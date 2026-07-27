@@ -9,9 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.107.0",
+    "@types/pg": "^8.20.0",
+    "lucide-react": "^1.22.0",
     "next": "16.2.9",
+    "pg": "^8.22.0",
+    "plaid": "^42.2.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "react-plaid-link": "^4.1.1",
+    "recharts": "^3.9.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

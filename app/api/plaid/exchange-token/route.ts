@@ -1,0 +1,93 @@
+import { NextRequest } from 'next/server';
+import { plaidClient } from '@/lib/plaid';
+import db from '@/lib/db';
+import type { ApiResponse } from '@/shared/types';
+
+export async function POST(req: NextRequest) {
+  const { public_token } = await req.json();
+
+  if (!public_token || typeof public_token !== 'string') {
+    return Response.json(
+      { success: false, error: { code: 'INVALID_INPUT', message: 'public_token is required' } } satisfies ApiResponse<never>,
+      { status: 400 }
+    );
+  }
+
+  try {
+    const exchangeRes = await plaidClient.itemPublicTokenExchange({ public_token });
+    const { access_token } = exchangeRes.data;
+
+    const [accountsRes, itemRes] = await Promise.all([
+      plaidClient.accountsGet({ access_token }),
+      plaidClient.itemGet({ access_token }),
+    ]);
+    const accounts = accountsRes.data.accounts;
+    const institutionId = itemRes.data.item.institution_id;
+
+    let bankName: string | null = null;
+    if (institutionId) {
+      try {
+        const instRes = await plaidClient.institutionsGetById({
+          institution_id: institutionId,
+          country_codes: ['US'] as any,
+        });
+        bankName = instRes.data.institution.name;
+      } catch {
+        // non-fatal — bank name stays null
+      }
+    }
+
+    await Promise.all(
+      accounts.map((a) =>
+        db.query(
+          `INSERT INTO accounts (id, name, type, subtype, mask, persistent_account_id, access_token, bank)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (id) DO UPDATE
+             SET name = EXCLUDED.name, mask = EXCLUDED.mask, persistent_account_id = EXCLUDED.persistent_account_id,
+                 access_token = EXCLUDED.access_token,
+                 bank = COALESCE(accounts.bank, EXCLUDED.bank)`,
+          [a.account_id, a.name, a.type, a.subtype ?? null, a.mask ?? null, a.persistent_account_id ?? null, access_token, bankName]
+        ).then(async (res) => {
+          // If this account_id was new (no conflict), it may be reconnecting an account
+          // from a previous item under a different id. Match by the strongest signal
+          // available — persistent_account_id, then mask+type, then name — and if found,
+          // keep the EXISTING row's id (so transaction history stays attached) and just
+          // repoint it at the new access_token, then drop the freshly-inserted duplicate.
+          if (res.rowCount === 1) {
+            const dup = await db.query<{ id: string }>(
+              `SELECT id FROM accounts
+               WHERE id != $4
+                 AND (
+                   ($1::text IS NOT NULL AND persistent_account_id = $1)
+                   OR ($2::text IS NOT NULL AND mask = $2 AND type = $3)
+                   OR (name = $5 AND type = $3)
+                 )
+               ORDER BY (persistent_account_id = $1) DESC, (mask = $2) DESC
+               LIMIT 1`,
+              [a.persistent_account_id ?? null, a.mask ?? null, a.type, a.account_id, a.name]
+            );
+            if (dup.rows.length > 0) {
+              const existingId = dup.rows[0].id;
+              await db.query(
+                'UPDATE accounts SET access_token = $1, mask = $2, persistent_account_id = $3, bank = COALESCE(bank, $4) WHERE id = $5',
+                [access_token, a.mask ?? null, a.persistent_account_id ?? null, bankName, existingId]
+              );
+              await db.query('DELETE FROM accounts WHERE id = $1', [a.account_id]);
+            }
+          }
+        })
+      )
+    );
+
+    return Response.json({
+      success: true,
+      data: { accounts_linked: accounts.length },
+    } satisfies ApiResponse<{ accounts_linked: number }>);
+  } catch (err) {
+    console.error('[exchange-token]', err);
+    return Response.json(
+      { success: false, error: { code: 'PLAID_ERROR', message: 'Failed to exchange token' } } satisfies ApiResponse<never>,
+      { status: 500 }
+    );
+  }
+}
