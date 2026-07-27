@@ -5,6 +5,7 @@ import { ArrowLeft, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import db from '@/lib/db';
 import CategoryBalanceEdit from '@/components/CategoryBalanceEdit';
 import CategoryNameEdit from '@/components/CategoryNameEdit';
+import CategoryMonthlyBudget from '@/components/CategoryMonthlyBudget';
 import CategorySelect from '@/components/CategorySelect';
 import type { BudgetCategory } from '@/shared/types';
 
@@ -50,8 +51,8 @@ export default async function CategoryStatementPage({
   const currentMonth = new Date().getMonth(); // 0-indexed
 
   const [categoryRes, balanceRes, txRes, categoriesRes] = await Promise.all([
-    db.query<Pick<BudgetCategory, 'id' | 'name' | 'landscape' | 'annual_budget' | 'exclude_from_budget'>>(
-      'SELECT id, name, landscape, annual_budget, exclude_from_budget FROM budget_categories WHERE name = $1 ORDER BY id LIMIT 1',
+    db.query<Pick<BudgetCategory, 'id' | 'name' | 'landscape' | 'annual_budget' | 'exclude_from_budget' | 'monthly_amounts' | 'is_income'>>(
+      'SELECT id, name, landscape, annual_budget, exclude_from_budget, monthly_amounts, is_income FROM budget_categories WHERE name = $1 ORDER BY id LIMIT 1',
       [name]
     ),
     db.query<{ beginning_balance: string }>(
@@ -114,6 +115,18 @@ export default async function CategoryStatementPage({
   const ytdExpenses = ytdTxns.reduce((s, t) => s + Math.max( Number(t.amount), 0), 0);
   const ytdNet      = ytdIncome - ytdExpenses;
 
+  // Per-month actual totals for the monthly budget panel, sign-adjusted so positive means
+  // "counts toward this category's budget" (mirrors BudgetMonthlyGrid.tsx's SQL CASE).
+  const monthlyActuals = new Array(12).fill(0);
+  for (const t of txRes.rows) {
+    const monthIdx = parseInt(t.date.slice(5, 7), 10) - 1;
+    const amount = Number(t.amount);
+    monthlyActuals[monthIdx] += category.is_income ? -amount : amount;
+  }
+  const monthlyAmounts = category.monthly_amounts
+    ? category.monthly_amounts.map(Number)
+    : null;
+
   return (
     <div className="p-8 max-w-4xl mx-auto">
       {/* Page header */}
@@ -169,6 +182,20 @@ export default async function CategoryStatementPage({
             </div>
           ))}
         </div>
+
+        {/* Monthly budget allocation */}
+        {!category.exclude_from_budget && (
+          <CategoryMonthlyBudget
+            categoryId={category.id}
+            categoryName={category.name}
+            annualBudget={Number(category.annual_budget)}
+            monthlyAmounts={monthlyAmounts}
+            isIncome={category.is_income}
+            monthlyActuals={monthlyActuals}
+            currentMonth={currentMonth}
+            year={year}
+          />
+        )}
 
         {/* Flat transaction list */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
