@@ -45,6 +45,12 @@ async function syncItem(
         unmatchedAccountIds.add(txn.account_id); // unrecognized even after reconciliation — surfaced, not silently dropped
         continue;
       }
+      // Pending transactions (e.g. a restaurant auth hold before the tip is added) are
+      // frequently reissued under a brand-new transaction_id once they post — storing the
+      // pending one creates a permanent duplicate alongside the posted one. Wait for it to
+      // post (pending: false) before saving it; the posted version arrives later as its own
+      // `added` or `modified` event.
+      if (txn.pending) continue;
       const plaidCategory = txn.personal_finance_category?.primary ?? null;
       const { mapped, ruleApplied } = applyRule(plaidCategory, rules);
       await db.query(
@@ -69,15 +75,26 @@ async function syncItem(
         unmatchedAccountIds.add(txn.account_id);
         continue;
       }
+      // Same pending skip as above — some institutions post-in-place (same transaction_id,
+      // `modified` event flips pending false) rather than reissuing a new id. Upsert instead
+      // of a plain UPDATE so that case still creates the row the first time it posts, even
+      // though we never stored it while pending.
+      if (txn.pending) continue;
       const plaidCategory = txn.personal_finance_category?.primary ?? null;
       const { mapped, ruleApplied } = applyRule(plaidCategory, rules);
       await db.query(
-        `UPDATE transactions
-         SET account_id = $2, date = $3, amount = $4, name = $5, merchant_name = $6,
-             plaid_category = $7,
-             mapped_category = CASE WHEN mapped_category IS NULL OR rule_applied = TRUE THEN $8 ELSE mapped_category END,
-             rule_applied    = CASE WHEN mapped_category IS NULL OR rule_applied = TRUE THEN $9 ELSE rule_applied    END
-         WHERE plaid_transaction_id = $1`,
+        `INSERT INTO transactions
+           (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (plaid_transaction_id) DO UPDATE
+           SET account_id = EXCLUDED.account_id,
+               date = EXCLUDED.date,
+               amount = EXCLUDED.amount,
+               name = EXCLUDED.name,
+               merchant_name = EXCLUDED.merchant_name,
+               plaid_category = EXCLUDED.plaid_category,
+               mapped_category = CASE WHEN transactions.mapped_category IS NULL OR transactions.rule_applied = TRUE THEN EXCLUDED.mapped_category ELSE transactions.mapped_category END,
+               rule_applied    = CASE WHEN transactions.mapped_category IS NULL OR transactions.rule_applied = TRUE THEN EXCLUDED.rule_applied    ELSE transactions.rule_applied    END`,
         [txn.transaction_id, txn.account_id, txn.date, txn.amount,
          txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied]
       );
