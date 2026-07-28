@@ -26,8 +26,9 @@ export default function TransactionFilter({ total, uncategorized, accounts, acti
   const hasAmountRange = Boolean(amountMinValue || amountMaxValue);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const amountMinDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const amountMaxDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const amountMinRef = useRef<HTMLInputElement>(null);
+  const amountMaxRef = useRef<HTMLInputElement>(null);
+  const amountDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function nav(updates: Record<string, string | null>) {
     const p = new URLSearchParams(params.toString());
@@ -43,14 +44,18 @@ export default function TransactionFilter({ total, uncategorized, accounts, acti
     debounceRef.current = setTimeout(() => nav({ search: value || null }), 400);
   }
 
-  function handleAmountMin(value: string) {
-    if (amountMinDebounceRef.current) clearTimeout(amountMinDebounceRef.current);
-    amountMinDebounceRef.current = setTimeout(() => nav({ amountMin: value || null }), 400);
-  }
-
-  function handleAmountMax(value: string) {
-    if (amountMaxDebounceRef.current) clearTimeout(amountMaxDebounceRef.current);
-    amountMaxDebounceRef.current = setTimeout(() => nav({ amountMax: value || null }), 400);
+  // Shared debounce for both fields, reading live DOM values at fire time (not the value from
+  // whichever field's onChange happened to schedule it) — typing into both fields within the
+  // debounce window previously raced two independent timers, each built from a stale params
+  // snapshot, and whichever fired last silently dropped the other field from the URL.
+  function handleAmountChange() {
+    if (amountDebounceRef.current) clearTimeout(amountDebounceRef.current);
+    amountDebounceRef.current = setTimeout(() => {
+      nav({
+        amountMin: amountMinRef.current?.value || null,
+        amountMax: amountMaxRef.current?.value || null,
+      });
+    }, 400);
   }
 
   return (
@@ -112,20 +117,22 @@ export default function TransactionFilter({ total, uncategorized, accounts, acti
       {/* Amount range */}
       <div className="relative flex items-center gap-1">
         <input
+          ref={amountMinRef}
           type="number"
           inputMode="decimal"
           placeholder="Min $"
           defaultValue={amountMinValue}
-          onChange={(e) => handleAmountMin(e.target.value)}
+          onChange={handleAmountChange}
           className="py-1.5 px-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 w-20"
         />
         <span className="text-slate-300 text-xs">–</span>
         <input
+          ref={amountMaxRef}
           type="number"
           inputMode="decimal"
           placeholder="Max $"
           defaultValue={amountMaxValue}
-          onChange={(e) => handleAmountMax(e.target.value)}
+          onChange={handleAmountChange}
           className="py-1.5 px-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 w-20"
         />
         {hasAmountRange && (
