@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, Eye, EyeOff } from 'lucide-react';
+import { Trash2, Eye, EyeOff, Copy } from 'lucide-react';
 import CategorySelect from './CategorySelect';
 import TransferLinkButton from './TransferLinkButton';
 
+type AccountOption = { id: string; name: string; landscape: string };
 type GroupPeer = { account_name: string; amount: number | string };
 
 type TxRow = {
@@ -30,6 +31,7 @@ type CategoryOption = { name: string; landscape: Landscape; exclude_from_budget:
 interface Props {
   transactions: TxRow[];
   categories: CategoryOption[];
+  accounts: AccountOption[];
 }
 
 const fmt = (n: number) =>
@@ -97,6 +99,201 @@ function DeleteButton({ transactionId }: { transactionId: number }) {
   );
 }
 
+// Shared <option> groups for a budget-category <select>, used by both the bulk-apply bar and
+// the duplicate-transaction form.
+function CategoryOptionsList({ categories }: { categories: CategoryOption[] }) {
+  return (
+    <>
+      {(['operational', 'capital'] as const).map((ls) => {
+        const group = categories.filter((c) => !c.exclude_from_budget && c.landscape === ls).sort((a, b) => a.name.localeCompare(b.name));
+        if (group.length === 0) return null;
+        return (
+          <optgroup key={ls} label={ls.charAt(0).toUpperCase() + ls.slice(1)}>
+            {group.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </optgroup>
+        );
+      })}
+      {(() => {
+        const excl = categories.filter((c) => c.exclude_from_budget).sort((a, b) => a.name.localeCompare(b.name));
+        return excl.length > 0 ? (
+          <optgroup key="other" label="Other">
+            {excl.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </optgroup>
+        ) : null;
+      })()}
+    </>
+  );
+}
+
+function DuplicateButton({ transaction, accounts, categories }: {
+  transaction: TxRow;
+  accounts: AccountOption[];
+  categories: CategoryOption[];
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [date, setDate] = useState(transaction.date);
+  const [accountId, setAccountId] = useState(transaction.account_id);
+  const [merchant, setMerchant] = useState(transaction.merchant_name ?? transaction.name ?? '');
+  const [amount, setAmount] = useState(String(transaction.amount));
+  const [category, setCategory] = useState(transaction.mapped_category ?? '');
+
+  function openModal() {
+    setDate(transaction.date);
+    setAccountId(transaction.account_id);
+    setMerchant(transaction.merchant_name ?? transaction.name ?? '');
+    setAmount(String(transaction.amount));
+    setCategory(transaction.mapped_category ?? '');
+    setError(null);
+    setOpen(true);
+  }
+
+  async function create() {
+    const amountNum = parseFloat(amount);
+    if (!date || !accountId || isNaN(amountNum)) {
+      setError('Enter a valid date, account, and amount');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const res = await fetch('/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        account_id: accountId,
+        date,
+        amount: amountNum,
+        name: merchant || null,
+        merchant_name: merchant || null,
+        mapped_category: category || null,
+      }),
+    });
+    const data = await res.json();
+    setBusy(false);
+    if (!data.success) {
+      setError(data.error?.message ?? 'Failed to create transaction');
+      return;
+    }
+    setOpen(false);
+    router.refresh();
+  }
+
+  return (
+    <>
+      <button
+        onClick={openModal}
+        className="text-slate-400 hover:text-blue-500 transition-colors"
+        title="Duplicate transaction"
+      >
+        <Copy size={14} />
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+          onClick={() => !busy && setOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 p-6 w-96 mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-50 mb-4">
+              <Copy size={18} className="text-blue-500" />
+            </div>
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">Duplicate transaction</h3>
+            <p className="text-xs text-slate-400 mb-4">Creates a new, independent transaction — edit any field first.</p>
+
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Amount ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    title="Positive = expense, negative = income/refund"
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Merchant / description</label>
+                <input
+                  value={merchant}
+                  onChange={(e) => setMerchant(e.target.value)}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Account</label>
+                  <select
+                    value={accountId}
+                    onChange={(e) => setAccountId(e.target.value)}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                  >
+                    {(['operational', 'capital'] as const).map((ls) => {
+                      const group = accounts.filter((a) => a.landscape === ls);
+                      if (group.length === 0) return null;
+                      return (
+                        <optgroup key={ls} label={ls.charAt(0).toUpperCase() + ls.slice(1)}>
+                          {group.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </optgroup>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Budget category</label>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                  >
+                    <option value="">— uncategorized —</option>
+                    <CategoryOptionsList categories={categories} />
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {error && <p className="text-xs text-red-500 mt-3">{error}</p>}
+
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={() => setOpen(false)}
+                disabled={busy}
+                className="flex-1 px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={create}
+                disabled={busy}
+                className="flex-1 px-4 py-2 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {busy ? 'Creating…' : 'Create copy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function HideToggleButton({ transactionId, hidden }: { transactionId: number; hidden: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -129,7 +326,7 @@ const LANDSCAPE_BADGE: Record<string, string> = {
   capital: 'bg-violet-50 text-violet-600',
 };
 
-export default function TransactionTable({ transactions, categories }: Props) {
+export default function TransactionTable({ transactions, categories, accounts }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkCategory, setBulkCategory] = useState('');
@@ -374,6 +571,7 @@ export default function TransactionTable({ transactions, categories }: Props) {
                   </td>
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-2">
+                      <DuplicateButton transaction={t} accounts={accounts} categories={categories} />
                       <HideToggleButton transactionId={t.id} hidden={t.hidden} />
                       <DeleteButton transactionId={t.id} />
                     </div>
@@ -420,23 +618,7 @@ export default function TransactionTable({ transactions, categories }: Props) {
           >
             <option value="">Set category…</option>
             <option value="__clear__">— Clear category —</option>
-            {(['operational', 'capital'] as const).map((ls) => {
-              const group = categories.filter((c) => !c.exclude_from_budget && c.landscape === ls).sort((a, b) => a.name.localeCompare(b.name));
-              if (group.length === 0) return null;
-              return (
-                <optgroup key={ls} label={ls.charAt(0).toUpperCase() + ls.slice(1)}>
-                  {group.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </optgroup>
-              );
-            })}
-            {(() => {
-              const excl = categories.filter((c) => c.exclude_from_budget).sort((a, b) => a.name.localeCompare(b.name));
-              return excl.length > 0 ? (
-                <optgroup key="other" label="Other">
-                  {excl.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </optgroup>
-              ) : null;
-            })()}
+            <CategoryOptionsList categories={categories} />
           </select>
           <button
             onClick={applyBulk}

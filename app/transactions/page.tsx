@@ -230,7 +230,7 @@ export default async function TransactionsPage({
           </p>
         </div>
       ) : (
-        <TransactionTable transactions={transactions} categories={categories} />
+        <TransactionTable transactions={transactions} categories={categories} accounts={accounts} />
       )}
     </div>
   );
