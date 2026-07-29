@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
 
     return Response.json({ success: true, data: { id } } satisfies ApiResponse<{ id: string }>);
   } catch (err) {
-    console.error('[accounts POST]', err);
+    console.error('[accounts POST]', err instanceof Error ? err.message : err);
     return Response.json(
       { success: false, error: { code: 'SERVER_ERROR', message: 'Failed to create account' } } satisfies ApiResponse<null>,
       { status: 500 }

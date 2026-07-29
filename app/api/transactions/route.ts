@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
 
     return Response.json({ success: true, data: { id: result.rows[0].id } } satisfies ApiResponse<{ id: number }>, { status: 201 });
   } catch (err) {
-    console.error('[transactions POST]', err);
+    console.error('[transactions POST]', err instanceof Error ? err.message : err);
     return Response.json(
       { success: false, error: { code: 'SERVER_ERROR', message: 'Failed to create transaction' } } satisfies ApiResponse<null>,
       { status: 500 }

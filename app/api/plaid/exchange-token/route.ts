@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { CountryCode } from 'plaid';
 import { plaidClient } from '@/lib/plaid';
 import db from '@/lib/db';
 import type { ApiResponse } from '@/shared/types';
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
       try {
         const instRes = await plaidClient.institutionsGetById({
           institution_id: institutionId,
-          country_codes: ['US'] as any,
+          country_codes: [CountryCode.Us],
         });
         bankName = instRes.data.institution.name;
       } catch {
@@ -84,7 +85,9 @@ export async function POST(req: NextRequest) {
       data: { accounts_linked: accounts.length },
     } satisfies ApiResponse<{ accounts_linked: number }>);
   } catch (err) {
-    console.error('[exchange-token]', err);
+    // Message only — see create-link-token/route.ts for why the raw error object must never
+    // be logged here (it can carry the live Plaid client-id/secret via axios's error.config).
+    console.error('[exchange-token]', err instanceof Error ? err.message : err);
     return Response.json(
       { success: false, error: { code: 'PLAID_ERROR', message: 'Failed to exchange token' } } satisfies ApiResponse<never>,
       { status: 500 }

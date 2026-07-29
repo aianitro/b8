@@ -22,12 +22,21 @@ export async function POST(req: NextRequest) {
       data: result,
     } satisfies ApiResponse<typeof result>);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Sync failed';
-    console.error('[sync]', err);
-    const status = message === 'Account not found or has no access token' ? 404 : 500;
+    const rawMessage = err instanceof Error ? err.message : 'Sync failed';
+    // Message only, never the raw error object — see create-link-token/route.ts for why
+    // (runSync can throw axios errors from the Plaid SDK, which carry the live client
+    // secret in `.config.headers`, and console.error on such an object prints that too).
+    console.error('[sync]', rawMessage);
+    // "Account not found" is a specific, deliberately-thrown, known-safe string from
+    // runSyncInner — safe to pass through as-is. Anything else caught here is an
+    // unanticipated failure (DB/Plaid internals) and must not reach the client verbatim.
+    const isKnownNotFound = rawMessage === 'Account not found or has no access token';
     return Response.json(
-      { success: false, error: { code: 'SYNC_ERROR', message } } satisfies ApiResponse<never>,
-      { status }
+      {
+        success: false,
+        error: { code: 'SYNC_ERROR', message: isKnownNotFound ? rawMessage : 'Sync failed' },
+      } satisfies ApiResponse<never>,
+      { status: isKnownNotFound ? 404 : 500 }
     );
   }
 }

@@ -41,8 +41,9 @@ export async function POST(req: NextRequest) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to save';
     const isDupe = msg.includes('unique') || msg.includes('duplicate');
+    if (!isDupe) console.error('[categories POST]', msg);
     return Response.json(
-      { success: false, error: { code: 'DB_ERROR', message: isDupe ? `Category "${name.trim()}" already exists in ${landscape}` : msg } } satisfies ApiResponse<never>,
+      { success: false, error: { code: 'DB_ERROR', message: isDupe ? `Category "${name.trim()}" already exists in ${landscape}` : 'Failed to save category' } } satisfies ApiResponse<never>,
       { status: 409 }
     );
   }

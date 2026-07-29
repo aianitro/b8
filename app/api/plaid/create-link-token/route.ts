@@ -18,7 +18,10 @@ export async function POST(_req: NextRequest) {
       data: { link_token: response.data.link_token },
     } satisfies ApiResponse<{ link_token: string }>);
   } catch (err) {
-    console.error('[create-link-token]', err);
+    // Log only the message, never the raw error object — Plaid SDK errors are axios errors
+    // whose `.config.headers` carries the live PLAID-CLIENT-ID/PLAID-SECRET, and console.error
+    // on an Error with extra own properties prints those properties too.
+    console.error('[create-link-token]', err instanceof Error ? err.message : err);
     return Response.json(
       { success: false, error: { code: 'PLAID_ERROR', message: 'Failed to create link token' } } satisfies ApiResponse<never>,
       { status: 500 }

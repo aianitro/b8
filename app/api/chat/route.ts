@@ -252,7 +252,7 @@ export async function POST(req: NextRequest) {
     const reply = await runAgentLoop(messages);
     return Response.json({ success: true, data: { reply } } satisfies ApiResponse<{ reply: string }>);
   } catch (err) {
-    console.error('[chat]', err);
+    console.error('[chat]', err instanceof Error ? err.message : err);
     return Response.json(
       { success: false, error: { code: 'CHAT_ERROR', message: 'Failed to get response from Claude' } } satisfies ApiResponse<never>,
       { status: 500 }

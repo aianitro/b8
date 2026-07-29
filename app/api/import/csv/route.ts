@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
     return Response.json({ success: true, data: { imported, skipped } } satisfies ApiResponse<{ imported: number; skipped: number }>);
   } catch (err) {
-    console.error('[import/csv]', err);
+    console.error('[import/csv]', err instanceof Error ? err.message : err);
     return Response.json(
       { success: false, error: { code: 'IMPORT_ERROR', message: 'Import failed' } } satisfies ApiResponse<null>,
       { status: 500 }

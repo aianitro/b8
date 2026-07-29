@@ -222,7 +222,10 @@ async function runSyncInner({
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[sync] item failed:', ids, msg);
-      errors.push(`${ids.join(',')}: ${msg}`);
+      // Generic, not `msg` — this array reaches the client via the API response. Raw
+      // Postgres/Plaid error text can carry internal schema or request details; the full
+      // message is already logged server-side above for debugging.
+      errors.push(`Sync failed for account(s): ${ids.join(', ')}`);
     }
   }
 
