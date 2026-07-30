@@ -9,6 +9,7 @@ export type GridRow = {
   annual_budget: number;
   monthly_amounts: number[] | null;
   months_budget: number[]; // expected amount per month, index 0–11
+  months_upcoming: number[]; // projected amount for months after current, index 0–11 (0 for current/past)
   is_income: boolean;
   sort_order: number;
   months: number[]; // index 0–11
@@ -34,7 +35,31 @@ function monthsBudget(annual: number, monthlyAmounts: number[] | null): number[]
   return new Array(12).fill(annual / 12);
 }
 
-async function getGridData(landscape: Landscape): Promise<GridRow[]> {
+// Projected amount for months after the current one. A category with an explicit monthly
+// schedule just uses its own scheduled amount per future month. Otherwise the remaining
+// annual budget (annual - YTD realized) is spread evenly across the months still to come —
+// current month included in that count — so the projection self-corrects as the year goes
+// (spent less than pace so far -> higher projected months ahead, and vice versa).
+function monthsUpcoming(
+  annual: number,
+  monthlyAmounts: number[] | null,
+  monthsBudgetArr: number[],
+  ytd: number,
+  currentMonth: number
+): number[] {
+  const upcoming = new Array(12).fill(0);
+  if (monthlyAmounts) {
+    for (let i = currentMonth + 1; i < 12; i++) upcoming[i] = monthsBudgetArr[i];
+    return upcoming;
+  }
+  const remainingMonths = 12 - currentMonth;
+  if (remainingMonths <= 0) return upcoming;
+  const perMonth = (annual - ytd) / remainingMonths;
+  for (let i = currentMonth + 1; i < 12; i++) upcoming[i] = perMonth;
+  return upcoming;
+}
+
+async function getGridData(landscape: Landscape, currentMonth: number): Promise<GridRow[]> {
   const result = await db.query<DbRow>(`
     SELECT bc.id, bc.name, bc.landscape, bc.annual_budget::text, bc.monthly_amounts, bc.is_income, bc.sort_order,
            m.month::int AS month,
@@ -71,6 +96,7 @@ async function getGridData(landscape: Landscape): Promise<GridRow[]> {
         annual_budget: annual,
         monthly_amounts: monthlyAmounts,
         months_budget: monthsBudget(annual, monthlyAmounts),
+        months_upcoming: new Array(12).fill(0), // filled below, once each row's full YTD is known
         is_income: row.is_income,
         sort_order: row.sort_order,
         months: new Array(12).fill(0),
@@ -81,6 +107,16 @@ async function getGridData(landscape: Landscape): Promise<GridRow[]> {
     const amount = Number(row.amount);
     entry.months[row.month - 1] = amount;
     entry.ytd += amount;
+  }
+
+  for (const entry of map.values()) {
+    entry.months_upcoming = monthsUpcoming(
+      entry.annual_budget,
+      entry.monthly_amounts,
+      entry.months_budget,
+      entry.ytd,
+      currentMonth
+    );
   }
 
   return Array.from(map.values());
@@ -119,12 +155,12 @@ async function getUncategorized(landscape: Landscape): Promise<{ income: number[
 }
 
 export default async function BudgetMonthlyGrid({ landscape }: { landscape: Landscape }) {
+  const currentMonth = new Date().getMonth();
   const [rows, beginningBalance, uncategorized] = await Promise.all([
-    getGridData(landscape),
+    getGridData(landscape, currentMonth),
     getBeginningBalance(landscape),
     getUncategorized(landscape),
   ]);
-  const currentMonth = new Date().getMonth();
   return (
     <BudgetMonthlyGridClient
       key={landscape}
