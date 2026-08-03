@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Report-only for now: there's pre-existing lint debt (react-hooks/static-components
+      # in BudgetMonthlyGridClient.tsx) not yet cleaned up. Once that's fixed, drop
+      # continue-on-error so this becomes a hard gate like typecheck/gitleaks below.
+      - run: npm run lint
+        continue-on-error: true
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/gitleaks/gitleaks:latest
+      options: --entrypoint=""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: gitleaks detect --no-banner -v --source .
