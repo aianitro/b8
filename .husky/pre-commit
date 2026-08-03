@@ -1,0 +1,6 @@
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks not found (brew install gitleaks) — skipping secret scan, commit allowed"
+  exit 0
+fi
+
+gitleaks protect --staged --no-banner
