@@ -8,19 +8,24 @@ interface Props {
   transactionId: number;
   current: string | null;
   categories: Pick<BudgetCategory, 'name' | 'landscape' | 'exclude_from_budget'>[];
-  landscape: string;
   description?: string | null;
 }
 
 const UNDO_WINDOW_MS = 5000;
 
-export default function CategorySelect({ transactionId, current, categories, landscape, description }: Props) {
+export default function CategorySelect({ transactionId, current, categories, description }: Props) {
   const router = useRouter();
   const [value, setValue] = useState(current ?? '');
   const [saving, setSaving] = useState(false);
   const [undoPrev, setUndoPrev] = useState<string | null>(null);
 
-  useEffect(() => { setValue(current ?? ''); }, [current]);
+  // Adjusted during render rather than in an effect, so a `current` prop change (e.g. another
+  // tab recategorizing the same transaction) is reflected in the same render pass.
+  const [prevCurrent, setPrevCurrent] = useState(current);
+  if (current !== prevCurrent) {
+    setPrevCurrent(current);
+    setValue(current ?? '');
+  }
 
   useEffect(() => {
     if (undoPrev === null) return;

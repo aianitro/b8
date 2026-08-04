@@ -18,25 +18,25 @@ const NAV = [
   { href: '/import',       label: 'Import CSV',    icon: Upload },
 ];
 
+function NavItem({ href, label, icon: Icon, pathname }: { href: string; label: string; icon: React.ElementType; pathname: string }) {
+  const active = pathname === href || (href !== '/' && pathname.startsWith(href));
+  return (
+    <Link
+      href={href}
+      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+        active
+          ? 'bg-white/10 text-white font-medium'
+          : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+      }`}
+    >
+      <Icon size={16} className="shrink-0" />
+      {label}
+    </Link>
+  );
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
-
-  function NavItem({ href, label, icon: Icon }: { href: string; label: string; icon: React.ElementType }) {
-    const active = pathname === href || (href !== '/' && pathname.startsWith(href));
-    return (
-      <Link
-        href={href}
-        className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-          active
-            ? 'bg-white/10 text-white font-medium'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-        }`}
-      >
-        <Icon size={16} className="shrink-0" />
-        {label}
-      </Link>
-    );
-  }
 
   return (
     <aside className="w-[220px] shrink-0 bg-slate-900 flex flex-col h-full">
@@ -48,7 +48,7 @@ export default function Sidebar() {
 
       {/* Main nav */}
       <nav className="flex-1 px-3 space-y-0.5">
-        {NAV.map((item) => <NavItem key={item.href} {...item} />)}
+        {NAV.map((item) => <NavItem key={item.href} {...item} pathname={pathname} />)}
       </nav>
 
       {/* Intelligence section */}
@@ -57,7 +57,7 @@ export default function Sidebar() {
         <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-600 mb-2">
           Intelligence
         </p>
-        <NavItem href="/insights" label="Insights" icon={Sparkles} />
+        <NavItem href="/insights" label="Insights" icon={Sparkles} pathname={pathname} />
       </div>
     </aside>
   );

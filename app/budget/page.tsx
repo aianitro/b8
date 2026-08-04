@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { cookies } from 'next/headers';
+import Link from 'next/link';
 import db from '@/lib/db';
 import type { BudgetSummary, Landscape } from '@/shared/types';
 import BudgetMonthlyGrid from '@/components/BudgetMonthlyGrid';
@@ -221,7 +222,7 @@ export default async function BudgetPage({ searchParams }: PageProps) {
       <BudgetTabsToggle current={landscape} view={view} />
 
       {summary.length === 0 ? (
-        <p className="text-slate-500 text-sm">No categories yet. <a href="/categories" className="underline">Add some.</a></p>
+        <p className="text-slate-500 text-sm">No categories yet. <Link href="/categories" className="underline">Add some.</Link></p>
       ) : (
         <>
           {/* KPIs */}

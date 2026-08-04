@@ -15,15 +15,26 @@ function relative(iso: string): string {
   return `${months}mo ago`;
 }
 
+function labelFor(iso: string | null): string {
+  return iso ? relative(iso) : 'Never synced';
+}
+
 export default function RelativeTime({ iso }: { iso: string | null }) {
-  const [label, setLabel] = useState<string | null>(null);
+  const [label, setLabel] = useState(() => labelFor(iso));
+
+  // Adjusted during render (not an effect) when `iso` itself changes, so a re-sync is reflected
+  // immediately; the effect below is only the minute-tick subscription for the same `iso`.
+  const [prevIso, setPrevIso] = useState(iso);
+  if (iso !== prevIso) {
+    setPrevIso(iso);
+    setLabel(labelFor(iso));
+  }
 
   useEffect(() => {
-    if (!iso) { setLabel('Never synced'); return; }
-    setLabel(relative(iso));
+    if (!iso) return;
     const id = setInterval(() => setLabel(relative(iso)), 60000);
     return () => clearInterval(id);
   }, [iso]);
 
-  return <span className="text-xs text-gray-400">{label ?? ''}</span>;
+  return <span className="text-xs text-gray-400">{label}</span>;
 }

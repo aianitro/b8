@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { Suspense } from 'react';
+import Link from 'next/link';
 import db from '@/lib/db';
 import type { Transaction, BudgetCategory } from '@/shared/types';
 import TransactionFilter from '@/components/TransactionFilter';
@@ -226,7 +227,7 @@ export default async function TransactionsPage({
               ? `No transactions matching "${searchQuery}".`
               : uncategorizedOnly
               ? 'No uncategorized transactions — great!'
-              : <>No transactions yet. <a href="/accounts" className="underline text-blue-600">Sync an account.</a></>}
+              : <>No transactions yet. <Link href="/accounts" className="underline text-blue-600">Sync an account.</Link></>}
           </p>
         </div>
       ) : (

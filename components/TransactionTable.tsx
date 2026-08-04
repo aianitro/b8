@@ -343,8 +343,14 @@ export default function TransactionTable({ transactions, categories, accounts }:
   }, [bulkUndo]);
 
   useEffect(() => {
+    // Deliberately in an effect, not a lazy useState initializer: sessionStorage isn't available
+    // during SSR, so reading it synchronously during render would make the client's first
+    // hydration pass disagree with the server-rendered HTML (a real hydration mismatch, since
+    // sort order controls row order). Restoring post-hydration trades one harmless post-mount
+    // re-render for correctness here.
     const savedField = sessionStorage.getItem('txSortField');
     const savedDir = sessionStorage.getItem('txSortDir');
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (savedField === 'date' || savedField === 'amount') setSortField(savedField);
     if (savedDir === 'asc' || savedDir === 'desc') setSortDir(savedDir);
   }, []);
@@ -556,7 +562,6 @@ export default function TransactionTable({ transactions, categories, accounts }:
                       transactionId={t.id}
                       current={t.mapped_category}
                       categories={categories}
-                      landscape={t.account_landscape}
                       description={t.name ?? t.merchant_name}
                     />
                   </td>

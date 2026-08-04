@@ -206,7 +206,6 @@ export default async function AccountStatementPage({
                           transactionId={t.id}
                           current={t.mapped_category}
                           categories={categories}
-                          landscape={account.landscape}
                           description={t.name ?? t.merchant_name}
                         />
                       </td>
