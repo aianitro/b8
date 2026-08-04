@@ -6,7 +6,8 @@ import MonthlySpendingChart, { type MonthlySpendingData } from '@/components/cha
 import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
 import CategoryDonutChart, { type CategorySlice } from '@/components/charts/CategoryDonutChart';
 import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts/BudgetVsActualChart';
-import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
+import Sparkline from '@/components/charts/Sparkline';
+import { STATUS_CLASS, NEUTRAL_HEX, STATUS_HEX, type StatusColor } from '@/lib/chartColors';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -49,6 +50,7 @@ async function getStats() {
 // transactions, not a live Plaid balance pull — see db/schema.sql's account_balances comment.
 async function getNetWorth(): Promise<{
   total: number; totalBeginning: number; operational: number; capital: number; accountCount: number;
+  monthlySeries: number[]; // combined running balance at the end of each elapsed month
 }> {
   const year = new Date().getFullYear();
   const currentMonth = new Date().getMonth();
@@ -79,17 +81,21 @@ async function getNetWorth(): Promise<{
   const beginningByAccount = new Map(balancesRes.rows.map((r) => [r.account_id, Number(r.beginning_balance)]));
 
   let total = 0, totalBeginning = 0, operational = 0, capital = 0;
+  const monthlySeries = new Array(currentMonth + 1).fill(0);
   for (const a of accountsRes.rows) {
     const byMonth = netByAccount.get(a.id) ?? new Map();
     const beginning = beginningByAccount.get(a.id) ?? 0;
     let running = beginning;
-    for (let i = 0; i <= currentMonth; i++) running += byMonth.get(i + 1) ?? 0;
+    for (let i = 0; i <= currentMonth; i++) {
+      running += byMonth.get(i + 1) ?? 0;
+      monthlySeries[i] += running;
+    }
     total += running;
     totalBeginning += beginning;
     if (a.landscape === 'operational') operational += running;
     if (a.landscape === 'capital') capital += running;
   }
-  return { total, totalBeginning, operational, capital, accountCount: accountsRes.rows.length };
+  return { total, totalBeginning, operational, capital, accountCount: accountsRes.rows.length, monthlySeries };
 }
 
 interface TodayStats {
@@ -273,9 +279,10 @@ async function getBudgetVsActual(): Promise<BudgetVsActualRow[]> {
   return result.rows.map((r) => ({ ...r, budget: Number(r.budget), spent: Number(r.spent) }));
 }
 
-function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
+function KpiCard({ label, value, sub, subColor, highlight, href, footer, sparkline }: {
   label: string; value: string; sub?: string; subColor?: StatusColor;
   highlight?: StatusColor; href?: string; footer?: ReactNode;
+  sparkline?: { data: number[]; color: string };
 }) {
   const content = (
     <>
@@ -284,6 +291,7 @@ function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
         {value}
       </p>
       {sub && <p className={`text-xs mt-1.5 ${subColor ? STATUS_CLASS[subColor] : 'text-slate-400'}`}>{sub}</p>}
+      {sparkline && <div className="mt-2 -mx-1"><Sparkline data={sparkline.data} color={sparkline.color} /></div>}
       {footer && <div className="mt-3 pt-3 border-t border-slate-100">{footer}</div>}
     </>
   );
@@ -334,6 +342,10 @@ export default async function DashboardPage() {
   const weekPacePct = expectedWeekSpend > 0 ? weekStats.spent / expectedWeekSpend : 0;
 
   const netWorthYtdChange = netWorth.total - netWorth.totalBeginning;
+  // Per-month total spend for the elapsed months of the year — monthly's future months are
+  // already 0 (no transactions yet), so slicing to monthsElapsed drops them rather than
+  // plotting a trend that flatlines to zero.
+  const monthlySpendSeries = monthly.slice(0, monthsElapsed).map((m) => m.operational + m.capital);
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -364,7 +376,10 @@ export default async function DashboardPage() {
           <span className="text-slate-600">·</span>
           <span className="text-slate-500">as of last sync</span>
         </div>
-        <div className="flex items-center gap-6 mt-5 pt-4 border-t border-slate-800 text-xs">
+        <div className="mt-3 -mx-1">
+          <Sparkline data={netWorth.monthlySeries} color={netWorthYtdChange >= 0 ? STATUS_HEX.good : STATUS_HEX.over} />
+        </div>
+        <div className="flex items-center gap-6 mt-2 pt-4 border-t border-slate-800 text-xs">
           <span className="text-slate-500">
             Operational <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.operational)}</span>
           </span>
@@ -414,6 +429,7 @@ export default async function DashboardPage() {
           value={fmt(stats.spent)}
           sub={`${pctUsed}% of annual · expected ${fmt(expectedYearSpend)}`}
           subColor={expectedYearSpend > 0 ? paceColor(yearPacePct) : undefined}
+          sparkline={{ data: monthlySpendSeries, color: NEUTRAL_HEX }}
         />
       </div>
 
