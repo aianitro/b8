@@ -46,12 +46,14 @@ async function getStats() {
 // total instead of one landscape at a time — no page in the app, including Balances itself,
 // otherwise shows a single combined operational + capital number. Derived from recorded
 // transactions, not a live Plaid balance pull — see db/schema.sql's account_balances comment.
-async function getNetWorth(): Promise<{ total: number; accountCount: number }> {
+async function getNetWorth(): Promise<{
+  total: number; totalBeginning: number; operational: number; capital: number; accountCount: number;
+}> {
   const year = new Date().getFullYear();
   const currentMonth = new Date().getMonth();
 
   const [accountsRes, netRes, balancesRes] = await Promise.all([
-    db.query<{ id: string }>('SELECT id FROM accounts WHERE track_transactions = TRUE'),
+    db.query<{ id: string; landscape: string }>('SELECT id, landscape FROM accounts WHERE track_transactions = TRUE'),
     db.query<{ account_id: string; month: number; net: string }>(`
       SELECT t.account_id,
              EXTRACT(MONTH FROM t.date)::int AS month,
@@ -75,14 +77,18 @@ async function getNetWorth(): Promise<{ total: number; accountCount: number }> {
   }
   const beginningByAccount = new Map(balancesRes.rows.map((r) => [r.account_id, Number(r.beginning_balance)]));
 
-  let total = 0;
+  let total = 0, totalBeginning = 0, operational = 0, capital = 0;
   for (const a of accountsRes.rows) {
     const byMonth = netByAccount.get(a.id) ?? new Map();
-    let running = beginningByAccount.get(a.id) ?? 0;
+    const beginning = beginningByAccount.get(a.id) ?? 0;
+    let running = beginning;
     for (let i = 0; i <= currentMonth; i++) running += byMonth.get(i + 1) ?? 0;
     total += running;
+    totalBeginning += beginning;
+    if (a.landscape === 'operational') operational += running;
+    if (a.landscape === 'capital') capital += running;
   }
-  return { total, accountCount: accountsRes.rows.length };
+  return { total, totalBeginning, operational, capital, accountCount: accountsRes.rows.length };
 }
 
 interface TodayStats {
@@ -329,6 +335,8 @@ export default async function DashboardPage() {
   const expectedWeekSpend = weekStats.weeklyBudgetReference * (isoDow / 7);
   const weekPacePct = expectedWeekSpend > 0 ? weekStats.spent / expectedWeekSpend : 0;
 
+  const netWorthYtdChange = netWorth.total - netWorth.totalBeginning;
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       {/* Header */}
@@ -342,6 +350,31 @@ export default async function DashboardPage() {
         }`}>
           {onTrack ? '↓ Under pace' : '↑ Over pace'} · Month {monthsElapsed}/12
         </span>
+      </div>
+
+      {/* Net Worth — the one hero number (Copilot/Empower's "single primary figure" pattern),
+          everything else on this page is supporting detail below it. */}
+      <div className="bg-slate-900 rounded-2xl shadow-sm p-8 mb-6">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Net Worth</p>
+        <p className={`text-5xl font-bold mt-2 font-mono ${netWorth.total < 0 ? 'text-red-400' : 'text-white'}`}>
+          {fmt(netWorth.total)}
+        </p>
+        <div className="flex items-center gap-2 mt-3 text-sm">
+          <span className={`font-mono font-medium ${netWorthYtdChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {netWorthYtdChange >= 0 ? '+' : ''}{fmt(netWorthYtdChange)} YTD
+          </span>
+          <span className="text-slate-600">·</span>
+          <span className="text-slate-500">as of last sync</span>
+        </div>
+        <div className="flex items-center gap-6 mt-5 pt-4 border-t border-slate-800 text-xs">
+          <span className="text-slate-500">
+            Operational <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.operational)}</span>
+          </span>
+          <span className="text-slate-500">
+            Capital <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.capital)}</span>
+          </span>
+          <span className="text-slate-600 ml-auto">{netWorth.accountCount} accounts</span>
+        </div>
       </div>
 
       {/* Day / Week / Year — three concurrently-visible time horizons, not tabbed */}
@@ -386,15 +419,10 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* Year detail — "This Year" above already gives the headline number; these round out the
-          annual picture (net worth, budget ceiling, remaining, uncategorized) without repeating it. */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <KpiCard
-          label="Net Worth"
-          value={fmt(netWorth.total)}
-          sub={`as of last sync · ${netWorth.accountCount} account${netWorth.accountCount !== 1 ? 's' : ''}`}
-          highlight={netWorth.total < 0 ? 'red' : undefined}
-        />
+      {/* Year detail — "This Year" and the Net Worth hero above already give the headline
+          numbers; these round out the annual picture (budget ceiling, remaining, uncategorized)
+          without repeating them. */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
         <KpiCard label="Annual Budget" value={fmt(stats.budget)} />
         <KpiCard
           label="Remaining"
