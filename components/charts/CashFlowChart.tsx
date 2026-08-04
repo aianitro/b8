@@ -4,6 +4,7 @@ import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
+import { CASHFLOW_HEX } from '@/lib/chartColors';
 
 export interface CashFlowData {
   month: string;
@@ -30,9 +31,9 @@ export default function CashFlowChart({ data }: { data: CashFlowData[] }) {
           />
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: '#64748b' }} />
           <ReferenceLine y={0} stroke="#e2e8f0" />
-          <Bar dataKey="in" name="Money in" fill="#22c55e" radius={[3, 3, 0, 0]} />
-          <Bar dataKey="out" name="Money out" fill="#f97316" radius={[3, 3, 0, 0]} />
-          <Line dataKey="net" name="Net" type="monotone" stroke="#1e293b" strokeWidth={2} dot={{ r: 3, fill: '#1e293b' }} />
+          <Bar dataKey="in" name="Money in" fill={CASHFLOW_HEX.in} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="out" name="Money out" fill={CASHFLOW_HEX.out} radius={[3, 3, 0, 0]} />
+          <Line dataKey="net" name="Net" type="monotone" stroke={CASHFLOW_HEX.net} strokeWidth={2} dot={{ r: 3, fill: CASHFLOW_HEX.net }} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

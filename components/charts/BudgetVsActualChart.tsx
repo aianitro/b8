@@ -4,6 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ResponsiveContainer, Cell,
 } from 'recharts';
+import { STATUS_HEX } from '@/lib/chartColors';
 
 export interface BudgetVsActualRow {
   category: string;
@@ -33,7 +34,7 @@ function Section({ rows, title }: { rows: BudgetVsActualRow[]; title: string }) 
           <Bar dataKey="budget" name="Budget" fill="#f1f5f9" radius={[0, 3, 3, 0]} />
           <Bar dataKey="spent" name="Spent" radius={[0, 3, 3, 0]}>
             {rows.map((row, i) => (
-              <Cell key={i} fill={row.spent > row.budget ? '#ef4444' : '#3b82f6'} />
+              <Cell key={i} fill={row.spent > row.budget ? STATUS_HEX.over : STATUS_HEX.under} />
             ))}
           </Bar>
         </BarChart>

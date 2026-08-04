@@ -4,6 +4,7 @@ import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
+import { LANDSCAPE_HEX, LANDSCAPE_HEX_LIGHT } from '@/lib/chartColors';
 
 export interface MonthlySpendingData {
   month: string;
@@ -30,10 +31,10 @@ export default function MonthlySpendingChart({ data }: { data: MonthlySpendingDa
             contentStyle={{ border: '1px solid #e2e8f0', borderRadius: '10px', fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }}
           />
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: '#64748b' }} />
-          <Bar dataKey="operational" name="Operational" stackId="a" fill="#3b82f6" />
-          <Bar dataKey="capital" name="Capital" stackId="a" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
-          <Line dataKey="budget_operational" name="Op. budget/mo" type="monotone" stroke="#93c5fd" strokeDasharray="4 2" dot={false} strokeWidth={1.5} />
-          <Line dataKey="budget_capital" name="Cap. budget/mo" type="monotone" stroke="#c4b5fd" strokeDasharray="4 2" dot={false} strokeWidth={1.5} />
+          <Bar dataKey="operational" name="Operational" stackId="a" fill={LANDSCAPE_HEX.operational} />
+          <Bar dataKey="capital" name="Capital" stackId="a" fill={LANDSCAPE_HEX.capital} radius={[3, 3, 0, 0]} />
+          <Line dataKey="budget_operational" name="Op. budget/mo" type="monotone" stroke={LANDSCAPE_HEX_LIGHT.operational} strokeDasharray="4 2" dot={false} strokeWidth={1.5} />
+          <Line dataKey="budget_capital" name="Cap. budget/mo" type="monotone" stroke={LANDSCAPE_HEX_LIGHT.capital} strokeDasharray="4 2" dot={false} strokeWidth={1.5} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

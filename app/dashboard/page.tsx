@@ -6,6 +6,7 @@ import MonthlySpendingChart, { type MonthlySpendingData } from '@/components/cha
 import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
 import CategoryDonutChart, { type CategorySlice } from '@/components/charts/CategoryDonutChart';
 import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts/BudgetVsActualChart';
+import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -273,19 +274,16 @@ async function getBudgetVsActual(): Promise<BudgetVsActualRow[]> {
 }
 
 function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
-  label: string; value: string; sub?: string; subColor?: 'red' | 'green' | 'amber' | 'blue';
-  highlight?: 'red' | 'green' | 'amber' | 'blue'; href?: string; footer?: ReactNode;
+  label: string; value: string; sub?: string; subColor?: StatusColor;
+  highlight?: StatusColor; href?: string; footer?: ReactNode;
 }) {
-  const colors = {
-    red: 'text-red-500', green: 'text-emerald-500', amber: 'text-amber-500', blue: 'text-blue-500',
-  };
   const content = (
     <>
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-      <p className={`text-3xl font-bold mt-2 font-mono ${highlight ? colors[highlight] : 'text-slate-900'}`}>
+      <p className={`text-3xl font-bold mt-2 font-mono ${highlight ? STATUS_CLASS[highlight] : 'text-slate-900'}`}>
         {value}
       </p>
-      {sub && <p className={`text-xs mt-1.5 ${subColor ? colors[subColor] : 'text-slate-400'}`}>{sub}</p>}
+      {sub && <p className={`text-xs mt-1.5 ${subColor ? STATUS_CLASS[subColor] : 'text-slate-400'}`}>{sub}</p>}
       {footer && <div className="mt-3 pt-3 border-t border-slate-100">{footer}</div>}
     </>
   );
@@ -306,7 +304,7 @@ function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
   );
 }
 
-function paceColor(pct: number): 'red' | 'amber' | 'green' {
+function paceColor(pct: number): StatusColor {
   if (pct > 1.1) return 'red';
   if (pct > 1.0) return 'amber';
   return 'green';

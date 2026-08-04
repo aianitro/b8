@@ -1,6 +1,7 @@
 'use client';
 
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { LANDSCAPE_HEX, NEUTRAL_HEX } from '@/lib/chartColors';
 
 export interface CategorySlice {
   name: string;
@@ -8,9 +9,12 @@ export interface CategorySlice {
   landscape: 'operational' | 'capital';
 }
 
-const OP_COLORS  = ['#3b82f6', '#60a5fa', '#93c5fd', '#06b6d4', '#0ea5e9', '#6366f1', '#14b8a6'];
-const CAP_COLORS = ['#8b5cf6', '#a78bfa', '#c4b5fd', '#d946ef', '#ec4899', '#f43f5e', '#e879f9'];
-const OTHER_COLOR = '#94a3b8';
+// Each ramp starts on its landscape's shared color (LANDSCAPE_HEX) so the connection to the
+// same blue/violet used elsewhere on the dashboard (MonthlySpendingChart, KPI accents) is
+// explicit rather than coincidental, then fans out into distinct shades for the rest of the
+// top-7 slices.
+const OP_COLORS  = [LANDSCAPE_HEX.operational, '#60a5fa', '#93c5fd', '#06b6d4', '#0ea5e9', '#6366f1', '#14b8a6'];
+const CAP_COLORS = [LANDSCAPE_HEX.capital, '#a78bfa', '#c4b5fd', '#d946ef', '#ec4899', '#f43f5e', '#e879f9'];
 
 // Recharts' built-in <Legend/> used to share the same fixed-height container as the <Pie/>, so a
 // landscape with many categories wrapped the legend across enough rows to crush the pie's radius
@@ -49,7 +53,7 @@ function Donut({ data, title, colors }: { data: CategorySlice[]; title: string; 
         <PieChart>
           <Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={46} outerRadius={76} paddingAngle={2}>
             {slices.map((s, i) => (
-              <Cell key={s.name} fill={s.isOther ? OTHER_COLOR : colors[i % colors.length]} />
+              <Cell key={s.name} fill={s.isOther ? NEUTRAL_HEX : colors[i % colors.length]} />
             ))}
           </Pie>
           <Tooltip
@@ -63,7 +67,7 @@ function Donut({ data, title, colors }: { data: CategorySlice[]; title: string; 
           <li key={s.name} className="flex items-center gap-1.5 text-[11px] text-slate-500">
             <span
               className="inline-block w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: s.isOther ? OTHER_COLOR : colors[i % colors.length] }}
+              style={{ backgroundColor: s.isOther ? NEUTRAL_HEX : colors[i % colors.length] }}
             />
             <span className="truncate flex-1">{s.name}</span>
             <span className="font-mono text-slate-400 shrink-0">{fmt(s.value)}</span>
