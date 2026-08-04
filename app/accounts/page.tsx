@@ -3,6 +3,7 @@ import PlaidLinkButton from '@/components/PlaidLinkButton';
 import AddAccountForm from '@/components/AddAccountForm';
 import AccountsList from '@/components/AccountsList';
 import SyncControls from '@/components/SyncControls';
+import SyncHealthCard from '@/components/SyncHealthCard';
 import type { Account } from '@/shared/types';
 
 async function getAccounts(): Promise<Account[]> {
@@ -56,6 +57,8 @@ export default async function AccountsPage() {
       ) : (
         <AccountsList operational={operational} capital={capital} txnCounts={txnCountsObj} />
       )}
+
+      {plaidCount > 0 && <SyncHealthCard />}
     </div>
   );
 }
