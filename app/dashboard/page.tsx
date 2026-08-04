@@ -6,6 +6,7 @@ import MonthlySpendingChart, { type MonthlySpendingData } from '@/components/cha
 import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
 import CategoryDonutChart, { type CategorySlice } from '@/components/charts/CategoryDonutChart';
 import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts/BudgetVsActualChart';
+import NetWorthChart from '@/components/charts/NetWorthChart';
 import Sparkline from '@/components/charts/Sparkline';
 import { STATUS_CLASS, NEUTRAL_HEX, STATUS_HEX, type StatusColor } from '@/lib/chartColors';
 
@@ -51,6 +52,8 @@ async function getStats() {
 async function getNetWorth(): Promise<{
   total: number; totalBeginning: number; operational: number; capital: number; accountCount: number;
   monthlySeries: number[]; // combined running balance at the end of each elapsed month
+  monthlyOperational: number[];
+  monthlyCapital: number[];
 }> {
   const year = new Date().getFullYear();
   const currentMonth = new Date().getMonth();
@@ -82,6 +85,8 @@ async function getNetWorth(): Promise<{
 
   let total = 0, totalBeginning = 0, operational = 0, capital = 0;
   const monthlySeries = new Array(currentMonth + 1).fill(0);
+  const monthlyOperational = new Array(currentMonth + 1).fill(0);
+  const monthlyCapital = new Array(currentMonth + 1).fill(0);
   for (const a of accountsRes.rows) {
     const byMonth = netByAccount.get(a.id) ?? new Map();
     const beginning = beginningByAccount.get(a.id) ?? 0;
@@ -89,13 +94,18 @@ async function getNetWorth(): Promise<{
     for (let i = 0; i <= currentMonth; i++) {
       running += byMonth.get(i + 1) ?? 0;
       monthlySeries[i] += running;
+      if (a.landscape === 'operational') monthlyOperational[i] += running;
+      if (a.landscape === 'capital') monthlyCapital[i] += running;
     }
     total += running;
     totalBeginning += beginning;
     if (a.landscape === 'operational') operational += running;
     if (a.landscape === 'capital') capital += running;
   }
-  return { total, totalBeginning, operational, capital, accountCount: accountsRes.rows.length, monthlySeries };
+  return {
+    total, totalBeginning, operational, capital, accountCount: accountsRes.rows.length,
+    monthlySeries, monthlyOperational, monthlyCapital,
+  };
 }
 
 interface TodayStats {
@@ -346,6 +356,12 @@ export default async function DashboardPage() {
   // already 0 (no transactions yet), so slicing to monthsElapsed drops them rather than
   // plotting a trend that flatlines to zero.
   const monthlySpendSeries = monthly.slice(0, monthsElapsed).map((m) => m.operational + m.capital);
+  const netWorthSeries = netWorth.monthlySeries.map((total, i) => ({
+    month: MONTHS[i],
+    operational: netWorth.monthlyOperational[i],
+    capital: netWorth.monthlyCapital[i],
+    total,
+  }));
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -480,6 +496,7 @@ export default async function DashboardPage() {
 
       {/* Charts */}
       <div className="space-y-6">
+        <NetWorthChart data={netWorthSeries} />
         <MonthlySpendingChart data={monthly} />
         <div className="grid grid-cols-2 gap-6">
           <CategoryDonutChart data={categories} />
