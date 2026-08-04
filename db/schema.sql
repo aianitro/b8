@@ -1,3 +1,9 @@
+-- Enabled with no schema depending on it yet — groundwork for future semantic search over
+-- transaction/merchant history (see ROADMAP.md's pgvector-backed RAG section). On Homebrew
+-- Postgres, note the bottled `pgvector` formula only targets postgresql@17/@18; against
+-- postgresql@16 it has to be built from source against that version's pg_config.
+CREATE EXTENSION IF NOT EXISTS vector;
+
 -- Plaid-linked accounts
 CREATE TABLE IF NOT EXISTS accounts (
   id                     TEXT PRIMARY KEY,  -- Plaid account_id (NOT guaranteed permanently stable — see lib/plaidReconcile.ts)
