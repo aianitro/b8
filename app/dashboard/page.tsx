@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import type { ReactNode } from 'react';
 import db from '@/lib/db';
 import MonthlySpendingChart, { type MonthlySpendingData } from '@/components/charts/MonthlySpendingChart';
 import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
@@ -37,6 +38,99 @@ async function getStats() {
   return {
     budget, spent, remaining: budget - spent, uncategorized, totalTxns,
     uncategorizedPct: totalTxns > 0 ? Math.round((uncategorized / totalTxns) * 100) : 0,
+  };
+}
+
+interface TodayStats {
+  spent: number;
+  avgSameWeekday: number;
+  transactions: { label: string; amount: number }[];
+  totalCount: number;
+}
+
+async function getTodayStats(): Promise<TodayStats> {
+  const [todayResult, avgResult, txnsResult] = await Promise.all([
+    db.query<{ spent: string }>(`
+      SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS spent
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+      LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
+      WHERE t.date = CURRENT_DATE
+        AND t.hidden = FALSE
+        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+    `),
+    // Average of the same weekday's total spend over the trailing 30 days (excluding today) —
+    // "is today unusual" without building full anomaly detection.
+    db.query<{ avg_spent: string }>(`
+      SELECT COALESCE(AVG(daily_total), 0)::text AS avg_spent
+      FROM (
+        SELECT t.date, SUM(t.amount) FILTER (WHERE t.amount > 0) AS daily_total
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+        LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
+        WHERE t.date >= CURRENT_DATE - INTERVAL '30 days'
+          AND t.date < CURRENT_DATE
+          AND EXTRACT(DOW FROM t.date) = EXTRACT(DOW FROM CURRENT_DATE)
+          AND t.hidden = FALSE
+          AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+        GROUP BY t.date
+      ) daily
+    `),
+    db.query<{ name: string | null; merchant_name: string | null; amount: string; total_count: string }>(`
+      SELECT t.name, t.merchant_name, t.amount::text, COUNT(*) OVER()::text AS total_count
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+      WHERE t.date = CURRENT_DATE AND t.hidden = FALSE AND t.amount > 0
+      ORDER BY t.amount DESC
+      LIMIT 3
+    `),
+  ]);
+  return {
+    spent: Number(todayResult.rows[0]?.spent ?? 0),
+    avgSameWeekday: Number(avgResult.rows[0]?.avg_spent ?? 0),
+    transactions: txnsResult.rows.map((r) => ({ label: r.merchant_name ?? r.name ?? 'Transaction', amount: Number(r.amount) })),
+    totalCount: Number(txnsResult.rows[0]?.total_count ?? 0),
+  };
+}
+
+interface WeekStats {
+  spent: number;
+  spentComparableLastWeek: number;
+  weeklyBudgetReference: number;
+}
+
+async function getWeekStats(): Promise<WeekStats> {
+  const [weekResult, lastWeekResult, budgetResult] = await Promise.all([
+    db.query<{ spent: string }>(`
+      SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS spent
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+      LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
+      WHERE t.date >= date_trunc('week', CURRENT_DATE)
+        AND t.hidden = FALSE
+        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+    `),
+    // Same portion of the week, shifted back exactly 7 days — a fair week-over-week comparison
+    // regardless of which day of the week "today" is.
+    db.query<{ spent: string }>(`
+      SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS spent
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+      LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
+      WHERE t.date >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 days'
+        AND t.date <= CURRENT_DATE - INTERVAL '7 days'
+        AND t.hidden = FALSE
+        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+    `),
+    db.query<{ weekly_budget: string }>(`
+      SELECT COALESCE(SUM(annual_budget) / 52, 0)::text AS weekly_budget
+      FROM budget_categories WHERE exclude_from_budget = FALSE AND is_income = FALSE
+    `),
+  ]);
+  return {
+    spent: Number(weekResult.rows[0]?.spent ?? 0),
+    spentComparableLastWeek: Number(lastWeekResult.rows[0]?.spent ?? 0),
+    weeklyBudgetReference: Number(budgetResult.rows[0]?.weekly_budget ?? 0),
   };
 }
 
@@ -128,8 +222,9 @@ async function getBudgetVsActual(): Promise<BudgetVsActualRow[]> {
   return result.rows.map((r) => ({ ...r, budget: Number(r.budget), spent: Number(r.spent) }));
 }
 
-function KpiCard({ label, value, sub, highlight, href }: {
-  label: string; value: string; sub?: string; highlight?: 'red' | 'green' | 'amber' | 'blue'; href?: string;
+function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
+  label: string; value: string; sub?: string; subColor?: 'red' | 'green' | 'amber' | 'blue';
+  highlight?: 'red' | 'green' | 'amber' | 'blue'; href?: string; footer?: ReactNode;
 }) {
   const colors = {
     red: 'text-red-500', green: 'text-emerald-500', amber: 'text-amber-500', blue: 'text-blue-500',
@@ -140,7 +235,8 @@ function KpiCard({ label, value, sub, highlight, href }: {
       <p className={`text-3xl font-bold mt-2 font-mono ${highlight ? colors[highlight] : 'text-slate-900'}`}>
         {value}
       </p>
-      {sub && <p className="text-xs text-slate-400 mt-1.5">{sub}</p>}
+      {sub && <p className={`text-xs mt-1.5 ${subColor ? colors[subColor] : 'text-slate-400'}`}>{sub}</p>}
+      {footer && <div className="mt-3 pt-3 border-t border-slate-100">{footer}</div>}
     </>
   );
   if (href) {
@@ -160,15 +256,34 @@ function KpiCard({ label, value, sub, highlight, href }: {
   );
 }
 
+function paceColor(pct: number): 'red' | 'amber' | 'green' {
+  if (pct > 1.1) return 'red';
+  if (pct > 1.0) return 'amber';
+  return 'green';
+}
+
 export default async function DashboardPage() {
-  const [stats, monthly, cashflow, categories, budgetVsActual] = await Promise.all([
-    getStats(), getMonthlySpending(), getCashFlow(), getCategoryBreakdown(), getBudgetVsActual(),
+  const [stats, todayStats, weekStats, monthly, cashflow, categories, budgetVsActual] = await Promise.all([
+    getStats(), getTodayStats(), getWeekStats(), getMonthlySpending(), getCashFlow(), getCategoryBreakdown(), getBudgetVsActual(),
   ]);
 
   const pctUsed = stats.budget > 0 ? Math.round((stats.spent / stats.budget) * 100) : 0;
   const monthsElapsed = new Date().getMonth() + 1;
   const pctYear = Math.round((monthsElapsed / 12) * 100);
-  const onTrack = stats.spent <= (stats.budget / 12) * monthsElapsed;
+  const expectedYearSpend = (stats.budget / 12) * monthsElapsed;
+  const onTrack = stats.spent <= expectedYearSpend;
+  const yearPacePct = expectedYearSpend > 0 ? stats.spent / expectedYearSpend : 0;
+
+  const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
+  const todayVsAvgPct = todayStats.avgSameWeekday > 0
+    ? todayStats.spent / todayStats.avgSameWeekday
+    : (todayStats.spent > 0 ? Infinity : 0);
+  const weekdayName = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+
+  const weekDelta = weekStats.spent - weekStats.spentComparableLastWeek;
+  const isoDow = new Date().getDay() === 0 ? 7 : new Date().getDay(); // Monday=1..Sunday=7, matches date_trunc('week', ...)
+  const expectedWeekSpend = weekStats.weeklyBudgetReference * (isoDow / 7);
+  const weekPacePct = expectedWeekSpend > 0 ? weekStats.spent / expectedWeekSpend : 0;
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -185,14 +300,52 @@ export default async function DashboardPage() {
         </span>
       </div>
 
-      {/* KPI row */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <KpiCard label="Annual Budget" value={fmt(stats.budget)} />
+      {/* Day / Week / Year — three concurrently-visible time horizons, not tabbed */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
         <KpiCard
-          label="YTD Spent"
-          value={fmt(stats.spent)}
-          sub={`${pctUsed}% of annual · expected ${fmt((stats.budget / 12) * monthsElapsed)}`}
+          label="Today"
+          value={fmt(todayStats.spent)}
+          sub={todayStats.avgSameWeekday > 0
+            ? `${todayDelta >= 0 ? '+' : ''}${fmt(todayDelta)} vs typical ${weekdayName}`
+            : undefined}
+          subColor={todayStats.avgSameWeekday > 0 ? paceColor(todayVsAvgPct) : undefined}
+          footer={
+            todayStats.transactions.length === 0 ? (
+              <p className="text-xs text-slate-300">No spending yet today</p>
+            ) : (
+              <div className="space-y-1">
+                {todayStats.transactions.map((t, i) => (
+                  <div key={i} className="flex justify-between gap-2 text-xs text-slate-500">
+                    <span className="truncate">{t.label}</span>
+                    <span className="font-mono text-slate-400 shrink-0">{fmt(t.amount)}</span>
+                  </div>
+                ))}
+                {todayStats.totalCount > todayStats.transactions.length && (
+                  <p className="text-[10px] text-slate-300">+{todayStats.totalCount - todayStats.transactions.length} more</p>
+                )}
+              </div>
+            )
+          }
         />
+        <KpiCard
+          label="This Week"
+          value={fmt(weekStats.spent)}
+          sub={`${weekDelta >= 0 ? '+' : ''}${fmt(weekDelta)} vs same point last week`}
+          subColor={expectedWeekSpend > 0 ? paceColor(weekPacePct) : undefined}
+          footer={<p className="text-xs text-slate-400">{fmt(weekStats.weeklyBudgetReference)}/wk reference</p>}
+        />
+        <KpiCard
+          label="This Year"
+          value={fmt(stats.spent)}
+          sub={`${pctUsed}% of annual · expected ${fmt(expectedYearSpend)}`}
+          subColor={expectedYearSpend > 0 ? paceColor(yearPacePct) : undefined}
+        />
+      </div>
+
+      {/* Year detail — "This Year" above already gives the headline number; these round out the
+          annual picture (budget ceiling, remaining, uncategorized) without repeating it. */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <KpiCard label="Annual Budget" value={fmt(stats.budget)} />
         <KpiCard
           label="Remaining"
           value={fmt(stats.remaining)}
