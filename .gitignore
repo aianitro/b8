@@ -42,3 +42,6 @@ next-env.d.ts
 
 # kept local — private job-search strategy notes
 ROADMAP.md
+
+# kept local — internal design working docs, not part of the shipped app
+DASHBOARD-UX-REVIEW.md
