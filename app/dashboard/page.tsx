@@ -41,6 +41,50 @@ async function getStats() {
   };
 }
 
+// Same per-account running-balance computation as app/balances/page.tsx (beginning_balance +
+// sum of monthly net through the current month), just combined across both landscapes into one
+// total instead of one landscape at a time — no page in the app, including Balances itself,
+// otherwise shows a single combined operational + capital number. Derived from recorded
+// transactions, not a live Plaid balance pull — see db/schema.sql's account_balances comment.
+async function getNetWorth(): Promise<{ total: number; accountCount: number }> {
+  const year = new Date().getFullYear();
+  const currentMonth = new Date().getMonth();
+
+  const [accountsRes, netRes, balancesRes] = await Promise.all([
+    db.query<{ id: string }>('SELECT id FROM accounts WHERE track_transactions = TRUE'),
+    db.query<{ account_id: string; month: number; net: string }>(`
+      SELECT t.account_id,
+             EXTRACT(MONTH FROM t.date)::int AS month,
+             (COALESCE(ABS(SUM(t.amount) FILTER (WHERE t.amount < 0)), 0)
+              - COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0))::text AS net
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+      WHERE EXTRACT(YEAR FROM t.date) = $1
+      GROUP BY t.account_id, EXTRACT(MONTH FROM t.date)::int
+    `, [year]),
+    db.query<{ account_id: string; beginning_balance: string }>(
+      'SELECT account_id, beginning_balance FROM account_balances WHERE year = $1',
+      [year]
+    ),
+  ]);
+
+  const netByAccount = new Map<string, Map<number, number>>();
+  for (const r of netRes.rows) {
+    if (!netByAccount.has(r.account_id)) netByAccount.set(r.account_id, new Map());
+    netByAccount.get(r.account_id)!.set(r.month, Number(r.net));
+  }
+  const beginningByAccount = new Map(balancesRes.rows.map((r) => [r.account_id, Number(r.beginning_balance)]));
+
+  let total = 0;
+  for (const a of accountsRes.rows) {
+    const byMonth = netByAccount.get(a.id) ?? new Map();
+    let running = beginningByAccount.get(a.id) ?? 0;
+    for (let i = 0; i <= currentMonth; i++) running += byMonth.get(i + 1) ?? 0;
+    total += running;
+  }
+  return { total, accountCount: accountsRes.rows.length };
+}
+
 interface TodayStats {
   spent: number;
   avgSameWeekday: number;
@@ -263,8 +307,8 @@ function paceColor(pct: number): 'red' | 'amber' | 'green' {
 }
 
 export default async function DashboardPage() {
-  const [stats, todayStats, weekStats, monthly, cashflow, categories, budgetVsActual] = await Promise.all([
-    getStats(), getTodayStats(), getWeekStats(), getMonthlySpending(), getCashFlow(), getCategoryBreakdown(), getBudgetVsActual(),
+  const [stats, netWorth, todayStats, weekStats, monthly, cashflow, categories, budgetVsActual] = await Promise.all([
+    getStats(), getNetWorth(), getTodayStats(), getWeekStats(), getMonthlySpending(), getCashFlow(), getCategoryBreakdown(), getBudgetVsActual(),
   ]);
 
   const pctUsed = stats.budget > 0 ? Math.round((stats.spent / stats.budget) * 100) : 0;
@@ -343,8 +387,14 @@ export default async function DashboardPage() {
       </div>
 
       {/* Year detail — "This Year" above already gives the headline number; these round out the
-          annual picture (budget ceiling, remaining, uncategorized) without repeating it. */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+          annual picture (net worth, budget ceiling, remaining, uncategorized) without repeating it. */}
+      <div className="grid grid-cols-4 gap-4 mb-6">
+        <KpiCard
+          label="Net Worth"
+          value={fmt(netWorth.total)}
+          sub={`as of last sync · ${netWorth.accountCount} account${netWorth.accountCount !== 1 ? 's' : ''}`}
+          highlight={netWorth.total < 0 ? 'red' : undefined}
+        />
         <KpiCard label="Annual Budget" value={fmt(stats.budget)} />
         <KpiCard
           label="Remaining"
