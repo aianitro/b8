@@ -9,6 +9,9 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "migrate:up": "node-pg-migrate up --envPath .env.local",
+    "migrate:down": "node-pg-migrate down --envPath .env.local",
+    "migrate:create": "node-pg-migrate create -j sql",
     "prepare": "husky"
   },
   "dependencies": {
@@ -28,9 +31,11 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "^16.2.12",
     "husky": "^9.1.7",
+    "node-pg-migrate": "^9.0.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.10"

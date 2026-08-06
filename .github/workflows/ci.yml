@@ -40,6 +40,37 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  migrate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: b8_finance_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/b8_finance_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Verifies both directions apply cleanly against a throwaway DB — a migration that
+      # can't be written down is a debugging trap the first time a deploy needs a rollback.
+      - run: npm run migrate:up
+      - run: npm run migrate:down
+      - run: npm run migrate:up
+
   gitleaks:
     runs-on: ubuntu-latest
     container:

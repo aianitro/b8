@@ -1,3 +1,5 @@
+-- Up Migration
+
 -- Enabled with no schema depending on it yet — groundwork for future semantic search over
 -- transaction/merchant history (see ROADMAP.md's pgvector-backed RAG section). On Homebrew
 -- Postgres, note the bottled `pgvector` formula only targets postgresql@17/@18; against
@@ -113,11 +115,26 @@ CREATE INDEX IF NOT EXISTS idx_sync_log_ran_at ON sync_log(ran_at);
 
 -- Editable beginning balance for a whole landscape's budget in a given year — distinct from
 -- account_balances (per-account) and category_balances (per-category); this is the top-level
--- number the annual budget page nets everything else against. See app/api/budget/settings/route.ts,
--- app/budget/page.tsx, components/BudgetMonthlyGrid.tsx for its call sites.
+-- number the annual budget page nets everything else against. Found via schema drift: this
+-- table existed live but was never captured in db/schema.sql (see app/api/budget/settings/route.ts,
+-- app/budget/page.tsx, components/BudgetMonthlyGrid.tsx for its three call sites) — this baseline
+-- migration is the first place its definition is actually version-controlled.
 CREATE TABLE IF NOT EXISTS budget_settings (
   year                INT NOT NULL,
   landscape           TEXT NOT NULL DEFAULT 'operational',
   beginning_balance   NUMERIC NOT NULL DEFAULT 0,
   PRIMARY KEY (year, landscape)
 );
+
+-- Down Migration
+
+DROP TABLE IF EXISTS budget_settings;
+DROP TABLE IF EXISTS sync_log;
+DROP TABLE IF EXISTS transactions;
+DROP TABLE IF EXISTS transfer_groups;
+DROP TABLE IF EXISTS category_rules;
+DROP TABLE IF EXISTS category_balances;
+DROP TABLE IF EXISTS budget_categories;
+DROP TABLE IF EXISTS account_balances;
+DROP TABLE IF EXISTS accounts;
+DROP EXTENSION IF EXISTS vector;

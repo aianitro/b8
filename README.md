@@ -26,9 +26,10 @@ Built as a hobby project to get hands-on with a production-grade Plaid integrati
 This is a single-user, self-hosted app — it expects to be run for one person's own accounts, not deployed as a multi-tenant service.
 
 1. `npm install`
-2. Create a Postgres database and apply `db/schema.sql`
+2. Create a Postgres database (with the `pgvector` extension available — see `db/schema.sql`'s note on building it from source against Postgres 16 on Homebrew)
 3. Copy `.env.local.example` to `.env.local` and fill in your own Plaid, database, and Anthropic API credentials
-4. `npm run dev`
+4. `npm run migrate:up` — applies `migrations/` via `node-pg-migrate`, reading `DATABASE_URL` from the environment (`db/schema.sql` is kept as a human-readable reference of the same schema; the migrations are the source of truth)
+5. `npm run dev`
 
 The dev/start scripts bind to `127.0.0.1` only.
 
