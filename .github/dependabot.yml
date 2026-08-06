@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # npm deps go through every CI gate (typecheck/lint/test/migrate/gitleaks) automatically —
+  # Dependabot PRs trigger the same pull_request workflow as any other PR.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+
+  # Catches the exact class of drift manually caught and fixed this session — a pinned
+  # action version silently falling behind what GitHub actually runs.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
