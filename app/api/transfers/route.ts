@@ -1,45 +1,36 @@
 import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import type { ApiResponse } from '@/shared/types';
+import {
+  isValidTransferIds,
+  invalidTransferIdsError,
+  validateTransferRows,
+  type TransferValidationError,
+} from '@/lib/transferValidation';
 
-const EPSILON = 0.01;
+const STATUS_BY_CODE: Record<TransferValidationError['code'], number> = {
+  INVALID_INPUT: 400,
+  NOT_FOUND: 404,
+  ALREADY_GROUPED: 409,
+  UNBALANCED: 400,
+};
+
+const errorResponse = (error: TransferValidationError) =>
+  Response.json({ success: false, error } satisfies ApiResponse<never>, { status: STATUS_BY_CODE[error.code] });
 
 // Link 2+ transactions as a transfer group — any quantity, as long as the amounts sum to ~0
 export async function POST(req: NextRequest) {
-  const { ids } = await req.json() as { ids?: number[] };
+  const { ids } = await req.json() as { ids?: unknown };
 
-  if (!Array.isArray(ids) || ids.length < 2 || new Set(ids).size !== ids.length) {
-    return Response.json(
-      { success: false, error: { code: 'INVALID_INPUT', message: 'ids must be 2 or more distinct transaction ids' } } satisfies ApiResponse<never>,
-      { status: 400 }
-    );
-  }
+  if (!isValidTransferIds(ids)) return errorResponse(invalidTransferIdsError);
 
   const rows = await db.query<{ id: number; amount: string; transfer_group_id: number | null }>(
     'SELECT id, amount, transfer_group_id FROM transactions WHERE id = ANY($1)',
     [ids]
   );
 
-  if (rows.rows.length !== ids.length) {
-    return Response.json(
-      { success: false, error: { code: 'NOT_FOUND', message: 'One or more transactions not found' } } satisfies ApiResponse<never>,
-      { status: 404 }
-    );
-  }
-  if (rows.rows.some((r) => r.transfer_group_id !== null)) {
-    return Response.json(
-      { success: false, error: { code: 'ALREADY_GROUPED', message: 'One or more transactions are already part of a transfer group — unlink first' } } satisfies ApiResponse<never>,
-      { status: 409 }
-    );
-  }
-
-  const sum = rows.rows.reduce((s, r) => s + Number(r.amount), 0);
-  if (Math.abs(sum) > EPSILON) {
-    return Response.json(
-      { success: false, error: { code: 'UNBALANCED', message: `Selected amounts must sum to 0 (currently ${sum.toFixed(2)})` } } satisfies ApiResponse<never>,
-      { status: 400 }
-    );
-  }
+  const rowsError = validateTransferRows(ids, rows.rows);
+  if (rowsError) return errorResponse(rowsError);
 
   const group = await db.query<{ id: number }>('INSERT INTO transfer_groups DEFAULT VALUES RETURNING id');
   const groupId = group.rows[0].id;

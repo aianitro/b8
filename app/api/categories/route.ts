@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import type { ApiResponse, BudgetCategory } from '@/shared/types';
+import { normalizeMonthlyAmounts, resolveAnnualBudget } from '@/lib/budgetMath';
 
 export async function GET() {
   const result = await db.query<BudgetCategory>(
@@ -11,15 +12,6 @@ export async function GET() {
 
 // Exactly 12 values (Jan-Dec), each a non-negative amount. An invalid length or all-zero
 // array is treated the same as "no custom schedule" (falls back to the flat annual/12 split).
-function normalizeMonthlyAmounts(input: unknown): number[] | null {
-  if (!Array.isArray(input) || input.length !== 12) return null;
-  const amounts = input.map((v) => {
-    const n = Number(v);
-    return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0;
-  });
-  return amounts.some((n) => n > 0) ? amounts : null;
-}
-
 export async function POST(req: NextRequest) {
   const { name, annual_budget, landscape, is_income, dedicated_account_id, monthly_amounts } = await req.json();
   if (!name || typeof annual_budget !== 'number' || !landscape) {
@@ -32,7 +24,7 @@ export async function POST(req: NextRequest) {
     const amounts = normalizeMonthlyAmounts(monthly_amounts);
     // When a schedule is provided, its total is authoritative — mirrors the PATCH behavior so
     // annual_budget and the schedule can never drift apart, even if a caller passes both.
-    const resolvedAnnualBudget = amounts ? Math.round(amounts.reduce((s, n) => s + n, 0) * 100) / 100 : annual_budget;
+    const resolvedAnnualBudget = resolveAnnualBudget(amounts, annual_budget);
     const result = await db.query<BudgetCategory>(
       'INSERT INTO budget_categories (name, annual_budget, landscape, is_income, dedicated_account_id, monthly_amounts) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
       [name.trim(), resolvedAnnualBudget, landscape, Boolean(is_income), dedicated_account_id ?? null, amounts]

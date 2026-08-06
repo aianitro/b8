@@ -1,6 +1,9 @@
 if ! command -v gitleaks >/dev/null 2>&1; then
   echo "gitleaks not found (brew install gitleaks) — skipping secret scan, commit allowed"
-  exit 0
+else
+  gitleaks protect --staged --no-banner || exit 1
 fi
 
-gitleaks protect --staged --no-banner
+# The unit suite is pure functions only — no DB, no network — so it runs in well under a
+# second. Cheap enough to gate every commit rather than waiting for CI to catch a red suite.
+npm test --silent || exit 1
