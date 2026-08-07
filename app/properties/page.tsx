@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import db from '@/lib/db';
 import AddPropertyForm from '@/components/AddPropertyForm';
 import PropertyValuationEdit from '@/components/PropertyValuationEdit';
+import PropertyTypeToggle from '@/components/PropertyTypeToggle';
 import PropertyMortgageLink from '@/components/PropertyMortgageLink';
 import { computePropertyEquity, latestValuationByProperty } from '@/lib/domain/property';
 import { latestValuationByAccount } from '@/lib/domain/valuation';
@@ -115,11 +116,7 @@ export default async function PropertiesPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="text-sm font-medium text-slate-800 truncate">{p.nickname}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
-                        p.type === 'primary' ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'
-                      }`}>
-                        {p.type}
-                      </span>
+                      <PropertyTypeToggle propertyId={p.id} current={p.type} />
                     </div>
                     <div className="text-xs text-slate-400">
                       {p.address || 'No address'}
