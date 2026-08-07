@@ -31,7 +31,12 @@ export default function AccountTrackingToggle({ accountId, current }: Props) {
     <button
       onClick={toggle}
       disabled={saving}
-      title={tracked ? 'Tracked — included in budgets and dashboard' : 'Hidden from budgets and dashboard'}
+      // Deliberately says "transactions": this flag no longer gates net worth for
+      // valuation-mode accounts (see getNetWorth in app/dashboard/page.tsx), so promising
+      // it hides the account everywhere would be wrong.
+      title={tracked
+        ? 'Transactions included in budgets and dashboard totals'
+        : 'Transactions hidden from budgets and dashboard totals'}
       aria-label={tracked ? 'Tracked' : 'Hidden'}
       aria-pressed={tracked}
       className={`mx-auto flex items-center justify-center w-7 h-7 rounded-lg transition-colors disabled:opacity-40 ${
