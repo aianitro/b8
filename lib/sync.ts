@@ -1,5 +1,6 @@
 import { plaidClient } from './plaid';
 import { reconcileAccountIds } from './plaidReconcile';
+import { recordPlaidBalances } from './plaidBalances';
 import db from './db';
 import { createLogger } from './logger';
 
@@ -172,6 +173,14 @@ async function runSyncInner({
       const result = await reconcileAccountIds(access_token);
       for (const r of result.remapped) reconciled.push(`remapped ${r.name} (${r.matchedBy})`);
       for (const u of result.unmatchedLive) reconciled.push(`new/unmatched account at Plaid: ${u.name}`);
+
+      // Best-effort and deliberately isolated: recording balances is a nice-to-have that must
+      // never cost us a transaction sync, which is what this run actually exists to do.
+      try {
+        await recordPlaidBalances(result.liveBalances);
+      } catch (err) {
+        log.error('recording plaid balances failed', { error: err instanceof Error ? err.message : String(err) });
+      }
     } catch (err) {
       log.error('reconcile failed for token', { error: err instanceof Error ? err.message : String(err) });
     }

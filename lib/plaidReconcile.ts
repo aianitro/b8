@@ -2,6 +2,7 @@ import { plaidClient } from './plaid';
 import db from './db';
 import { matchAccounts, type DbAccountRow } from './plaidMatch';
 import { createLogger } from './logger';
+import type { ObservedBalance } from './domain/valuation';
 
 const log = createLogger('plaidReconcile');
 
@@ -18,11 +19,17 @@ const log = createLogger('plaidReconcile');
 //
 // The matching itself lives in plaidMatch.ts as a pure function — this file is the I/O
 // shell around it (fetch live accounts, apply the remaps and identifier backfills).
+//
+// It also surfaces the balances from that same live snapshot (`liveBalances`), which the
+// accountsGet call already returns and the sync path historically discarded. Returning them
+// here rather than re-fetching in lib/plaidBalances.ts keeps it at one Plaid API call per
+// item per sync.
 
 export interface ReconcileResult {
   remapped: { oldId: string; newId: string; name: string; matchedBy: string }[];
   unmatchedLive: { id: string; name: string; mask: string | null }[];
   unmatchedDb: { id: string; name: string; mask: string | null }[];
+  liveBalances: ObservedBalance[];
 }
 
 export async function reconcileAccountIds(accessToken: string): Promise<ReconcileResult> {
@@ -63,9 +70,23 @@ export async function reconcileAccountIds(accessToken: string): Promise<Reconcil
     log.warn('could not confidently reconcile', { unmatchedLive, unmatchedDb });
   }
 
+  // Keyed by Plaid's live account_id, which by this point equals our accounts.id for every
+  // account we know about — the remaps above have already run. Accounts Plaid reports that we
+  // have no row for (unmatchedLive) are still included here; lib/plaidBalances.ts filters them
+  // out against the accounts table rather than letting them hit the FK.
+  //
+  // `current`, not `available`: for credit accounts `available` is remaining credit, not the
+  // balance. Plaid reports `current` as a positive magnitude for both assets and liabilities
+  // (for credit/loan it's the amount owed), which is exactly the convention account_valuations
+  // stores — sign is derived from accounts.is_liability, never from the stored value.
+  const liveBalances: ObservedBalance[] = live.data.accounts
+    .filter((a) => a.balances.current !== null)
+    .map((a) => ({ accountId: a.account_id, value: a.balances.current as number }));
+
   return {
     remapped: remapped.map(({ oldId, newId, name, matchedBy }) => ({ oldId, newId, name, matchedBy })),
     unmatchedLive,
     unmatchedDb,
+    liveBalances,
   };
 }

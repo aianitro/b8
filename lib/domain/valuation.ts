@@ -5,6 +5,7 @@
 // split as lib/plaidMatch.ts and lib/budgetMath.ts.
 
 import type { Landscape } from '../../shared/types';
+import { roundCents } from '../budgetMath';
 
 export type ValuationMode = 'ledger' | 'valuation';
 
@@ -50,6 +51,35 @@ export function latestValuationByAccount(rows: ValuationRow[]): Map<string, numb
     }
   }
   return new Map([...latest].map(([accountId, v]) => [accountId, v.value]));
+}
+
+export interface ObservedBalance {
+  accountId: string;
+  value: number;
+}
+
+/**
+ * Filters a batch of freshly-observed balances down to the ones worth appending, by dropping
+ * any whose value is unchanged since that account's last recorded observation.
+ *
+ * Why dedupe at all: the scheduler runs two sync phases (plain + force) daily, and each
+ * reconciles every Plaid item — so recording unconditionally would append two identical rows
+ * per account per day forever, plus more on every manual sync. Keeping only changes makes
+ * account_valuations a change-log whose row count tracks actual movement rather than sync
+ * frequency, which is what both the value-over-time chart (§1f) and drift detection (§1g)
+ * actually want to read. A gap between rows means "unchanged", not "unobserved".
+ *
+ * Values are rounded to cents before comparison because the column is NUMERIC(14,2): an
+ * unrounded 110.229999 from Plaid would store as 110.23 and then compare unequal on the next
+ * sync, appending a spurious row every single run.
+ */
+export function balancesToRecord(
+  observed: ObservedBalance[],
+  lastRecorded: Map<string, number>
+): ObservedBalance[] {
+  return observed
+    .map((o) => ({ accountId: o.accountId, value: roundCents(o.value) }))
+    .filter((o) => lastRecorded.get(o.accountId) !== o.value);
 }
 
 /**
