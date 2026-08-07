@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, FileText } from 'lucide-react';
 import AccountNameEdit from './AccountNameEdit';
 import AccountTypeEdit from './AccountTypeEdit';
 import AccountBankEdit from './AccountBankEdit';
@@ -14,6 +14,13 @@ import RelativeTime from './RelativeTime';
 import type { Account } from '@/shared/types';
 
 type Section = 'operational' | 'capital';
+
+// One grid shared by the header and every row, so the columns actually line up. The row was
+// previously a flex with justify-between: cells sized themselves per row, nothing aligned
+// vertically, and the whole thing overflowed once a fifth control was added. Fixed tracks for
+// the controls plus a single minmax(0,1fr) for the name is what keeps that from recurring —
+// minmax(0,...) rather than 1fr because a bare 1fr floors at min-content and refuses to shrink.
+const ROW_GRID = 'grid grid-cols-[14px_4px_minmax(0,1fr)_112px_44px_150px_116px_24px] gap-3 items-center';
 
 interface Props {
   operational: Account[];
@@ -122,6 +129,18 @@ function Group({
     <div className="mb-8">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">{title}</h2>
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        {/* Column headers: with five controls per row, the compact ones (an eye, two short
+            selects) only read unambiguously once the column is named. */}
+        <div className={`${ROW_GRID} px-6 py-2 bg-slate-50/60 border-b border-slate-100`}>
+          <span />
+          <span />
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Account</span>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 text-right">Value</span>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 text-center">Track</span>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Balance from</span>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Landscape</span>
+          <span />
+        </div>
         {items.map((a, i) => {
           const isDragOver = dragOver === a.id;
           return (
@@ -132,52 +151,73 @@ function Group({
               onDragOver={(e) => onDragOver(e, a.id)}
               onDrop={() => onDrop(section, a.id)}
               onDragEnd={onDragEnd}
-              className={`flex items-center justify-between gap-4 px-6 py-4 cursor-grab active:cursor-grabbing transition-colors ${
+              className={`${ROW_GRID} px-6 py-3 cursor-grab active:cursor-grabbing transition-colors ${
                 i < items.length - 1 ? 'border-b border-slate-50' : ''
               } hover:bg-slate-50/50 ${isDragOver ? 'border-t-2 border-t-blue-400' : ''}`}
             >
-              <div className="flex items-center gap-4 flex-1 min-w-0">
-                <GripVertical size={14} className="text-slate-300 shrink-0" />
-                <div className={`w-1 h-8 rounded-full shrink-0 ${accent}`} />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <AccountNameEdit accountId={a.id} current={a.name} />
-                    <AccountTypeEdit accountId={a.id} type={a.type} subtype={a.subtype} />
-                    {a.is_manual && (
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium shrink-0">
-                        manual
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <AccountBankEdit accountId={a.id} current={a.bank} />
-                    {!a.is_manual && <RelativeTime iso={a.last_synced_at} />}
-                  </div>
+              <GripVertical size={14} className="text-slate-300" />
+              <div className={`w-1 h-8 rounded-full ${accent}`} />
+
+              {/* min-w-0 lets this cell shrink, but every child must then truncate or clip on
+                  its own — without that the text overflowed its box and painted over the
+                  controls to its right, which is what made the row look broken. */}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-0.5 min-w-0">
+                  <AccountNameEdit accountId={a.id} current={a.name} />
+                  <AccountTypeEdit accountId={a.id} type={a.type} subtype={a.subtype} />
+                  {a.is_manual && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium shrink-0">
+                      manual
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 min-w-0 text-xs text-slate-400">
+                  <AccountBankEdit accountId={a.id} current={a.bank} />
+                  {(txnCounts[a.id] ?? 0) > 0 && (
+                    <>
+                      <span className="shrink-0">·</span>
+                      {/* draggable={false} so grabbing a link doesn't hijack the row's own drag */}
+                      <a
+                        href={`/transactions?account=${a.id}`}
+                        draggable={false}
+                        className="shrink-0 font-mono hover:text-slate-600 transition-colors"
+                      >
+                        {(txnCounts[a.id] ?? 0).toLocaleString()} txns
+                      </a>
+                      <span className="shrink-0">·</span>
+                      <a
+                        href={`/accounts/${a.id}`}
+                        draggable={false}
+                        className="shrink-0 inline-flex items-center gap-0.5 hover:text-slate-600 transition-colors"
+                      >
+                        <FileText size={11} />
+                        statement
+                      </a>
+                    </>
+                  )}
+                  {!a.is_manual && (
+                    <>
+                      <span className="shrink-0">·</span>
+                      <span className="shrink-0"><RelativeTime iso={a.last_synced_at} /></span>
+                    </>
+                  )}
                 </div>
               </div>
-              {(txnCounts[a.id] ?? 0) > 0 && (
-                <div className="flex items-center gap-1.5">
-                  <a
-                    href={`/accounts/${a.id}`}
-                    className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800 text-white hover:bg-slate-700 transition-colors whitespace-nowrap"
-                  >
-                    Statement
-                  </a>
-                  <a
-                    href={`/transactions?account=${a.id}`}
-                    className="text-xs font-mono font-medium px-2.5 py-1 rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700 transition-colors whitespace-nowrap"
-                  >
-                    {(txnCounts[a.id] ?? 0).toLocaleString()} txns
-                  </a>
-                </div>
-              )}
-              {a.valuation_mode === 'valuation' && (
-                <AccountValuationEdit
-                  accountId={a.id}
-                  current={valuations[a.id] ?? null}
-                  isLiability={a.is_liability}
-                />
-              )}
+
+              {/* Fixed-width cell rather than a conditional element, so the numbers line up
+                  down the column even though only valuation-mode accounts have one. */}
+              <div className="text-right">
+                {a.valuation_mode === 'valuation' ? (
+                  <AccountValuationEdit
+                    accountId={a.id}
+                    current={valuations[a.id] ?? null}
+                    isLiability={a.is_liability}
+                  />
+                ) : (
+                  <span className="text-xs text-slate-300">—</span>
+                )}
+              </div>
+
               <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
               <AccountValuationModeToggle accountId={a.id} mode={a.valuation_mode} isLiability={a.is_liability} />
               <AccountLandscapeToggle accountId={a.id} current={a.landscape} />
