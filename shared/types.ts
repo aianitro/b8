@@ -1,5 +1,10 @@
 export type Landscape = 'operational' | 'capital';
 
+// 'ledger': balance is flow-derived (beginning_balance + Σ transactions) — right for cash.
+// 'valuation': balance is the latest account_valuations row — right for market-value assets,
+// real estate, and amortizing liabilities, which have no meaningful transaction-sum balance.
+export type ValuationMode = 'ledger' | 'valuation';
+
 export interface Account {
   id: string;
   name: string;
@@ -10,6 +15,8 @@ export interface Account {
   bank: string | null;
   is_manual: boolean;
   last_synced_at: string | null;
+  valuation_mode: ValuationMode;
+  is_liability: boolean;
 }
 
 export interface BudgetCategory {
