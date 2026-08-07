@@ -1,4 +1,5 @@
 import { runSync } from './sync';
+import { writeNetWorthSnapshot } from './netWorth';
 import { createLogger } from './logger';
 
 const log = createLogger('scheduler');
@@ -26,6 +27,16 @@ async function runAndLog() {
     log.info('force refresh phase', { ...forced });
   } catch (err) {
     log.error('daily sync failed', { error: err instanceof Error ? err.message : String(err) });
+  }
+
+  // Snapshotted after the syncs, and outside their try, for two reasons: it should reflect
+  // balances the run just pulled, and a failed sync still leaves a worth-recording position —
+  // yesterday's data is a truer snapshot than a missing day. Upserts on date, so the two sync
+  // phases plus any manual run collapse into one row.
+  try {
+    await writeNetWorthSnapshot();
+  } catch (err) {
+    log.error('net worth snapshot failed', { error: err instanceof Error ? err.message : String(err) });
   }
 }
 
