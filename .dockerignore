@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.github
+.husky
+*.tsbuildinfo
+npm-debug.log*
+.env*
+!.env.local.example
+coverage

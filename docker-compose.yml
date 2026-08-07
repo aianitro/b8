@@ -1,0 +1,61 @@
+# Local dev parity + first rung of the AWS deploy track (ROADMAP.md §2's "Dockerfile +
+# docker-compose first" item). Run via `npm run docker:up`, which wraps
+# `docker compose --env-file .env.local up --build` — Postgres/Plaid/Anthropic credentials
+# come from the same .env.local already used by `npm run dev`, so there's one source of
+# truth for local secrets, not two.
+#
+# DATABASE_URL below is deliberately NOT the one in .env.local (that one points at
+# `localhost`, which only resolves to the host machine, not the `db` service, from inside
+# the `app`/`migrate` containers) — it's rebuilt here against the Docker-internal `db`
+# hostname instead.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: b8
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.local}
+      POSTGRES_DB: b8_finance
+    volumes:
+      - b8_pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U b8 -d b8_finance"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: applies migrations/ against `db`, then exits. `app` waits for it to succeed.
+  migrate:
+    build:
+      context: .
+      target: builder
+    environment:
+      DATABASE_URL: postgresql://b8:${POSTGRES_PASSWORD}@db:5432/b8_finance
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["npm", "run", "migrate:up"]
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    env_file: .env.local
+    environment:
+      # Overrides the localhost-pointed DATABASE_URL that env_file above also supplies —
+      # docker compose gives `environment:` precedence over `env_file:` for the same key.
+      DATABASE_URL: postgresql://b8:${POSTGRES_PASSWORD}@db:5432/b8_finance
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  b8_pgdata:

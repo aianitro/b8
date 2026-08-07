@@ -33,6 +33,16 @@ This is a single-user, self-hosted app — it expects to be run for one person's
 
 The dev/start scripts bind to `127.0.0.1` only.
 
+## Running via Docker
+
+An alternative to the steps above — app + Postgres (with `pgvector`) in containers, no local Postgres install needed:
+
+1. Copy `.env.local.example` to `.env.local`, fill in your credentials, and also set `POSTGRES_PASSWORD` (used only by the `db` container)
+2. `npm run docker:up` — builds the app image, starts Postgres, runs migrations, then starts the app on `127.0.0.1:3000`
+3. `npm run docker:down` to stop
+
+Ports are published to `127.0.0.1` only, matching the dev/start scripts' own localhost-only binding.
+
 ## Note on data
 
 This repo contains only application code and schema — no real account data, transactions, or credentials. All of that lives in a local Postgres database and a gitignored `.env.local`, neither of which is part of this repository.

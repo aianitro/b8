@@ -12,6 +12,8 @@
     "migrate:up": "node-pg-migrate up --envPath .env.local",
     "migrate:down": "node-pg-migrate down --envPath .env.local",
     "migrate:create": "node-pg-migrate create -j sql",
+    "docker:up": "docker compose --env-file .env.local up --build",
+    "docker:down": "docker compose down",
     "prepare": "husky"
   },
   "dependencies": {
