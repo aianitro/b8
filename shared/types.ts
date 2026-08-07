@@ -1,5 +1,17 @@
 export type Landscape = 'operational' | 'capital';
 
+export type PropertyType = 'primary' | 'rental';
+
+export interface Property {
+  id: number;
+  nickname: string;
+  address: string | null;
+  type: PropertyType;
+  purchase_price: number | null;
+  purchase_date: string | null;
+  cost_basis: number | null;
+}
+
 export interface Account {
   id: string;
   name: string;
@@ -10,6 +22,7 @@ export interface Account {
   bank: string | null;
   is_manual: boolean;
   last_synced_at: string | null;
+  property_id: number | null;
 }
 
 export interface BudgetCategory {

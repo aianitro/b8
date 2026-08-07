@@ -6,7 +6,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   const body: {
     landscape?: Landscape; track_transactions?: boolean; bank?: string; name?: string;
-    type?: string; subtype?: string | null;
+    type?: string; subtype?: string | null; property_id?: number | null;
   } = await req.json();
 
   if ('landscape' in body) {
@@ -48,6 +48,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       );
     }
     await db.query('UPDATE accounts SET type = $1, subtype = $2 WHERE id = $3', [type, body.subtype ?? null, id]);
+  }
+
+  // Links (or clears, via null) which property this account's mortgage is secured against —
+  // see lib/domain/property.ts for the equity computation this feeds. No is_liability check
+  // here deliberately: the UI scopes the selector to liability accounts today, but the FK
+  // itself is generic (step 9's per-property P&L will want a rental's checking account linked
+  // too), and re-validating a UI-level scoping decision at the API layer would just be two
+  // places to keep in sync.
+  if ('property_id' in body) {
+    await db.query('UPDATE accounts SET property_id = $1 WHERE id = $2', [body.property_id ?? null, id]);
   }
 
   return Response.json({ success: true, data: null } satisfies ApiResponse<null>);
