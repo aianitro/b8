@@ -1,10 +1,9 @@
 export const dynamic = 'force-dynamic';
 
+import Link from 'next/link';
+import { ChevronRight } from 'lucide-react';
 import db from '@/lib/db';
 import AddPropertyForm from '@/components/AddPropertyForm';
-import PropertyValuationEdit from '@/components/PropertyValuationEdit';
-import PropertyTypeToggle from '@/components/PropertyTypeToggle';
-import PropertyMortgageLink from '@/components/PropertyMortgageLink';
 import { computePropertyEquity, latestValuationByProperty } from '@/lib/domain/property';
 import { latestValuationByAccount } from '@/lib/domain/valuation';
 import type { Property } from '@/shared/types';
@@ -67,7 +66,6 @@ export default async function PropertiesPage() {
   ]);
 
   const mortgageByProperty = new Map(mortgageAccounts.filter((a) => a.propertyId !== null).map((a) => [a.propertyId as number, a]));
-  const unlinkedMortgages = mortgageAccounts.filter((a) => a.propertyId === null);
 
   const mortgageBalanceByProperty = new Map(
     [...mortgageByProperty].map(([propertyId, acct]) => [propertyId, mortgageBalanceByAccount.get(acct.id) ?? 0])
@@ -103,20 +101,29 @@ export default async function PropertiesPage() {
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          {/* Read-only summary rows: every edit affordance now lives on the detail page, so a
+              whole row is a single link target rather than a strip of competing controls. */}
           {properties.map((p, i) => {
             const e = equityByProperty.get(p.id);
             const linkedAccount = mortgageByProperty.get(p.id) ?? null;
             return (
-              <div
+              <Link
                 key={p.id}
-                className={`flex items-center justify-between gap-4 px-6 py-4 ${i < properties.length - 1 ? 'border-b border-slate-50' : ''}`}
+                href={`/properties/${p.id}`}
+                className={`flex items-center justify-between gap-4 px-6 py-4 hover:bg-slate-50/50 transition-colors ${
+                  i < properties.length - 1 ? 'border-b border-slate-50' : ''
+                }`}
               >
                 <div className="flex items-center gap-4 flex-1 min-w-0">
                   <div className="w-1 h-8 rounded-full shrink-0 bg-violet-500" />
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="text-sm font-medium text-slate-800 truncate">{p.nickname}</span>
-                      <PropertyTypeToggle propertyId={p.id} current={p.type} />
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                        p.type === 'primary' ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'
+                      }`}>
+                        {p.type}
+                      </span>
                     </div>
                     <div className="text-xs text-slate-400">
                       {p.address || 'No address'}
@@ -127,7 +134,9 @@ export default async function PropertiesPage() {
 
                 <div className="text-right shrink-0">
                   <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-0.5">Value</p>
-                  <PropertyValuationEdit propertyId={p.id} current={e?.value ?? null} />
+                  <span className="text-xs font-mono font-medium text-slate-600">
+                    {e?.value !== null && e?.value !== undefined ? fmt(e.value) : '—'}
+                  </span>
                 </div>
 
                 {linkedAccount && (
@@ -137,19 +146,15 @@ export default async function PropertiesPage() {
                   </div>
                 )}
 
-                <div className="text-right shrink-0">
+                <div className="text-right shrink-0 w-24">
                   <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-0.5">Equity</p>
                   <span className="text-xs font-mono font-semibold text-slate-700">
                     {e?.equity !== null && e?.equity !== undefined ? fmt(e.equity) : '—'}
                   </span>
                 </div>
 
-                <PropertyMortgageLink
-                  propertyId={p.id}
-                  linkedAccount={linkedAccount}
-                  unlinkedCandidates={unlinkedMortgages}
-                />
-              </div>
+                <ChevronRight size={15} className="text-slate-300 shrink-0" />
+              </Link>
             );
           })}
         </div>

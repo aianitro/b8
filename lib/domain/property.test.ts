@@ -1,5 +1,45 @@
 import { describe, it, expect } from 'vitest';
-import { computePropertyEquity, latestValuationByProperty, type Property } from './property';
+import { computePropertyEquity, latestValuationByProperty, valueAsOf, type Property } from './property';
+
+describe('valueAsOf', () => {
+  const series = [
+    { value: 300000, valuedAt: '2024-01-01T00:00:00Z' },
+    { value: 290000, valuedAt: '2025-01-01T00:00:00Z' },
+    { value: 280000, valuedAt: '2026-01-01T00:00:00Z' },
+  ];
+
+  it('returns the observation current on that date, not the newest overall', () => {
+    // The whole point: charting equity for a 2025 valuation must use the 2025 mortgage
+    // balance, or today's paid-down balance would retroactively inflate past equity.
+    expect(valueAsOf(series, '2025-06-01T00:00:00Z')).toBe(290000);
+  });
+
+  it('is inclusive of an exact date match', () => {
+    expect(valueAsOf(series, '2025-01-01T00:00:00Z')).toBe(290000);
+  });
+
+  it('returns null before the series starts, rather than guessing backwards', () => {
+    expect(valueAsOf(series, '2023-06-01T00:00:00Z')).toBeNull();
+  });
+
+  it('holds the last value forward for dates after the final reading', () => {
+    expect(valueAsOf(series, '2030-01-01T00:00:00Z')).toBe(280000);
+  });
+
+  it('is order-independent — the caller need not pre-sort', () => {
+    const shuffled = [series[2], series[0], series[1]];
+    expect(valueAsOf(shuffled, '2025-06-01T00:00:00Z')).toBe(290000);
+  });
+
+  it('returns null for an empty series', () => {
+    expect(valueAsOf([], '2026-01-01T00:00:00Z')).toBeNull();
+  });
+
+  it('treats a zero balance as a real reading, not a missing one', () => {
+    // A paid-off mortgage is 0, and equity should then equal the full property value.
+    expect(valueAsOf([{ value: 0, valuedAt: '2026-01-01T00:00:00Z' }], '2026-06-01T00:00:00Z')).toBe(0);
+  });
+});
 
 describe('latestValuationByProperty', () => {
   it('picks the most recent row per property out of an unsorted, multi-row history', () => {

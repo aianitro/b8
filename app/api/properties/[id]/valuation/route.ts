@@ -8,13 +8,35 @@ import type { ApiResponse } from '@/shared/types';
 // re-entry is meant to build the series, not overwrite last quarter's number.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { value } = await req.json();
+  const { value, valued_at } = await req.json();
 
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return Response.json(
       { success: false, error: { code: 'INVALID_INPUT', message: 'value must be a number' } } satisfies ApiResponse<never>,
       { status: 400 }
     );
+  }
+
+  // Backdating is the point, not an edge case: values are entered by hand every few months, so
+  // the series only means anything if "what it was worth in Q2" can be recorded in Q3. Omitting
+  // valued_at falls back to the column's NOW() default.
+  let valuedAt: string | null = null;
+  if (valued_at !== undefined && valued_at !== null && valued_at !== '') {
+    if (typeof valued_at !== 'string' || Number.isNaN(new Date(valued_at).getTime())) {
+      return Response.json(
+        { success: false, error: { code: 'INVALID_INPUT', message: 'valued_at must be a valid date' } } satisfies ApiResponse<never>,
+        { status: 400 }
+      );
+    }
+    // A future valuation is always a typo (a mistyped year), and it would sit at the right edge
+    // of the chart dragging the axis with it — rejecting beats silently charting it.
+    if (new Date(valued_at).getTime() > Date.now()) {
+      return Response.json(
+        { success: false, error: { code: 'INVALID_INPUT', message: 'Valuation date cannot be in the future' } } satisfies ApiResponse<never>,
+        { status: 400 }
+      );
+    }
+    valuedAt = valued_at;
   }
 
   // Unlike the accounts valuation route, there's no liability variant to guard against here —
@@ -34,9 +56,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     );
   }
 
+  // COALESCE so an omitted date takes the column default rather than being written as NULL,
+  // which the NOT NULL constraint would reject.
   await db.query(
-    `INSERT INTO property_valuations (property_id, value, source) VALUES ($1, $2, 'manual')`,
-    [id, roundCents(value)]
+    `INSERT INTO property_valuations (property_id, value, source, valued_at)
+     VALUES ($1, $2, 'manual', COALESCE($3::timestamptz, NOW()))`,
+    [id, roundCents(value), valuedAt]
   );
 
   return Response.json({ success: true, data: null } satisfies ApiResponse<null>, { status: 201 });
