@@ -25,11 +25,18 @@ export default function AccountLandscapeToggle({ accountId, current }: Props) {
   }
 
   return (
+    // Tinted to match the row's landscape accent bar, so the grouping is scannable down the
+    // column instead of needing the label read on every row.
     <select
       value={value}
       onChange={handleChange}
       disabled={saving}
-      className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-600 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-slate-400"
+      title="Which landscape this account belongs to"
+      className={`w-full text-xs rounded-lg pl-2 pr-1 py-1.5 border disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-slate-400 cursor-pointer ${
+        value === 'operational'
+          ? 'bg-blue-50 text-blue-700 border-blue-100'
+          : 'bg-violet-50 text-violet-700 border-violet-100'
+      }`}
     >
       <option value="operational">Operational</option>
       <option value="capital">Capital</option>

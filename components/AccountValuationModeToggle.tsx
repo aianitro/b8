@@ -40,12 +40,21 @@ export default function AccountValuationModeToggle({ accountId, mode, isLiabilit
   }
 
   return (
+    // Neutral while ledger (the default, and true of most accounts) and tinted once it isn't,
+    // so the handful of valuation-mode accounts stand out from a long list of cash ones —
+    // liabilities in red because they subtract from net worth.
     <select
       value={value}
       onChange={handleChange}
       disabled={saving}
-      title="How this account's balance is determined"
-      className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white text-slate-600 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-slate-400"
+      title="How this account's balance is determined: summed from transactions (ledger), or the latest recorded valuation"
+      className={`w-full text-xs rounded-lg pl-2 pr-1 py-1.5 border disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-slate-400 cursor-pointer ${
+        value === 'ledger'
+          ? 'bg-white text-slate-500 border-slate-200'
+          : value === 'liability'
+            ? 'bg-red-50 text-red-700 border-red-100'
+            : 'bg-emerald-50 text-emerald-700 border-emerald-100'
+      }`}
     >
       <option value="ledger">Ledger</option>
       <option value="asset">Valuation (asset)</option>

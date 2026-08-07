@@ -2,9 +2,13 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Eye, EyeOff } from 'lucide-react';
 
 interface Props { accountId: string; current: boolean; }
 
+// Icon-only. The previous switch-plus-"Tracking"/"Hidden"-label cost ~90px in every row, which
+// the accounts list can't spare now that it also carries a balance-mode and a landscape
+// control. An eye is the conventional show/hide affordance, and the column header names it.
 export default function AccountTrackingToggle({ accountId, current }: Props) {
   const router = useRouter();
   const [tracked, setTracked] = useState(current);
@@ -24,16 +28,17 @@ export default function AccountTrackingToggle({ accountId, current }: Props) {
   }
 
   return (
-    <label className="flex items-center gap-2 cursor-pointer select-none" title={tracked ? 'Tracking transactions' : 'Transactions hidden from budget'}>
-      <div
-        onClick={toggle}
-        className={`relative w-8 h-4.5 rounded-full transition-colors ${saving ? 'opacity-50' : ''} ${tracked ? 'bg-slate-700' : 'bg-slate-200'}`}
-      >
-        <div className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white shadow-sm transition-transform ${tracked ? 'translate-x-4' : 'translate-x-0.5'}`} />
-      </div>
-      <span className={`text-xs font-medium ${tracked ? 'text-slate-600' : 'text-slate-400'}`}>
-        {tracked ? 'Tracking' : 'Hidden'}
-      </span>
-    </label>
+    <button
+      onClick={toggle}
+      disabled={saving}
+      title={tracked ? 'Tracked — included in budgets and dashboard' : 'Hidden from budgets and dashboard'}
+      aria-label={tracked ? 'Tracked' : 'Hidden'}
+      aria-pressed={tracked}
+      className={`mx-auto flex items-center justify-center w-7 h-7 rounded-lg transition-colors disabled:opacity-40 ${
+        tracked ? 'text-slate-600 hover:bg-slate-100' : 'text-slate-300 hover:bg-slate-100 hover:text-slate-400'
+      }`}
+    >
+      {tracked ? <Eye size={14} /> : <EyeOff size={14} />}
+    </button>
   );
 }
