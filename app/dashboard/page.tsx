@@ -71,8 +71,17 @@ async function getNetWorth(): Promise<{
   const currentMonth = new Date().getMonth();
 
   const [accountsRes, netRes, balancesRes, valuationsRes] = await Promise.all([
+    // Valuation-mode accounts count toward net worth even when untracked. track_transactions
+    // means "keep this account's transactions out of budgets and dashboard totals" — for a
+    // ledger account that legitimately excludes it, because its balance IS its transactions.
+    // A valuation account's balance comes from account_valuations instead, so gating it on a
+    // transactions flag was a category error: switching off a mortgage to keep its payments
+    // out of the budget silently deleted the whole liability from net worth. This also brings
+    // the dashboard in line with /properties, which already nets linked mortgages without
+    // consulting track_transactions.
     db.query<{ id: string; landscape: string; valuation_mode: string; is_liability: boolean }>(
-      'SELECT id, landscape, valuation_mode, is_liability FROM accounts WHERE track_transactions = TRUE'
+      `SELECT id, landscape, valuation_mode, is_liability FROM accounts
+        WHERE track_transactions = TRUE OR valuation_mode = 'valuation'`
     ),
     db.query<{ account_id: string; month: number; net: string }>(`
       SELECT t.account_id,
