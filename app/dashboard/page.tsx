@@ -378,10 +378,15 @@ export default async function DashboardPage() {
         </span>
       </div>
 
-      {/* Net Worth — the one hero number (Copilot/Empower's "single primary figure" pattern),
-          everything else on this page is supporting detail below it. */}
+      {/* Tracked Cash Flow — the one hero number (Copilot/Empower's "single primary figure"
+          pattern), everything else on this page is supporting detail below it.
+          Deliberately NOT labeled "Net Worth": getNetWorth() below is a flow-derived ledger
+          balance (beginning balance + Σ transactions), which is correct for operational
+          accounts but structurally can't represent market-value assets (brokerage, 401k),
+          real estate, or amortizing mortgages — see ROADMAP.md Phase 0. Until the
+          valuation-based model lands, this card must not claim to be net worth. */}
       <div className="bg-slate-900 rounded-2xl shadow-sm p-8 mb-6">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Net Worth</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Tracked Cash Flow</p>
         <p className={`text-5xl font-bold mt-2 font-mono ${netWorth.total < 0 ? 'text-red-400' : 'text-white'}`}>
           {fmt(netWorth.total)}
         </p>
@@ -449,9 +454,9 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* Year detail — "This Year" and the Net Worth hero above already give the headline
-          numbers; these round out the annual picture (budget ceiling, remaining, uncategorized)
-          without repeating them. */}
+      {/* Year detail — "This Year" and the Tracked Cash Flow hero above already give the
+          headline numbers; these round out the annual picture (budget ceiling, remaining,
+          uncategorized) without repeating them. */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         <KpiCard label="Annual Budget" value={fmt(stats.budget)} />
         <KpiCard
