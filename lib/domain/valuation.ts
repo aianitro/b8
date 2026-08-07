@@ -4,10 +4,10 @@
 // shell (querying accounts/ledger balances/account_valuations) lives at the call site, same
 // split as lib/plaidMatch.ts and lib/budgetMath.ts.
 
-import type { Landscape } from '../../shared/types';
+import type { Landscape, ValuationMode } from '../../shared/types';
 import { roundCents } from '../budgetMath';
 
-export type ValuationMode = 'ledger' | 'valuation';
+export type { ValuationMode };
 
 export interface AccountRegime {
   id: string;

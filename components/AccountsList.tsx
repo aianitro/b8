@@ -7,6 +7,8 @@ import AccountTypeEdit from './AccountTypeEdit';
 import AccountBankEdit from './AccountBankEdit';
 import AccountTrackingToggle from './AccountTrackingToggle';
 import AccountLandscapeToggle from './AccountLandscapeToggle';
+import AccountValuationModeToggle from './AccountValuationModeToggle';
+import AccountValuationEdit from './AccountValuationEdit';
 import AccountDeleteButton from './AccountDeleteButton';
 import RelativeTime from './RelativeTime';
 import type { Account } from '@/shared/types';
@@ -17,9 +19,11 @@ interface Props {
   operational: Account[];
   capital: Account[];
   txnCounts: Record<string, number>;
+  /** Latest valuation per account id; absent means never valued. */
+  valuations: Record<string, number>;
 }
 
-export default function AccountsList({ operational, capital, txnCounts }: Props) {
+export default function AccountsList({ operational, capital, txnCounts, valuations }: Props) {
   const [operationalOrder, setOperationalOrder] = useState<Account[]>(operational);
   const [capitalOrder, setCapitalOrder] = useState<Account[]>(capital);
   const [dragOver, setDragOver] = useState<string | null>(null); // account id
@@ -87,11 +91,11 @@ export default function AccountsList({ operational, capital, txnCounts }: Props)
   return (
     <>
       <Group
-        title="Operational" items={operationalOrder} section="operational" dragOver={dragOver} txnCounts={txnCounts}
+        title="Operational" items={operationalOrder} section="operational" dragOver={dragOver} txnCounts={txnCounts} valuations={valuations}
         onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onDragEnd={onDragEnd}
       />
       <Group
-        title="Capital" items={capitalOrder} section="capital" dragOver={dragOver} txnCounts={txnCounts}
+        title="Capital" items={capitalOrder} section="capital" dragOver={dragOver} txnCounts={txnCounts} valuations={valuations}
         onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onDragEnd={onDragEnd}
       />
     </>
@@ -99,13 +103,14 @@ export default function AccountsList({ operational, capital, txnCounts }: Props)
 }
 
 function Group({
-  title, items, section, dragOver, txnCounts, onDragStart, onDragOver, onDrop, onDragEnd,
+  title, items, section, dragOver, txnCounts, valuations, onDragStart, onDragOver, onDrop, onDragEnd,
 }: {
   title: string;
   items: Account[];
   section: Section;
   dragOver: string | null;
   txnCounts: Record<string, number>;
+  valuations: Record<string, number>;
   onDragStart: (section: Section, id: string) => void;
   onDragOver: (e: React.DragEvent, id: string) => void;
   onDrop: (section: Section, targetId: string) => void;
@@ -166,7 +171,15 @@ function Group({
                   </a>
                 </div>
               )}
+              {a.valuation_mode === 'valuation' && (
+                <AccountValuationEdit
+                  accountId={a.id}
+                  current={valuations[a.id] ?? null}
+                  isLiability={a.is_liability}
+                />
+              )}
               <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
+              <AccountValuationModeToggle accountId={a.id} mode={a.valuation_mode} isLiability={a.is_liability} />
               <AccountLandscapeToggle accountId={a.id} current={a.landscape} />
               <AccountDeleteButton accountId={a.id} accountName={a.name} />
             </div>

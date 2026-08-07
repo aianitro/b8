@@ -10,10 +10,22 @@ async function getAccounts(): Promise<Account[]> {
   const result = await db.query<Account>(
     `SELECT id, name, type, subtype, landscape, track_transactions, bank,
             (access_token IS NULL) AS is_manual,
-            last_synced_at
+            last_synced_at, valuation_mode, is_liability
      FROM accounts ORDER BY landscape, sort_order, created_at`
   );
   return result.rows;
+}
+
+// Latest valuation per account, for the inline value shown on valuation-mode rows. Mirrors
+// lib/domain/valuation.ts's "latest wins" rule, pushed into SQL since the page only needs the
+// current number rather than the whole history.
+async function getLatestValuations(): Promise<Map<string, number>> {
+  const result = await db.query<{ account_id: string; value: string }>(
+    `SELECT DISTINCT ON (account_id) account_id, value
+       FROM account_valuations
+      ORDER BY account_id, valued_at DESC`
+  );
+  return new Map(result.rows.map((r) => [r.account_id, Number(r.value)]));
 }
 
 async function getTxnCounts(): Promise<Map<string, number>> {
@@ -24,7 +36,9 @@ async function getTxnCounts(): Promise<Map<string, number>> {
 }
 
 export default async function AccountsPage() {
-  const [accounts, txnCounts] = await Promise.all([getAccounts(), getTxnCounts()]);
+  const [accounts, txnCounts, latestValuations] = await Promise.all([
+    getAccounts(), getTxnCounts(), getLatestValuations(),
+  ]);
   const operational = accounts.filter((a) => a.landscape === 'operational');
   const capital     = accounts.filter((a) => a.landscape === 'capital');
   const plaidCount  = accounts.filter((a) => !a.is_manual).length;
@@ -55,7 +69,12 @@ export default async function AccountsPage() {
           <p className="text-slate-400 text-sm">No accounts yet. Connect via Plaid or add one manually.</p>
         </div>
       ) : (
-        <AccountsList operational={operational} capital={capital} txnCounts={txnCountsObj} />
+        <AccountsList
+          operational={operational}
+          capital={capital}
+          txnCounts={txnCountsObj}
+          valuations={Object.fromEntries(latestValuations)}
+        />
       )}
 
       {plaidCount > 0 && <SyncHealthCard />}

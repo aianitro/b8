@@ -1,12 +1,13 @@
 import { NextRequest } from 'next/server';
 import db from '@/lib/db';
-import type { ApiResponse, Landscape } from '@/shared/types';
+import type { ApiResponse, Landscape, ValuationMode } from '@/shared/types';
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body: {
     landscape?: Landscape; track_transactions?: boolean; bank?: string; name?: string;
-    type?: string; subtype?: string | null; property_id?: number | null;
+    type?: string; subtype?: string | null;
+    valuation_mode?: ValuationMode; is_liability?: boolean; property_id?: number | null;
   } = await req.json();
 
   if ('landscape' in body) {
@@ -50,6 +51,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     await db.query('UPDATE accounts SET type = $1, subtype = $2 WHERE id = $3', [type, body.subtype ?? null, id]);
   }
 
+  // Kept as two independent fields rather than one combined enum, even though the UI presents
+  // them as a single three-way choice: is_liability is meaningful on its own, and only
+  // computeNetWorth()'s valuation branch currently chooses to act on it.
+  if ('valuation_mode' in body) {
+    const { valuation_mode } = body;
+    if (valuation_mode !== 'ledger' && valuation_mode !== 'valuation') {
+      return Response.json(
+        { success: false, error: { code: 'INVALID_INPUT', message: 'valuation_mode must be ledger or valuation' } } satisfies ApiResponse<never>,
+        { status: 400 }
+      );
+    }
+    await db.query('UPDATE accounts SET valuation_mode = $1 WHERE id = $2', [valuation_mode, id]);
+  }
+
+  if ('is_liability' in body) {
+    if (typeof body.is_liability !== 'boolean') {
+      return Response.json(
+        { success: false, error: { code: 'INVALID_INPUT', message: 'is_liability must be a boolean' } } satisfies ApiResponse<never>,
+        { status: 400 }
+      );
+    }
+    await db.query('UPDATE accounts SET is_liability = $1 WHERE id = $2', [body.is_liability, id]);
+  }
+
   // Links (or clears, via null) which property this account's mortgage is secured against —
   // see lib/domain/property.ts for the equity computation this feeds. No is_liability check
   // here deliberately: the UI scopes the selector to liability accounts today, but the FK
@@ -85,7 +110,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     );
   }
 
+  // account_valuations has no ON DELETE CASCADE (deliberately — valuation history is not
+  // something to drop by accident), so it has to be cleared explicitly here or the delete
+  // below fails the FK. Same reason account_balances is cleared above.
   await db.query('DELETE FROM account_balances WHERE account_id = $1', [id]);
+  await db.query('DELETE FROM account_valuations WHERE account_id = $1', [id]);
   await db.query('DELETE FROM accounts WHERE id = $1', [id]);
 
   return Response.json({ success: true, data: null } satisfies ApiResponse<null>);
