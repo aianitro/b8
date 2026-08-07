@@ -47,6 +47,39 @@ CREATE TABLE IF NOT EXISTS account_valuations (
 
 CREATE INDEX IF NOT EXISTS idx_account_valuations_account_id ON account_valuations(account_id, valued_at DESC);
 
+-- Real estate as a first-class capital asset — deliberately its own entity, not a shadow
+-- "account": a property has no Plaid id or track_transactions/cursor semantics, and (unlike a
+-- brokerage) two independent things move over time — its market value and, separately, the
+-- mortgage balance secured against it (accounts.property_id below).
+CREATE TABLE IF NOT EXISTS properties (
+  id             SERIAL PRIMARY KEY,
+  nickname       TEXT NOT NULL,
+  address        TEXT,
+  type           TEXT NOT NULL CHECK (type IN ('primary', 'rental')),
+  purchase_price NUMERIC(14, 2),
+  purchase_date  DATE,
+  cost_basis     NUMERIC(14, 2),  -- starts at purchase_price; bumped manually for capital improvements — no separate improvements ledger yet
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Same append-only shape as account_valuations. 'source' has only one live value today — a
+-- property's market value has no Plaid-sourced counterpart — kept as a CHECK (not a narrower
+-- type) so an API source (Zillow-shaped) can slot in later as a one-line constraint change.
+CREATE TABLE IF NOT EXISTS property_valuations (
+  id          SERIAL PRIMARY KEY,
+  property_id INT NOT NULL REFERENCES properties(id) ON UPDATE CASCADE,
+  value       NUMERIC(14, 2) NOT NULL,
+  source      TEXT NOT NULL CHECK (source IN ('manual')),
+  valued_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_property_valuations_property_id ON property_valuations(property_id, valued_at DESC);
+
+-- Links a mortgage LIABILITY account to the property it's secured against, so per-property
+-- equity = property_valuations.latest − this account's latest account_valuations balance.
+-- Nullable: most accounts (checking, brokerages, unrelated liabilities) have no property.
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS property_id INT REFERENCES properties(id) ON UPDATE CASCADE;
+
 -- Budget categories with annual allocations
 CREATE TABLE IF NOT EXISTS budget_categories (
   id                    SERIAL PRIMARY KEY,

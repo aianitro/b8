@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, PieChart, Landmark, ArrowLeftRight, Zap,
-  Tag, Building2, Sparkles, Upload,
+  Tag, Building2, Home, Sparkles, Upload,
 } from 'lucide-react';
 
 const NAV = [
@@ -15,6 +15,7 @@ const NAV = [
   { href: '/rules',        label: 'Rules',         icon: Zap },
   { href: '/categories',   label: 'Categories',    icon: Tag },
   { href: '/accounts',     label: 'Accounts',      icon: Building2 },
+  { href: '/properties',   label: 'Properties',    icon: Home },
   { href: '/import',       label: 'Import CSV',    icon: Upload },
 ];
 
