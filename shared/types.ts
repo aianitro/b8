@@ -5,6 +5,18 @@ export type Landscape = 'operational' | 'capital';
 // real estate, and amortizing liabilities, which have no meaningful transaction-sum balance.
 export type ValuationMode = 'ledger' | 'valuation';
 
+export type PropertyType = 'primary' | 'rental';
+
+export interface Property {
+  id: number;
+  nickname: string;
+  address: string | null;
+  type: PropertyType;
+  purchase_price: number | null;
+  purchase_date: string | null;
+  cost_basis: number | null;
+}
+
 export interface Account {
   id: string;
   name: string;
@@ -17,6 +29,7 @@ export interface Account {
   last_synced_at: string | null;
   valuation_mode: ValuationMode;
   is_liability: boolean;
+  property_id: number | null;
 }
 
 export interface BudgetCategory {
