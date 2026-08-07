@@ -21,6 +21,10 @@ Built as a hobby project to get hands-on with a production-grade Plaid integrati
 - Anthropic SDK (tool-use agent loop)
 - Tailwind CSS
 
+## API versioning
+
+Not versioned today — every `/api/*` route is called only by this app's own frontend, not by any consumer outside this repo, so there's no compatibility contract to protect yet. If that changes (a public MCP server, a mobile client, anything external depending on response shapes), the convention is an `/api/v1/` prefix on the routes exposed to that consumer, added at that point rather than pre-emptively; the existing unprefixed `/api/*` routes stay as-is as the internal-only surface.
+
 ## Running locally
 
 This is a single-user, self-hosted app — it expects to be run for one person's own accounts, not deployed as a multi-tenant service.
