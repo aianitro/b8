@@ -1,5 +1,33 @@
 import { describe, it, expect } from 'vitest';
-import { computePropertyEquity, latestValuationByProperty, valueAsOf, type Property } from './property';
+import { computePropertyEquity, latestValuationByProperty, toDateInputValue, valueAsOf, type Property } from './property';
+
+describe('toDateInputValue', () => {
+  it('formats a Date as YYYY-MM-DD from its local components', () => {
+    // pg hands back a DATE as local midnight. Reading local parts must round-trip the same
+    // calendar day the database holds, at any machine timezone.
+    expect(toDateInputValue(new Date(2021, 5, 1))).toBe('2021-06-01');
+  });
+
+  it('zero-pads single-digit months and days', () => {
+    expect(toDateInputValue(new Date(2024, 0, 5))).toBe('2024-01-05');
+  });
+
+  it('does not shift the day the way toISOString() would at a UTC+ offset', () => {
+    // Local midnight on 2021-06-01 is 2021-05-31T18:30Z at UTC+5:30 — toISOString().slice(0,10)
+    // would report the 31st. This must still say the 1st.
+    const localMidnight = new Date(2021, 5, 1, 0, 0, 0);
+    expect(toDateInputValue(localMidnight)).toBe('2021-06-01');
+    expect(toDateInputValue(localMidnight).slice(8, 10)).toBe('01');
+  });
+
+  it('passes a string through, trimmed to the date portion', () => {
+    expect(toDateInputValue('2021-06-01T00:00:00Z')).toBe('2021-06-01');
+  });
+
+  it('returns empty string for null, which is what an empty date input wants', () => {
+    expect(toDateInputValue(null)).toBe('');
+  });
+});
 
 describe('valueAsOf', () => {
   const series = [

@@ -4,21 +4,35 @@ import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import db from '@/lib/db';
 import AddPropertyForm from '@/components/AddPropertyForm';
-import { computePropertyEquity, latestValuationByProperty } from '@/lib/domain/property';
+import { computePropertyEquity, latestValuationByProperty, toDateInputValue } from '@/lib/domain/property';
 import { latestValuationByAccount } from '@/lib/domain/valuation';
-import type { Property } from '@/shared/types';
+import type { Property, PropertyType } from '@/shared/types';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 
 interface MortgageAccount { id: string; name: string; propertyId: number | null; }
 
+// NUMERIC comes back from node-postgres as a string and DATE as a Date, neither matching the
+// Property interface — mapped rather than cast so `fmt(purchase_price)` gets a real number.
+// Same conversion as app/properties/[id]/page.tsx.
 async function getProperties(): Promise<Property[]> {
-  const result = await db.query<Property>(
+  const result = await db.query<{
+    id: number; nickname: string; address: string | null; type: PropertyType;
+    purchase_price: string | null; purchase_date: Date | null; cost_basis: string | null;
+  }>(
     `SELECT id, nickname, address, type, purchase_price, purchase_date, cost_basis
        FROM properties ORDER BY type, nickname`
   );
-  return result.rows;
+  return result.rows.map((r) => ({
+    id: r.id,
+    nickname: r.nickname,
+    address: r.address,
+    type: r.type,
+    purchase_price: r.purchase_price === null ? null : Number(r.purchase_price),
+    purchase_date: r.purchase_date === null ? null : toDateInputValue(r.purchase_date),
+    cost_basis: r.cost_basis === null ? null : Number(r.cost_basis),
+  }));
 }
 
 // Liability, valuation-mode accounts are the only ones a mortgage link makes sense for — see
@@ -35,7 +49,7 @@ async function getMortgageAccounts(): Promise<MortgageAccount[]> {
 }
 
 async function getLatestPropertyValuations(): Promise<Map<number, number>> {
-  const result = await db.query<{ property_id: number; value: string; valued_at: string }>(
+  const result = await db.query<{ property_id: number; value: string; valued_at: Date }>(
     'SELECT property_id, value, valued_at FROM property_valuations'
   );
   return latestValuationByProperty(

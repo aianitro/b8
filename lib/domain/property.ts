@@ -35,6 +35,22 @@ export function latestValuationByProperty(rows: PropertyValuationRow[]): Map<num
 }
 
 /**
+ * Formats a Postgres DATE for an `<input type="date">`, which requires exactly `YYYY-MM-DD`.
+ *
+ * node-postgres returns a DATE column as a JS Date at **local** midnight, not a string — so
+ * `.slice(0, 10)` throws, and `.toISOString().slice(0, 10)` is subtly worse: it converts to UTC
+ * first, so at any UTC+ offset local midnight lands on the previous UTC day and every date
+ * silently shifts a day earlier. Reading the local components sidesteps both.
+ */
+export function toDateInputValue(d: Date | string | null): string {
+  if (d === null) return '';
+  if (typeof d === 'string') return d.slice(0, 10);
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+/**
  * Step-interpolated lookup: the most recent observation at or before `asOf`, or null if the
  * series hadn't started yet.
  *

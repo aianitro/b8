@@ -7,29 +7,55 @@ import db from '@/lib/db';
 import PropertyEditForm from '@/components/PropertyEditForm';
 import PropertyValuationHistory, { type ValuationRow } from '@/components/PropertyValuationHistory';
 import PropertyValueChart, { type PropertyValuePoint } from '@/components/charts/PropertyValueChart';
-import { valueAsOf } from '@/lib/domain/property';
-import type { Property } from '@/shared/types';
+import { toDateInputValue, valueAsOf } from '@/lib/domain/property';
+import type { Property, PropertyType } from '@/shared/types';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 
 interface Series { value: number; valuedAt: string }
 
+// The shapes node-postgres actually returns, which differ from the Property interface: NUMERIC
+// arrives as a string (the driver refuses to risk float precision loss) and DATE/TIMESTAMPTZ as
+// a Date. Mapping here rather than casting keeps Property honest for every consumer downstream.
+interface PropertyRow {
+  id: number;
+  nickname: string;
+  address: string | null;
+  type: PropertyType;
+  purchase_price: string | null;
+  purchase_date: Date | null;
+  cost_basis: string | null;
+}
+
+const numeric = (v: string | null): number | null => (v === null ? null : Number(v));
+
 async function getProperty(id: string): Promise<Property | null> {
-  const result = await db.query<Property>(
+  const result = await db.query<PropertyRow>(
     `SELECT id, nickname, address, type, purchase_price, purchase_date, cost_basis
        FROM properties WHERE id = $1`,
     [id]
   );
-  return result.rows[0] ?? null;
+  const r = result.rows[0];
+  if (!r) return null;
+  return {
+    id: r.id,
+    nickname: r.nickname,
+    address: r.address,
+    type: r.type,
+    purchase_price: numeric(r.purchase_price),
+    purchase_date: r.purchase_date === null ? null : toDateInputValue(r.purchase_date),
+    cost_basis: numeric(r.cost_basis),
+  };
 }
 
 async function getValuations(id: string): Promise<ValuationRow[]> {
-  const result = await db.query<{ id: number; value: string; valued_at: string }>(
+  const result = await db.query<{ id: number; value: string; valued_at: Date }>(
     'SELECT id, value, valued_at FROM property_valuations WHERE property_id = $1 ORDER BY valued_at DESC',
     [id]
   );
-  return result.rows.map((r) => ({ id: r.id, value: Number(r.value), valuedAt: r.valued_at }));
+  // Serialized to ISO here so the client component receives the string its prop type promises.
+  return result.rows.map((r) => ({ id: r.id, value: Number(r.value), valuedAt: r.valued_at.toISOString() }));
 }
 
 // Every account eligible to be this property's mortgage: valuation-mode liabilities that are
@@ -47,11 +73,11 @@ async function getMortgageOptions(propertyId: string) {
 }
 
 async function getMortgageBalances(accountId: string): Promise<Series[]> {
-  const result = await db.query<{ value: string; valued_at: string }>(
+  const result = await db.query<{ value: string; valued_at: Date }>(
     'SELECT value, valued_at FROM account_valuations WHERE account_id = $1 ORDER BY valued_at',
     [accountId]
   );
-  return result.rows.map((r) => ({ value: Number(r.value), valuedAt: r.valued_at }));
+  return result.rows.map((r) => ({ value: Number(r.value), valuedAt: r.valued_at.toISOString() }));
 }
 
 export default async function PropertyDetailPage({ params }: { params: Promise<{ id: string }> }) {
