@@ -52,6 +52,8 @@ export async function findBalanceDrift(threshold = 1): Promise<DriftFinding[]> {
       ledgerBalance: (beginningByAccount.get(a.id) ?? 0) + (netByAccount.get(a.id) ?? 0),
       plaidBalance: plaid ? Number(plaid.value) : null,
       observedAt: plaid ? plaid.valued_at.toISOString() : null,
+      currentBeginningBalance: beginningByAccount.get(a.id) ?? 0,
+      hasBeginningBalance: beginningByAccount.has(a.id),
     };
   });
 

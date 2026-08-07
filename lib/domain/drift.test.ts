@@ -4,6 +4,7 @@ import { detectDrift, normalizePlaidBalance, type DriftInput } from './drift';
 const row = (over: Partial<DriftInput> = {}): DriftInput => ({
   accountId: 'a', name: 'Checking', type: 'depository',
   ledgerBalance: 1000, plaidBalance: 1000, observedAt: '2026-08-07T00:00:00Z',
+  currentBeginningBalance: 0, hasBeginningBalance: false,
   ...over,
 });
 
@@ -82,5 +83,37 @@ describe('detectDrift', () => {
   it('does not report float dust as drift', () => {
     // 0.1 + 0.2 style accumulation in the ledger sum must not surface as a finding.
     expect(detectDrift([row({ ledgerBalance: 1000.000000001 })])).toEqual([]);
+  });
+});
+
+describe('reconciliation suggestion', () => {
+  it('suggests the beginning balance that lands the ledger on the bank figure', () => {
+    // ledger = beginning + ytdNet. Beginning 0, ledger -57,249.49, bank 2,218.65
+    // => shifting the opening figure by the drift (59,468.14) makes them agree.
+    const [f] = detectDrift([row({ ledgerBalance: -57249.49, plaidBalance: 2218.65, currentBeginningBalance: 0 })]);
+    expect(f.suggestedBeginningBalance).toBe(59468.14);
+    expect(f.suggestedBeginningBalance + (f.ledgerBalance - 0)).toBeCloseTo(f.expectedBalance, 2);
+  });
+
+  it('adds the drift to a non-zero existing beginning balance rather than replacing it', () => {
+    const [f] = detectDrift([row({ ledgerBalance: 900, plaidBalance: 1000, currentBeginningBalance: 500, hasBeginningBalance: true })]);
+    expect(f.suggestedBeginningBalance).toBe(600);
+  });
+
+  it('marks an uninitialized account safe to derive', () => {
+    const [f] = detectDrift([row({ ledgerBalance: 900, hasBeginningBalance: false })]);
+    expect(f.safeToDerive).toBe(true);
+  });
+
+  it('marks an already-initialized account UNSAFE — drift there means a transaction problem', () => {
+    // Moving the opening balance to absorb this would be exactly the spreadsheet's manual
+    // `correction` row, which is what this whole feature exists to replace.
+    const [f] = detectDrift([row({ ledgerBalance: 900, currentBeginningBalance: 500, hasBeginningBalance: true })]);
+    expect(f.safeToDerive).toBe(false);
+  });
+
+  it('handles the credit-card sign convention in the suggestion too', () => {
+    const [f] = detectDrift([row({ type: 'credit', ledgerBalance: -1400, plaidBalance: 1500, currentBeginningBalance: 0 })]);
+    expect(f.suggestedBeginningBalance).toBe(-100);
   });
 });

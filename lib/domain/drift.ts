@@ -25,6 +25,10 @@ export interface DriftInput {
   /** Latest recorded plaid_balance, or null when Plaid has never reported one. */
   plaidBalance: number | null;
   observedAt: string | null;
+  /** This year's beginning balance as currently stored (0 when no row exists). */
+  currentBeginningBalance: number;
+  /** False when no account_balances row exists for the year — see `safeToDerive` below. */
+  hasBeginningBalance: boolean;
 }
 
 export interface DriftFinding {
@@ -36,6 +40,20 @@ export interface DriftFinding {
   /** expected − ledger. Positive means the ledger is short of what Plaid reports. */
   drift: number;
   observedAt: string | null;
+  /** The beginning balance that would make the ledger agree with the bank. */
+  suggestedBeginningBalance: number;
+  /**
+   * Whether reconciling by adjusting the beginning balance is legitimate here.
+   *
+   * The distinction matters, and getting it wrong would repeat the exact sin this feature
+   * exists to end. Adjusting the beginning balance assumes the transaction history is complete
+   * and infers what the start-of-year balance must have been. That is sound for an account
+   * that was never initialized — the opening figure is genuinely unknown. It is *not* sound
+   * for an account that already had one and has since diverged: there the gap is evidence of a
+   * missing, duplicated, or mis-signed transaction, and silently moving the opening balance to
+   * absorb it is precisely what the budget spreadsheet's manual `correction` rows were doing.
+   */
+  safeToDerive: boolean;
 }
 
 /** Normalizes Plaid's magnitude into the ledger's signed convention. Exported for testing. */
@@ -71,6 +89,10 @@ export function detectDrift(rows: DriftInput[], threshold = 1): DriftFinding[] {
         expectedBalance,
         drift,
         observedAt: row.observedAt,
+        // ledger = beginning + ytdNet, so shifting the opening figure by exactly the drift
+        // lands the ledger on the bank's number without touching any transaction.
+        suggestedBeginningBalance: roundCents(row.currentBeginningBalance + drift),
+        safeToDerive: !row.hasBeginningBalance,
       });
     }
   }
