@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS accounts (
   track_transactions  BOOLEAN NOT NULL DEFAULT TRUE,
   bank                TEXT,
   sort_order          INT NOT NULL DEFAULT 0,  -- manual drag-and-drop order within a landscape group on /accounts
+  valuation_mode      TEXT NOT NULL DEFAULT 'ledger' CHECK (valuation_mode IN ('ledger', 'valuation')),  -- 'ledger': balance = flow-derived (below); 'valuation': balance = latest account_valuations row
+  is_liability        BOOLEAN NOT NULL DEFAULT FALSE,  -- valuation-mode accounts only (see lib/domain/valuation.ts) — subtracted rather than added
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -30,6 +32,20 @@ CREATE TABLE IF NOT EXISTS account_balances (
   beginning_balance  NUMERIC NOT NULL DEFAULT 0,
   PRIMARY KEY (account_id, year)
 );
+
+-- Point-in-time valuations for 'valuation'-mode accounts (market-value assets, real estate,
+-- amortizing liabilities) — a flow-derived running balance is meaningless for these. Append-only:
+-- one row per observation, not an editable "current value" column, so manual quarterly entries
+-- and eventual Plaid balance pulls both just add rows; "latest" is valued_at DESC LIMIT 1.
+CREATE TABLE IF NOT EXISTS account_valuations (
+  id          SERIAL PRIMARY KEY,
+  account_id  TEXT NOT NULL REFERENCES accounts(id) ON UPDATE CASCADE,
+  value       NUMERIC(14, 2) NOT NULL,  -- always a positive magnitude; sign is derived from accounts.is_liability, not stored here
+  source      TEXT NOT NULL CHECK (source IN ('manual', 'plaid_balance', 'plaid_investments', 'derived')),
+  valued_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_valuations_account_id ON account_valuations(account_id, valued_at DESC);
 
 -- Budget categories with annual allocations
 CREATE TABLE IF NOT EXISTS budget_categories (

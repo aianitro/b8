@@ -9,6 +9,7 @@ import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts
 import NetWorthChart from '@/components/charts/NetWorthChart';
 import Sparkline from '@/components/charts/Sparkline';
 import { STATUS_CLASS, NEUTRAL_HEX, STATUS_HEX, type StatusColor } from '@/lib/chartColors';
+import { computeNetWorth, latestValuationByAccount, type AccountRegime } from '@/lib/domain/valuation';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -44,11 +45,22 @@ async function getStats() {
   };
 }
 
-// Same per-account running-balance computation as app/balances/page.tsx (beginning_balance +
-// sum of monthly net through the current month), just combined across both landscapes into one
-// total instead of one landscape at a time — no page in the app, including Balances itself,
-// otherwise shows a single combined operational + capital number. Derived from recorded
-// transactions, not a live Plaid balance pull — see db/schema.sql's account_balances comment.
+// Point-in-time total/operational/capital go through lib/domain/valuation.ts's two-regime
+// model (ROADMAP.md Phase 0): a ledger-mode account's contribution is the same running-balance
+// computation as app/balances/page.tsx (beginning_balance + sum of monthly net through the
+// current month); a valuation-mode account's contribution is its latest account_valuations row
+// instead. With zero valuation-mode accounts seeded yet, this is byte-identical to the old
+// pure-ledger sum — see lib/domain/valuation.test.ts's "matches plain summation" case.
+//
+// monthlySeries/monthlyOperational/monthlyCapital stay pure ledger-derived and untouched — the
+// trend chart they feed is deliberately left as the "operational cash flow" series it actually
+// is until §1f (net_worth_snapshots) gives it real valuation history to chart instead.
+//
+// totalBeginning (used for the YTD-change delta below) is also still pure ledger-derived —
+// valuation-mode accounts have no account_balances row, so they don't contribute to it. That's
+// a known gap once valuation accounts exist (comparing a valuation-inclusive total against a
+// ledger-only totalBeginning), acceptable until §1f's snapshot history gives YTD change a
+// proper valuation-aware basis.
 async function getNetWorth(): Promise<{
   total: number; totalBeginning: number; operational: number; capital: number; accountCount: number;
   monthlySeries: number[]; // combined running balance at the end of each elapsed month
@@ -58,8 +70,10 @@ async function getNetWorth(): Promise<{
   const year = new Date().getFullYear();
   const currentMonth = new Date().getMonth();
 
-  const [accountsRes, netRes, balancesRes] = await Promise.all([
-    db.query<{ id: string; landscape: string }>('SELECT id, landscape FROM accounts WHERE track_transactions = TRUE'),
+  const [accountsRes, netRes, balancesRes, valuationsRes] = await Promise.all([
+    db.query<{ id: string; landscape: string; valuation_mode: string; is_liability: boolean }>(
+      'SELECT id, landscape, valuation_mode, is_liability FROM accounts WHERE track_transactions = TRUE'
+    ),
     db.query<{ account_id: string; month: number; net: string }>(`
       SELECT t.account_id,
              EXTRACT(MONTH FROM t.date)::int AS month,
@@ -74,6 +88,9 @@ async function getNetWorth(): Promise<{
       'SELECT account_id, beginning_balance FROM account_balances WHERE year = $1',
       [year]
     ),
+    db.query<{ account_id: string; value: string; valued_at: string }>(
+      'SELECT account_id, value, valued_at FROM account_valuations'
+    ),
   ]);
 
   const netByAccount = new Map<string, Map<number, number>>();
@@ -82,11 +99,16 @@ async function getNetWorth(): Promise<{
     netByAccount.get(r.account_id)!.set(r.month, Number(r.net));
   }
   const beginningByAccount = new Map(balancesRes.rows.map((r) => [r.account_id, Number(r.beginning_balance)]));
+  const latestValuations = latestValuationByAccount(
+    valuationsRes.rows.map((r) => ({ accountId: r.account_id, value: Number(r.value), valuedAt: r.valued_at }))
+  );
 
-  let total = 0, totalBeginning = 0, operational = 0, capital = 0;
+  let totalBeginning = 0;
   const monthlySeries = new Array(currentMonth + 1).fill(0);
   const monthlyOperational = new Array(currentMonth + 1).fill(0);
   const monthlyCapital = new Array(currentMonth + 1).fill(0);
+  const ledgerBalances = new Map<string, number>();
+  const accountRegimes: AccountRegime[] = [];
   for (const a of accountsRes.rows) {
     const byMonth = netByAccount.get(a.id) ?? new Map();
     const beginning = beginningByAccount.get(a.id) ?? 0;
@@ -97,11 +119,18 @@ async function getNetWorth(): Promise<{
       if (a.landscape === 'operational') monthlyOperational[i] += running;
       if (a.landscape === 'capital') monthlyCapital[i] += running;
     }
-    total += running;
+    ledgerBalances.set(a.id, running);
     totalBeginning += beginning;
-    if (a.landscape === 'operational') operational += running;
-    if (a.landscape === 'capital') capital += running;
+    accountRegimes.push({
+      id: a.id,
+      landscape: a.landscape as 'operational' | 'capital',
+      valuationMode: a.valuation_mode as 'ledger' | 'valuation',
+      isLiability: a.is_liability,
+    });
   }
+
+  const { total, operational, capital } = computeNetWorth(accountRegimes, ledgerBalances, latestValuations);
+
   return {
     total, totalBeginning, operational, capital, accountCount: accountsRes.rows.length,
     monthlySeries, monthlyOperational, monthlyCapital,
