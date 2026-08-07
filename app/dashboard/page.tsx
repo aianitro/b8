@@ -9,7 +9,7 @@ import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts
 import NetWorthChart from '@/components/charts/NetWorthChart';
 import Sparkline from '@/components/charts/Sparkline';
 import { STATUS_CLASS, NEUTRAL_HEX, STATUS_HEX, type StatusColor } from '@/lib/chartColors';
-import { computeNetWorth, latestValuationByAccount, type AccountRegime } from '@/lib/domain/valuation';
+import { computeCurrentNetWorth } from '@/lib/netWorth';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -45,43 +45,21 @@ async function getStats() {
   };
 }
 
-// Point-in-time total/operational/capital go through lib/domain/valuation.ts's two-regime
-// model (ROADMAP.md Phase 0): a ledger-mode account's contribution is the same running-balance
-// computation as app/balances/page.tsx (beginning_balance + sum of monthly net through the
-// current month); a valuation-mode account's contribution is its latest account_valuations row
-// instead. With zero valuation-mode accounts seeded yet, this is byte-identical to the old
-// pure-ledger sum — see lib/domain/valuation.test.ts's "matches plain summation" case.
-//
-// monthlySeries/monthlyOperational/monthlyCapital stay pure ledger-derived and untouched — the
-// trend chart they feed is deliberately left as the "operational cash flow" series it actually
-// is until §1f (net_worth_snapshots) gives it real valuation history to chart instead.
-//
-// totalBeginning (used for the YTD-change delta below) is also still pure ledger-derived —
-// valuation-mode accounts have no account_balances row, so they don't contribute to it. That's
-// a known gap once valuation accounts exist (comparing a valuation-inclusive total against a
-// ledger-only totalBeginning), acceptable until §1f's snapshot history gives YTD change a
-// proper valuation-aware basis.
-async function getNetWorth(): Promise<{
-  total: number; totalBeginning: number; operational: number; capital: number; accountCount: number;
-  monthlySeries: number[]; // combined running balance at the end of each elapsed month
+// The flow-derived month-by-month series. This is genuinely a *cash flow* view — beginning
+// balance plus transactions, per landscape — and it is now labelled as such rather than
+// masquerading as net worth. Net worth itself comes from computeCurrentNetWorth() below, which
+// also folds in valuation accounts and real estate.
+async function getCashFlowSeries(): Promise<{
   monthlyOperational: number[];
   monthlyCapital: number[];
+  monthlySeries: number[];
 }> {
   const year = new Date().getFullYear();
   const currentMonth = new Date().getMonth();
 
-  const [accountsRes, netRes, balancesRes, valuationsRes] = await Promise.all([
-    // Valuation-mode accounts count toward net worth even when untracked. track_transactions
-    // means "keep this account's transactions out of budgets and dashboard totals" — for a
-    // ledger account that legitimately excludes it, because its balance IS its transactions.
-    // A valuation account's balance comes from account_valuations instead, so gating it on a
-    // transactions flag was a category error: switching off a mortgage to keep its payments
-    // out of the budget silently deleted the whole liability from net worth. This also brings
-    // the dashboard in line with /properties, which already nets linked mortgages without
-    // consulting track_transactions.
-    db.query<{ id: string; landscape: string; valuation_mode: string; is_liability: boolean }>(
-      `SELECT id, landscape, valuation_mode, is_liability FROM accounts
-        WHERE track_transactions = TRUE OR valuation_mode = 'valuation'`
+  const [accountsRes, netRes, balancesRes] = await Promise.all([
+    db.query<{ id: string; landscape: string }>(
+      'SELECT id, landscape FROM accounts WHERE track_transactions = TRUE'
     ),
     db.query<{ account_id: string; month: number; net: string }>(`
       SELECT t.account_id,
@@ -94,11 +72,7 @@ async function getNetWorth(): Promise<{
       GROUP BY t.account_id, EXTRACT(MONTH FROM t.date)::int
     `, [year]),
     db.query<{ account_id: string; beginning_balance: string }>(
-      'SELECT account_id, beginning_balance FROM account_balances WHERE year = $1',
-      [year]
-    ),
-    db.query<{ account_id: string; value: string; valued_at: string }>(
-      'SELECT account_id, value, valued_at FROM account_valuations'
+      'SELECT account_id, beginning_balance FROM account_balances WHERE year = $1', [year]
     ),
   ]);
 
@@ -108,42 +82,34 @@ async function getNetWorth(): Promise<{
     netByAccount.get(r.account_id)!.set(r.month, Number(r.net));
   }
   const beginningByAccount = new Map(balancesRes.rows.map((r) => [r.account_id, Number(r.beginning_balance)]));
-  const latestValuations = latestValuationByAccount(
-    valuationsRes.rows.map((r) => ({ accountId: r.account_id, value: Number(r.value), valuedAt: r.valued_at }))
-  );
 
-  let totalBeginning = 0;
   const monthlySeries = new Array(currentMonth + 1).fill(0);
   const monthlyOperational = new Array(currentMonth + 1).fill(0);
   const monthlyCapital = new Array(currentMonth + 1).fill(0);
-  const ledgerBalances = new Map<string, number>();
-  const accountRegimes: AccountRegime[] = [];
   for (const a of accountsRes.rows) {
     const byMonth = netByAccount.get(a.id) ?? new Map();
-    const beginning = beginningByAccount.get(a.id) ?? 0;
-    let running = beginning;
+    let running = beginningByAccount.get(a.id) ?? 0;
     for (let i = 0; i <= currentMonth; i++) {
       running += byMonth.get(i + 1) ?? 0;
       monthlySeries[i] += running;
       if (a.landscape === 'operational') monthlyOperational[i] += running;
-      if (a.landscape === 'capital') monthlyCapital[i] += running;
+      else monthlyCapital[i] += running;
     }
-    ledgerBalances.set(a.id, running);
-    totalBeginning += beginning;
-    accountRegimes.push({
-      id: a.id,
-      landscape: a.landscape as 'operational' | 'capital',
-      valuationMode: a.valuation_mode as 'ledger' | 'valuation',
-      isLiability: a.is_liability,
-    });
   }
+  return { monthlySeries, monthlyOperational, monthlyCapital };
+}
 
-  const { total, operational, capital } = computeNetWorth(accountRegimes, ledgerBalances, latestValuations);
-
-  return {
-    total, totalBeginning, operational, capital, accountCount: accountsRes.rows.length,
-    monthlySeries, monthlyOperational, monthlyCapital,
-  };
+// Recorded net-worth history. Read from net_worth_snapshots rather than recomputed per month:
+// the figure depends on how accounts were classified and which properties were valued on the
+// day, none of which can be reconstructed after the fact.
+async function getNetWorthHistory(): Promise<{ date: string; total: number }[]> {
+  const result = await db.query<{ snapshot_date: Date; total: string }>(
+    'SELECT snapshot_date, total FROM net_worth_snapshots ORDER BY snapshot_date'
+  );
+  return result.rows.map((r) => ({
+    date: r.snapshot_date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    total: Number(r.total),
+  }));
 }
 
 interface TodayStats {
@@ -367,8 +333,9 @@ function paceColor(pct: number): StatusColor {
 }
 
 export default async function DashboardPage() {
-  const [stats, netWorth, todayStats, weekStats, monthly, cashflow, categories, budgetVsActual] = await Promise.all([
-    getStats(), getNetWorth(), getTodayStats(), getWeekStats(), getMonthlySpending(), getCashFlow(), getCategoryBreakdown(), getBudgetVsActual(),
+  const [stats, netWorth, nwHistory, flow, todayStats, weekStats, monthly, cashflow, categories, budgetVsActual] = await Promise.all([
+    getStats(), computeCurrentNetWorth(), getNetWorthHistory(), getCashFlowSeries(),
+    getTodayStats(), getWeekStats(), getMonthlySpending(), getCashFlow(), getCategoryBreakdown(), getBudgetVsActual(),
   ]);
 
   const pctUsed = stats.budget > 0 ? Math.round((stats.spent / stats.budget) * 100) : 0;
@@ -389,15 +356,21 @@ export default async function DashboardPage() {
   const expectedWeekSpend = weekStats.weeklyBudgetReference * (isoDow / 7);
   const weekPacePct = expectedWeekSpend > 0 ? weekStats.spent / expectedWeekSpend : 0;
 
-  const netWorthYtdChange = netWorth.total - netWorth.totalBeginning;
+  // YTD change against the earliest snapshot recorded this year. Only shown once there is a
+  // real earlier reading to compare with — the old basis summed account_balances, which
+  // valuation accounts and properties never contribute to, so it understated the starting
+  // point by the entire capital side.
+  const firstThisYear = nwHistory[0];
+  const netWorthYtdChange = firstThisYear ? netWorth.total - firstThisYear.total : null;
+  const nwSparkline = nwHistory.map((h) => h.total);
   // Per-month total spend for the elapsed months of the year — monthly's future months are
   // already 0 (no transactions yet), so slicing to monthsElapsed drops them rather than
   // plotting a trend that flatlines to zero.
   const monthlySpendSeries = monthly.slice(0, monthsElapsed).map((m) => m.operational + m.capital);
-  const netWorthSeries = netWorth.monthlySeries.map((total, i) => ({
+  const cashFlowSeries = flow.monthlySeries.map((total, i) => ({
     month: MONTHS[i],
-    operational: netWorth.monthlyOperational[i],
-    capital: netWorth.monthlyCapital[i],
+    operational: flow.monthlyOperational[i],
+    capital: flow.monthlyCapital[i],
     total,
   }));
 
@@ -416,36 +389,60 @@ export default async function DashboardPage() {
         </span>
       </div>
 
-      {/* Tracked Cash Flow — the one hero number (Copilot/Empower's "single primary figure"
-          pattern), everything else on this page is supporting detail below it.
-          Deliberately NOT labeled "Net Worth": getNetWorth() below is a flow-derived ledger
-          balance (beginning balance + Σ transactions), which is correct for operational
-          accounts but structurally can't represent market-value assets (brokerage, 401k),
-          real estate, or amortizing mortgages — see ROADMAP.md Phase 0. Until the
-          valuation-based model lands, this card must not claim to be net worth. */}
+      {/* Net Worth — the one hero number (Copilot/Empower's "single primary figure" pattern).
+          It reclaims the name here, having carried the placeholder "Tracked Cash Flow" since
+          Phase 0 step 1: the figure now combines ledger balances, valuation-mode accounts, and
+          real-estate equity, so it is finally the thing it says it is. The four components
+          below are non-overlapping and sum to this total — see lib/domain/netWorth.ts. */}
       <div className="bg-slate-900 rounded-2xl shadow-sm p-8 mb-6">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Tracked Cash Flow</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Net Worth</p>
         <p className={`text-5xl font-bold mt-2 font-mono ${netWorth.total < 0 ? 'text-red-400' : 'text-white'}`}>
           {fmt(netWorth.total)}
         </p>
         <div className="flex items-center gap-2 mt-3 text-sm">
-          <span className={`font-mono font-medium ${netWorthYtdChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {netWorthYtdChange >= 0 ? '+' : ''}{fmt(netWorthYtdChange)} YTD
-          </span>
-          <span className="text-slate-600">·</span>
-          <span className="text-slate-500">as of last sync</span>
+          {netWorthYtdChange !== null ? (
+            <>
+              <span className={`font-mono font-medium ${netWorthYtdChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {netWorthYtdChange >= 0 ? '+' : ''}{fmt(netWorthYtdChange)}
+              </span>
+              <span className="text-slate-500">since {firstThisYear.date}</span>
+            </>
+          ) : (
+            // No delta invented from a single reading — the previous card computed one against
+            // a beginning-balance sum that valuation accounts never contributed to.
+            <span className="text-slate-500">First recorded reading — a trend appears once more are collected</span>
+          )}
         </div>
-        <div className="mt-3 -mx-1">
-          <Sparkline data={netWorth.monthlySeries} color={netWorthYtdChange >= 0 ? STATUS_HEX.good : STATUS_HEX.over} />
-        </div>
+        {nwSparkline.length >= 2 && (
+          <div className="mt-3 -mx-1">
+            <Sparkline
+              data={nwSparkline}
+              color={(netWorthYtdChange ?? 0) >= 0 ? STATUS_HEX.good : STATUS_HEX.over}
+            />
+          </div>
+        )}
         <div className="flex items-center gap-6 mt-2 pt-4 border-t border-slate-800 text-xs">
           <span className="text-slate-500">
             Operational <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.operational)}</span>
           </span>
           <span className="text-slate-500">
-            Capital <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.capital)}</span>
+            Capital <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.capitalFinancial)}</span>
           </span>
-          <span className="text-slate-600 ml-auto">{netWorth.accountCount} accounts</span>
+          <span className="text-slate-500">
+            Real estate <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.realEstateEquity)}</span>
+          </span>
+          {netWorth.liabilities !== 0 && (
+            <span className="text-slate-500">
+              Other debt <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.liabilities)}</span>
+            </span>
+          )}
+          {/* Silently dropping an unvalued property would overstate net worth by whatever the
+              house is worth, so it is stated rather than hidden. */}
+          {netWorth.unvaluedPropertyIds.length > 0 && (
+            <span className="text-amber-400/80 ml-auto">
+              {netWorth.unvaluedPropertyIds.length} propert{netWorth.unvaluedPropertyIds.length === 1 ? 'y' : 'ies'} unvalued — excluded
+            </span>
+          )}
         </div>
       </div>
 
@@ -492,7 +489,7 @@ export default async function DashboardPage() {
         />
       </div>
 
-      {/* Year detail — "This Year" and the Tracked Cash Flow hero above already give the
+      {/* Year detail — "This Year" and the Net Worth hero above already give the
           headline numbers; these round out the annual picture (budget ceiling, remaining,
           uncategorized) without repeating them. */}
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -539,7 +536,7 @@ export default async function DashboardPage() {
 
       {/* Charts */}
       <div className="space-y-6">
-        <NetWorthChart data={netWorthSeries} />
+        <NetWorthChart data={cashFlowSeries} />
         <MonthlySpendingChart data={monthly} />
         <div className="grid grid-cols-2 gap-6">
           <CategoryDonutChart data={categories} />

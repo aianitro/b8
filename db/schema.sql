@@ -170,3 +170,21 @@ CREATE TABLE IF NOT EXISTS budget_settings (
   beginning_balance   NUMERIC NOT NULL DEFAULT 0,
   PRIMARY KEY (year, landscape)
 );
+
+-- Net worth over time. Unlike account_valuations/property_valuations, which record observations
+-- of a single thing, this stores the *computed* statement at a point in time. Stored rather than
+-- recomputed because it can't be reconstructed later: the calculation depends on which accounts
+-- existed and how they were classified that day, so deleting or reclassifying an account would
+-- silently rewrite history if the chart derived it on the fly. Components are non-overlapping and
+-- sum to total (lib/domain/netWorth.ts) — a property-linked mortgage lives in real_estate_equity
+-- and is deliberately absent from liabilities so the same debt is never counted twice.
+-- snapshot_date is the PK: re-running on the same day updates in place instead of duplicating.
+CREATE TABLE IF NOT EXISTS net_worth_snapshots (
+  snapshot_date      DATE PRIMARY KEY,
+  operational        NUMERIC(14, 2) NOT NULL,
+  capital_financial  NUMERIC(14, 2) NOT NULL,
+  real_estate_equity NUMERIC(14, 2) NOT NULL,
+  liabilities        NUMERIC(14, 2) NOT NULL,
+  total              NUMERIC(14, 2) NOT NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
