@@ -10,6 +10,8 @@ import NetWorthChart from '@/components/charts/NetWorthChart';
 import Sparkline from '@/components/charts/Sparkline';
 import { STATUS_CLASS, NEUTRAL_HEX, STATUS_HEX, type StatusColor } from '@/lib/chartColors';
 import { computeCurrentNetWorth } from '@/lib/netWorth';
+import { findBalanceDrift } from '@/lib/drift';
+import DriftAlertCard from '@/components/DriftAlertCard';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -333,10 +335,14 @@ function paceColor(pct: number): StatusColor {
 }
 
 export default async function DashboardPage() {
+  // Kicked off alongside the rest rather than awaited after, so the reconciliation check
+  // doesn't add a serial round trip to page load.
+  const driftPromise = findBalanceDrift();
   const [stats, netWorth, nwHistory, flow, todayStats, weekStats, monthly, cashflow, categories, budgetVsActual] = await Promise.all([
     getStats(), computeCurrentNetWorth(), getNetWorthHistory(), getCashFlowSeries(),
     getTodayStats(), getWeekStats(), getMonthlySpending(), getCashFlow(), getCategoryBreakdown(), getBudgetVsActual(),
   ]);
+  const driftFindings = await driftPromise;
 
   const pctUsed = stats.budget > 0 ? Math.round((stats.spent / stats.budget) * 100) : 0;
   const monthsElapsed = new Date().getMonth() + 1;
@@ -388,6 +394,10 @@ export default async function DashboardPage() {
           {onTrack ? '↓ Under pace' : '↑ Over pace'} · Month {monthsElapsed}/12
         </span>
       </div>
+
+      {/* Rendered above the hero deliberately: if a balance doesn't reconcile, that's context
+          you want before reading the headline figure, not after. */}
+      <DriftAlertCard findings={driftFindings} />
 
       {/* Net Worth — the one hero number (Copilot/Empower's "single primary figure" pattern).
           It reclaims the name here, having carried the placeholder "Tracked Cash Flow" since
