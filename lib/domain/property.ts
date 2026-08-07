@@ -34,6 +34,45 @@ export function latestValuationByProperty(rows: PropertyValuationRow[]): Map<num
   return new Map([...latest].map(([propertyId, v]) => [propertyId, v.value]));
 }
 
+/**
+ * Formats a Postgres DATE for an `<input type="date">`, which requires exactly `YYYY-MM-DD`.
+ *
+ * node-postgres returns a DATE column as a JS Date at **local** midnight, not a string — so
+ * `.slice(0, 10)` throws, and `.toISOString().slice(0, 10)` is subtly worse: it converts to UTC
+ * first, so at any UTC+ offset local midnight lands on the previous UTC day and every date
+ * silently shifts a day earlier. Reading the local components sidesteps both.
+ */
+export function toDateInputValue(d: Date | string | null): string {
+  if (d === null) return '';
+  if (typeof d === 'string') return d.slice(0, 10);
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * Step-interpolated lookup: the most recent observation at or before `asOf`, or null if the
+ * series hadn't started yet.
+ *
+ * Needed because a property's value and its mortgage's balance are recorded on unrelated
+ * schedules — you might type in a market value in March and a mortgage balance in July. To
+ * chart equity as the gap between them, each property valuation needs the mortgage balance
+ * that was current *on that date*, not the newest one overall (which would retroactively
+ * apply today's paid-down balance to a valuation from two years ago and overstate past equity).
+ *
+ * Step rather than linear interpolation: a balance stays what it was until the next reading
+ * replaces it. Inventing intermediate values would be presenting a guess as an observation.
+ */
+export function valueAsOf(rows: PropertyValuationRow[] | { value: number; valuedAt: Date | string }[], asOf: Date | string): number | null {
+  const asOfMs = new Date(asOf).getTime();
+  let best: { value: number; ms: number } | null = null;
+  for (const row of rows) {
+    const ms = new Date(row.valuedAt).getTime();
+    if (ms <= asOfMs && (best === null || ms > best.ms)) best = { value: row.value, ms };
+  }
+  return best?.value ?? null;
+}
+
 export interface PropertyEquity {
   propertyId: number;
   nickname: string;
