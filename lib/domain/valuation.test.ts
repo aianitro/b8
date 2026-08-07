@@ -1,5 +1,51 @@
 import { describe, it, expect } from 'vitest';
-import { computeNetWorth, latestValuationByAccount, type AccountRegime } from './valuation';
+import { balancesToRecord, computeNetWorth, latestValuationByAccount, type AccountRegime } from './valuation';
+
+describe('balancesToRecord', () => {
+  it('records every balance when nothing has been recorded before', () => {
+    const observed = [{ accountId: 'a', value: 100 }, { accountId: 'b', value: 200 }];
+    expect(balancesToRecord(observed, new Map())).toEqual(observed);
+  });
+
+  it('skips a balance that is unchanged since the last recording', () => {
+    const observed = [{ accountId: 'a', value: 100 }];
+    expect(balancesToRecord(observed, new Map([['a', 100]]))).toEqual([]);
+  });
+
+  it('records a balance that moved, and only that one', () => {
+    const observed = [{ accountId: 'a', value: 150 }, { accountId: 'b', value: 200 }];
+    const lastRecorded = new Map([['a', 100], ['b', 200]]);
+    expect(balancesToRecord(observed, lastRecorded)).toEqual([{ accountId: 'a', value: 150 }]);
+  });
+
+  it('rounds to cents before comparing, so float dust does not append a row every sync', () => {
+    // NUMERIC(14,2) would store 110.229999 as 110.23; comparing the raw value against what
+    // came back out of the column would never match, appending a spurious row on every run.
+    const observed = [{ accountId: 'a', value: 110.229999 }];
+    expect(balancesToRecord(observed, new Map([['a', 110.23]]))).toEqual([]);
+  });
+
+  it('rounds the value it emits, not just the one it compares', () => {
+    expect(balancesToRecord([{ accountId: 'a', value: 110.229999 }], new Map())).toEqual([
+      { accountId: 'a', value: 110.23 },
+    ]);
+  });
+
+  it('treats a balance returning to zero as a change worth recording', () => {
+    // Guards the falsy-vs-undefined trap: 0 is a real balance, not "nothing recorded".
+    expect(balancesToRecord([{ accountId: 'a', value: 0 }], new Map([['a', 500]]))).toEqual([
+      { accountId: 'a', value: 0 },
+    ]);
+  });
+
+  it('skips an unchanged zero balance', () => {
+    expect(balancesToRecord([{ accountId: 'a', value: 0 }], new Map([['a', 0]]))).toEqual([]);
+  });
+
+  it('returns empty for no observations', () => {
+    expect(balancesToRecord([], new Map([['a', 100]]))).toEqual([]);
+  });
+});
 
 describe('latestValuationByAccount', () => {
   it('returns empty for no rows', () => {
