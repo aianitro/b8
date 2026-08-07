@@ -1,5 +1,7 @@
 import { runSync } from './sync';
+import { createLogger } from './logger';
 
+const log = createLogger('scheduler');
 const DAILY_MS = 24 * 60 * 60 * 1000;
 let started = false;
 
@@ -18,12 +20,12 @@ async function runAndLog() {
     // sync_log; if the plain phase stays at 0 over time, "Sync Now" isn't pulling
     // anything Plaid wasn't already going to give us and can be dropped.
     const plain = await runSync({ force: false, trigger: 'scheduler' });
-    console.log('[scheduler] plain sync phase:', plain);
+    log.info('plain sync phase', { ...plain });
 
     const forced = await runSync({ force: true, trigger: 'scheduler' });
-    console.log('[scheduler] force refresh phase:', forced);
+    log.info('force refresh phase', { ...forced });
   } catch (err) {
-    console.error('[scheduler] daily sync failed:', err instanceof Error ? err.message : err);
+    log.error('daily sync failed', { error: err instanceof Error ? err.message : String(err) });
   }
 }
 
@@ -36,7 +38,7 @@ export function startDailySyncScheduler(hour = 6) {
   started = true;
 
   const delay = msUntilNextRun(hour);
-  console.log(`[scheduler] daily Plaid sync scheduled for ${hour}:00 local time (first run in ${Math.round(delay / 60000)} min)`);
+  log.info('daily Plaid sync scheduled', { hour, firstRunInMin: Math.round(delay / 60000) });
 
   setTimeout(() => {
     runAndLog();

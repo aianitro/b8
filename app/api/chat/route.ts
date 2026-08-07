@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import db from '@/lib/db';
 import type { ApiResponse } from '@/shared/types';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('chat');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -252,7 +255,7 @@ export async function POST(req: NextRequest) {
     const reply = await runAgentLoop(messages);
     return Response.json({ success: true, data: { reply } } satisfies ApiResponse<{ reply: string }>);
   } catch (err) {
-    console.error('[chat]', err instanceof Error ? err.message : err);
+    log.error('request failed', { error: err instanceof Error ? err.message : String(err) });
     return Response.json(
       { success: false, error: { code: 'CHAT_ERROR', message: 'Failed to get response from Claude' } } satisfies ApiResponse<never>,
       { status: 500 }

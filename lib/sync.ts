@@ -1,6 +1,9 @@
 import { plaidClient } from './plaid';
 import { reconcileAccountIds } from './plaidReconcile';
 import db from './db';
+import { createLogger } from './logger';
+
+const log = createLogger('sync');
 
 type RuleMap = Map<string, string>;
 
@@ -114,7 +117,7 @@ async function syncItem(
   );
 
   if (unmatchedAccountIds.size > 0) {
-    console.warn('[sync] transactions for unrecognized account_ids (not saved):', [...unmatchedAccountIds]);
+    log.warn('transactions for unrecognized account_ids (not saved)', { accountIds: [...unmatchedAccountIds] });
   }
 
   return { added, unmatchedAccountIds: [...unmatchedAccountIds] };
@@ -143,7 +146,7 @@ export async function runSync({
   await db.query(
     'INSERT INTO sync_log (trigger, phase, synced, unmatched, errors) VALUES ($1, $2, $3, $4, $5)',
     [trigger, force ? 'force' : 'plain', result.synced, result.unmatchedAccountIds.length, result.errors.length]
-  ).catch((err) => console.error('[sync] failed to write sync_log:', err instanceof Error ? err.message : err));
+  ).catch((err) => log.error('failed to write sync_log', { error: err instanceof Error ? err.message : String(err) }));
 
   return result;
 }
@@ -170,7 +173,7 @@ async function runSyncInner({
       for (const r of result.remapped) reconciled.push(`remapped ${r.name} (${r.matchedBy})`);
       for (const u of result.unmatchedLive) reconciled.push(`new/unmatched account at Plaid: ${u.name}`);
     } catch (err) {
-      console.error('[sync] reconcile failed for token:', err instanceof Error ? err.message : err);
+      log.error('reconcile failed for token', { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -203,7 +206,7 @@ async function runSyncInner({
     await Promise.allSettled(
       entries.map(([token]) =>
         plaidClient.transactionsRefresh({ access_token: token }).catch((e) => {
-          console.warn('[sync] refresh warning:', e?.message);
+          log.warn('refresh warning', { error: e?.message });
         })
       )
     );
@@ -221,7 +224,7 @@ async function runSyncInner({
       unmatchedAccountIds.push(...result.unmatchedAccountIds);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[sync] item failed:', ids, msg);
+      log.error('item failed', { accountIds: ids, error: msg });
       // Generic, not `msg` — this array reaches the client via the API response. Raw
       // Postgres/Plaid error text can carry internal schema or request details; the full
       // message is already logged server-side above for debugging.

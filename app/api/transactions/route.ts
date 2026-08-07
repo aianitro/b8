@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server';
 import { randomUUID } from 'crypto';
 import db from '@/lib/db';
 import type { ApiResponse } from '@/shared/types';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('transactions');
 
 // Manually create a transaction — used e.g. to recreate one that Plaid dropped/deduped away,
 // or any other hand-entered entry. Gets a synthetic plaid_transaction_id (never collides with
@@ -34,7 +37,7 @@ export async function POST(req: NextRequest) {
 
     return Response.json({ success: true, data: { id: result.rows[0].id } } satisfies ApiResponse<{ id: number }>, { status: 201 });
   } catch (err) {
-    console.error('[transactions POST]', err instanceof Error ? err.message : err);
+    log.error('POST failed', { error: err instanceof Error ? err.message : String(err) });
     return Response.json(
       { success: false, error: { code: 'SERVER_ERROR', message: 'Failed to create transaction' } } satisfies ApiResponse<null>,
       { status: 500 }

@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import type { ApiResponse, BudgetCategory } from '@/shared/types';
 import { normalizeMonthlyAmounts, resolveAnnualBudget } from '@/lib/budgetMath';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('categories');
 
 export async function GET() {
   const result = await db.query<BudgetCategory>(
@@ -33,7 +36,7 @@ export async function POST(req: NextRequest) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to save';
     const isDupe = msg.includes('unique') || msg.includes('duplicate');
-    if (!isDupe) console.error('[categories POST]', msg);
+    if (!isDupe) log.error('POST failed', { error: msg });
     return Response.json(
       { success: false, error: { code: 'DB_ERROR', message: isDupe ? `Category "${name.trim()}" already exists in ${landscape}` : 'Failed to save category' } } satisfies ApiResponse<never>,
       { status: 409 }

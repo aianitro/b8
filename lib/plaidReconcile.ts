@@ -1,6 +1,9 @@
 import { plaidClient } from './plaid';
 import db from './db';
 import { matchAccounts, type DbAccountRow } from './plaidMatch';
+import { createLogger } from './logger';
+
+const log = createLogger('plaidReconcile');
 
 // Plaid does not guarantee account_id is permanently stable for every institution —
 // OAuth-based banks (Chase, Discover, ...) can reissue it for an existing account
@@ -52,13 +55,12 @@ export async function reconcileAccountIds(accessToken: string): Promise<Reconcil
   }
 
   if (remapped.length > 0) {
-    console.warn(
-      '[plaidReconcile] remapped account ids:',
-      remapped.map((r) => `${r.name} ${r.oldId.slice(0, 8)}->${r.newId.slice(0, 8)} (${r.matchedBy})`).join(', ')
-    );
+    log.warn('remapped account ids', {
+      remapped: remapped.map((r) => `${r.name} ${r.oldId.slice(0, 8)}->${r.newId.slice(0, 8)} (${r.matchedBy})`),
+    });
   }
   if (unmatchedLive.length > 0 || unmatchedDb.length > 0) {
-    console.warn('[plaidReconcile] could not confidently reconcile:', { unmatchedLive, unmatchedDb });
+    log.warn('could not confidently reconcile', { unmatchedLive, unmatchedDb });
   }
 
   return {

@@ -1,6 +1,9 @@
 import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import type { ApiResponse } from '@/shared/types';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('import/csv');
 
 type CsvRow = { date: string; description: string; amount: number };
 
@@ -52,7 +55,7 @@ export async function POST(req: NextRequest) {
 
     return Response.json({ success: true, data: { imported, skipped } } satisfies ApiResponse<{ imported: number; skipped: number }>);
   } catch (err) {
-    console.error('[import/csv]', err instanceof Error ? err.message : err);
+    log.error('request failed', { error: err instanceof Error ? err.message : String(err) });
     return Response.json(
       { success: false, error: { code: 'IMPORT_ERROR', message: 'Import failed' } } satisfies ApiResponse<null>,
       { status: 500 }

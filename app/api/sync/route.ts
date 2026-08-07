@@ -1,6 +1,9 @@
 import { NextRequest } from 'next/server';
 import { runSync } from '@/lib/sync';
 import type { ApiResponse } from '@/shared/types';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('sync');
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,8 +28,8 @@ export async function POST(req: NextRequest) {
     const rawMessage = err instanceof Error ? err.message : 'Sync failed';
     // Message only, never the raw error object — see create-link-token/route.ts for why
     // (runSync can throw axios errors from the Plaid SDK, which carry the live client
-    // secret in `.config.headers`, and console.error on such an object prints that too).
-    console.error('[sync]', rawMessage);
+    // secret in `.config.headers`, and logging such an object would print that too).
+    log.error('request failed', { error: rawMessage });
     // "Account not found" is a specific, deliberately-thrown, known-safe string from
     // runSyncInner — safe to pass through as-is. Anything else caught here is an
     // unanticipated failure (DB/Plaid internals) and must not reach the client verbatim.

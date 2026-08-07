@@ -3,6 +3,9 @@ import { CountryCode } from 'plaid';
 import { plaidClient } from '@/lib/plaid';
 import db from '@/lib/db';
 import type { ApiResponse } from '@/shared/types';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('exchange-token');
 
 export async function POST(req: NextRequest) {
   const { public_token } = await req.json();
@@ -87,7 +90,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     // Message only — see create-link-token/route.ts for why the raw error object must never
     // be logged here (it can carry the live Plaid client-id/secret via axios's error.config).
-    console.error('[exchange-token]', err instanceof Error ? err.message : err);
+    log.error('request failed', { error: err instanceof Error ? err.message : String(err) });
     return Response.json(
       { success: false, error: { code: 'PLAID_ERROR', message: 'Failed to exchange token' } } satisfies ApiResponse<never>,
       { status: 500 }
