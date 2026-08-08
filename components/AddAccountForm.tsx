@@ -2,8 +2,10 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Landmark } from 'lucide-react';
 import { ACCOUNT_TYPES } from '@/lib/accountTypes';
+
+type BalanceChoice = 'ledger' | 'asset' | 'liability';
 
 export default function AddAccountForm() {
   const router = useRouter();
@@ -13,23 +15,43 @@ export default function AddAccountForm() {
   const [bank, setBank] = useState('');
   const [typeKey, setTypeKey] = useState('checking');
   const [landscape, setLandscape] = useState<'operational' | 'capital'>('operational');
+  const [balanceChoice, setBalanceChoice] = useState<BalanceChoice>('ledger');
+  const [initialValue, setInitialValue] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function reset() { setName(''); setBank(''); setTypeKey('checking'); setLandscape('operational'); setError(null); }
+  function reset() {
+    setName(''); setBank(''); setTypeKey('checking'); setLandscape('operational');
+    setBalanceChoice('ledger'); setInitialValue(''); setError(null);
+  }
 
   function close() { setOpen(false); reset(); }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) { setError('Name is required'); return; }
+
+    let parsedValue: number | null = null;
+    if (balanceChoice !== 'ledger' && initialValue.trim() !== '') {
+      parsedValue = Number(initialValue.replace(/[$,\s]/g, ''));
+      if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+        setError(balanceChoice === 'liability' ? 'Enter a positive amount owed' : 'Enter a positive balance');
+        return;
+      }
+    }
+
     setSaving(true); setError(null);
     const chosen = ACCOUNT_TYPES.find((t) => t.subtype === typeKey || t.type === typeKey) ?? ACCOUNT_TYPES[0];
     try {
       const res = await fetch('/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, bank: bank || undefined, type: chosen.type, subtype: chosen.subtype, landscape }),
+        body: JSON.stringify({
+          name, bank: bank || undefined, type: chosen.type, subtype: chosen.subtype, landscape,
+          valuation_mode: balanceChoice === 'ledger' ? 'ledger' : 'valuation',
+          is_liability: balanceChoice === 'liability',
+          initial_value: parsedValue,
+        }),
       });
       const data = await res.json();
       if (!data.success) { setError(data.error?.message ?? 'Failed'); return; }
@@ -112,6 +134,41 @@ export default function AddAccountForm() {
             </select>
           </div>
         </div>
+
+        {/* Defaults to Ledger — right for the common case (checking/savings/cards), where a
+            balance is summed from transactions rather than typed in. Only a brokerage,
+            retirement, or loan account needs the other two. */}
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Balance comes from</label>
+          <select
+            value={balanceChoice}
+            onChange={(e) => setBalanceChoice(e.target.value as BalanceChoice)}
+            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+          >
+            <option value="ledger">Ledger — summed from transactions</option>
+            <option value="asset">Valuation — a value you enter (asset)</option>
+            <option value="liability">Valuation — a value you enter (liability)</option>
+          </select>
+        </div>
+
+        {balanceChoice !== 'ledger' && (
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              {balanceChoice === 'liability' ? 'Amount owed' : 'Current balance'}
+              <span className="font-normal text-slate-400"> — optional, fill in later if you don&apos;t have it</span>
+            </label>
+            <div className="flex items-center gap-2">
+              {balanceChoice === 'liability' && <Landmark size={13} className="text-red-400 shrink-0" />}
+              <input
+                value={initialValue}
+                onChange={(e) => setInitialValue(e.target.value)}
+                placeholder="0.00"
+                inputMode="decimal"
+                className="w-full text-sm font-mono border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+              />
+            </div>
+          </div>
+        )}
 
         {error && <p className="text-xs text-red-600">{error}</p>}
 
