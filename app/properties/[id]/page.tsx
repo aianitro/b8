@@ -7,6 +7,9 @@ import db from '@/lib/db';
 import PropertyEditForm from '@/components/PropertyEditForm';
 import PropertyValuationHistory, { type ValuationRow } from '@/components/PropertyValuationHistory';
 import PropertyValueChart, { type PropertyValuePoint } from '@/components/charts/PropertyValueChart';
+import PropertyLinkedAccounts, { type LinkableAccount } from '@/components/PropertyLinkedAccounts';
+import PropertyPnlCard from '@/components/PropertyPnlCard';
+import { computePropertyPnl, type PnlTransaction } from '@/lib/domain/propertyPnl';
 import { toDateInputValue, valueAsOf } from '@/lib/domain/property';
 import type { Property, PropertyType } from '@/shared/types';
 
@@ -61,15 +64,32 @@ async function getValuations(id: string): Promise<ValuationRow[]> {
 // Every account eligible to be this property's mortgage: valuation-mode liabilities that are
 // either unlinked or already linked here. Scoping lives in the query rather than the DB — see
 // the note on PATCH /api/accounts/[id]'s property_id handling.
-async function getMortgageOptions(propertyId: string) {
-  const result = await db.query<{ id: string; name: string; property_id: number | null }>(
-    `SELECT id, name, property_id FROM accounts
-      WHERE valuation_mode = 'valuation' AND is_liability = TRUE
-        AND (property_id IS NULL OR property_id = $1)
-      ORDER BY name`,
+async function getLinkableAccounts(propertyId: string) {
+  const result = await db.query<{ id: string; name: string; is_liability: boolean; property_id: number | null }>(
+    `SELECT id, name, is_liability, property_id FROM accounts
+      WHERE property_id IS NULL OR property_id = $1
+      ORDER BY is_liability DESC, name`,
     [propertyId]
   );
   return result.rows;
+}
+
+// Transactions attributed to this property: everything in its linked accounts for the year.
+// Debt service is flagged from the account rather than the category so a mortgage payment is
+// kept out of operating expenses even when it is categorized generically.
+async function getPnlTransactions(propertyId: string, year: number): Promise<PnlTransaction[]> {
+  const result = await db.query<{ mapped_category: string | null; amount: string; is_liability: boolean }>(
+    `SELECT t.mapped_category, t.amount, a.is_liability
+       FROM transactions t
+       JOIN accounts a ON a.id = t.account_id
+      WHERE a.property_id = $1 AND EXTRACT(YEAR FROM t.date) = $2 AND t.hidden = FALSE`,
+    [propertyId, year]
+  );
+  return result.rows.map((r) => ({
+    category: r.mapped_category,
+    amount: Number(r.amount),
+    isDebtService: r.is_liability,
+  }));
 }
 
 async function getMortgageBalances(accountId: string): Promise<Series[]> {
@@ -83,14 +103,33 @@ async function getMortgageBalances(accountId: string): Promise<Series[]> {
 export default async function PropertyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const [property, valuations, mortgageOptions] = await Promise.all([
-    getProperty(id), getValuations(id), getMortgageOptions(id),
+  const year = new Date().getFullYear();
+
+  const [property, valuations, linkableAccounts, pnlTransactions] = await Promise.all([
+    getProperty(id), getValuations(id), getLinkableAccounts(id), getPnlTransactions(id, year),
   ]);
 
   if (!property) notFound();
 
-  const linked = mortgageOptions.find((m) => m.property_id !== null) ?? null;
+  // The mortgage drives the equity chart; any linked liability account counts as one.
+  const linked = linkableAccounts.find((a) => a.property_id !== null && a.is_liability) ?? null;
   const mortgageBalances = linked ? await getMortgageBalances(linked.id) : [];
+
+  const accountsForLinking: LinkableAccount[] = linkableAccounts.map((a) => ({
+    id: a.id, name: a.name, isLiability: a.is_liability, linked: a.property_id !== null,
+  }));
+
+  // Appreciation is measured between the first and last valuation recorded *within the year*,
+  // so it reflects this year's movement rather than the whole history. One reading gives no
+  // movement to measure, which computePropertyPnl reports as unknown rather than zero.
+  const thisYear = valuations
+    .filter((v) => new Date(v.valuedAt).getFullYear() === year)
+    .sort((a, b) => new Date(a.valuedAt).getTime() - new Date(b.valuedAt).getTime());
+  const pnl = computePropertyPnl(
+    pnlTransactions,
+    thisYear.length >= 2 ? thisYear[0].value : null,
+    thisYear.length >= 2 ? thisYear[thisYear.length - 1].value : null
+  );
 
   // Oldest-first for the chart; the history list below stays newest-first, which is the more
   // useful order for spotting and correcting a bad entry.
@@ -147,12 +186,14 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
       </div>
 
       <div className="grid grid-cols-2 gap-6 items-start">
-        <PropertyEditForm
-          property={property}
-          mortgageOptions={mortgageOptions.map((m) => ({ id: m.id, name: m.name }))}
-          linkedMortgageId={linked?.id ?? null}
-        />
-        <PropertyValuationHistory propertyId={property.id} rows={valuations} />
+        <div className="space-y-6">
+          <PropertyEditForm property={property} />
+          <PropertyLinkedAccounts propertyId={property.id} accounts={accountsForLinking} />
+        </div>
+        <div className="space-y-6">
+          <PropertyPnlCard pnl={pnl} year={year} />
+          <PropertyValuationHistory propertyId={property.id} rows={valuations} />
+        </div>
       </div>
     </div>
   );
