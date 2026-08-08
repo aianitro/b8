@@ -104,3 +104,55 @@ describe('computeNetWorthBreakdown', () => {
     expect(r.total).toBe(0);
   });
 });
+
+describe('contributions', () => {
+  it('emits one signed line per account, matching its component total', () => {
+    const r = computeNetWorthBreakdown(
+      [acct('chk', 'operational', 'ledger'), acct('401k', 'capital', 'valuation')],
+      new Map([['chk', 8000]]), new Map([['401k', 400000]]), new Map(), []
+    );
+    expect(r.contributions).toEqual([
+      { kind: 'account', id: 'chk', component: 'operational', value: 8000 },
+      { kind: 'account', id: '401k', component: 'capitalFinancial', value: 400000 },
+    ]);
+  });
+
+  it('records a linked mortgage as a NEGATIVE real-estate line, not a liability line', () => {
+    // Mirrors the no-double-count rule: the mortgage belongs to equity, and appears once.
+    const r = computeNetWorthBreakdown(
+      [acct('mtg', 'capital', 'valuation', true, 1)],
+      new Map(), new Map([['mtg', 310000]]), new Map([[1, 450000]]), [1]
+    );
+    expect(r.contributions).toContainEqual({ kind: 'account', id: 'mtg', component: 'realEstateEquity', value: -310000 });
+    expect(r.contributions).toContainEqual({ kind: 'property', id: '1', component: 'realEstateEquity', value: 450000 });
+    expect(r.contributions.filter((c) => c.component === 'liabilities')).toEqual([]);
+  });
+
+  it('omits an excluded property and its mortgage from contributions entirely', () => {
+    const r = computeNetWorthBreakdown(
+      [acct('mtg', 'capital', 'valuation', true, 7)],
+      new Map(), new Map([['mtg', 200000]]), new Map(), [7]
+    );
+    expect(r.contributions).toEqual([]);
+  });
+
+  it('contributions sum to the total, per component and overall', () => {
+    const r = computeNetWorthBreakdown(
+      [
+        acct('chk', 'operational', 'ledger'),
+        acct('401k', 'capital', 'valuation'),
+        acct('mtg', 'capital', 'valuation', true, 1),
+        acct('loan', 'capital', 'valuation', true, null),
+      ],
+      new Map([['chk', 8000]]),
+      new Map([['401k', 400000], ['mtg', 310000], ['loan', 25000]]),
+      new Map([[1, 450000]]), [1]
+    );
+    const sumOf = (c: string) => r.contributions.filter((x) => x.component === c).reduce((s, x) => s + x.value, 0);
+    expect(sumOf('operational')).toBe(r.operational);
+    expect(sumOf('capitalFinancial')).toBe(r.capitalFinancial);
+    expect(sumOf('realEstateEquity')).toBe(r.realEstateEquity);
+    expect(sumOf('liabilities')).toBe(r.liabilities);
+    expect(r.contributions.reduce((s, x) => s + x.value, 0)).toBe(r.total);
+  });
+});

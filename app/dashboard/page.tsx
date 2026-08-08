@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import db from '@/lib/db';
 import MonthlySpendingChart, { type MonthlySpendingData } from '@/components/charts/MonthlySpendingChart';
 import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
@@ -404,8 +405,11 @@ export default async function DashboardPage() {
           Phase 0 step 1: the figure now combines ledger balances, valuation-mode accounts, and
           real-estate equity, so it is finally the thing it says it is. The four components
           below are non-overlapping and sum to this total — see lib/domain/netWorth.ts. */}
-      <div className="bg-slate-900 rounded-2xl shadow-sm p-8 mb-6">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Net Worth</p>
+      <div className="bg-slate-900 rounded-2xl shadow-sm p-8 mb-6 group">
+        <Link href="/net-worth" className="block">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 group-hover:text-slate-300 transition-colors">
+          Net Worth <span className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity">→</span>
+        </p>
         <p className={`text-5xl font-bold mt-2 font-mono ${netWorth.total < 0 ? 'text-red-400' : 'text-white'}`}>
           {fmt(netWorth.total)}
         </p>
@@ -431,16 +435,19 @@ export default async function DashboardPage() {
             />
           </div>
         )}
+        </Link>
+        {/* Outside the card-wide link: each component deep-links to where its detail lives, so
+            the broad gesture and the specific ones both work rather than competing. */}
         <div className="flex items-center gap-6 mt-2 pt-4 border-t border-slate-800 text-xs">
-          <span className="text-slate-500">
+          <Link href="/balances" className="text-slate-500 hover:text-slate-300 transition-colors">
             Operational <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.operational)}</span>
-          </span>
-          <span className="text-slate-500">
+          </Link>
+          <Link href="/accounts" className="text-slate-500 hover:text-slate-300 transition-colors">
             Capital <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.capitalFinancial)}</span>
-          </span>
-          <span className="text-slate-500">
+          </Link>
+          <Link href="/properties" className="text-slate-500 hover:text-slate-300 transition-colors">
             Real estate <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.realEstateEquity)}</span>
-          </span>
+          </Link>
           {netWorth.liabilities !== 0 && (
             <span className="text-slate-500">
               Other debt <span className="font-mono text-slate-300 ml-1">{fmt(netWorth.liabilities)}</span>
