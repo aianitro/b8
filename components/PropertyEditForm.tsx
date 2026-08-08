@@ -4,21 +4,14 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Property, PropertyType } from '@/shared/types';
 
-interface MortgageOption { id: string; name: string; }
-
 interface Props {
   property: Property;
-  /** Liability, valuation-mode accounts: the one linked here plus any unlinked ones. */
-  mortgageOptions: MortgageOption[];
-  linkedMortgageId: string | null;
 }
-
-const NONE = '__none__';
 
 // Explicit Save rather than the save-on-blur used by the inline editors this replaces. With
 // this many fields, cross-field validation (cost basis vs. purchase price) only makes sense
 // against a complete set, and a dirty-state guard is worth having before navigating away.
-export default function PropertyEditForm({ property, mortgageOptions, linkedMortgageId }: Props) {
+export default function PropertyEditForm({ property }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
@@ -28,7 +21,6 @@ export default function PropertyEditForm({ property, mortgageOptions, linkedMort
   const [purchasePrice, setPurchasePrice] = useState(property.purchase_price?.toString() ?? '');
   const [purchaseDate, setPurchaseDate] = useState(property.purchase_date?.slice(0, 10) ?? '');
   const [costBasis, setCostBasis] = useState(property.cost_basis?.toString() ?? '');
-  const [mortgageId, setMortgageId] = useState(linkedMortgageId ?? NONE);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,8 +37,7 @@ export default function PropertyEditForm({ property, mortgageOptions, linkedMort
     type !== property.type ||
     purchasePrice !== (property.purchase_price?.toString() ?? '') ||
     purchaseDate !== (property.purchase_date?.slice(0, 10) ?? '') ||
-    costBasis !== (property.cost_basis?.toString() ?? '') ||
-    mortgageId !== (linkedMortgageId ?? NONE);
+    costBasis !== (property.cost_basis?.toString() ?? '');
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -83,22 +74,6 @@ export default function PropertyEditForm({ property, mortgageOptions, linkedMort
       return;
     }
 
-    // The mortgage link lives on accounts, not properties, so it's a second call. Clearing the
-    // old link before setting the new one keeps one account from pointing at two properties.
-    if (mortgageId !== (linkedMortgageId ?? NONE)) {
-      if (linkedMortgageId) {
-        await fetch(`/api/accounts/${linkedMortgageId}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ property_id: null }),
-        });
-      }
-      if (mortgageId !== NONE) {
-        await fetch(`/api/accounts/${mortgageId}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ property_id: property.id }),
-        });
-      }
-    }
 
     setSaving(false);
     setSaved(true);
@@ -147,18 +122,6 @@ export default function PropertyEditForm({ property, mortgageOptions, linkedMort
         </div>
       </div>
 
-      <div>
-        <label className={label}>Mortgage account</label>
-        <select value={mortgageId} onChange={(e) => { setMortgageId(e.target.value); setSaved(false); }} className={`${field} bg-white`}>
-          <option value={NONE}>No mortgage linked</option>
-          {mortgageOptions.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
-        {mortgageOptions.length === 0 && (
-          <p className="text-[10px] text-slate-400 mt-1">
-            No eligible accounts. A mortgage must be an account set to &ldquo;Valuation (liability)&rdquo;.
-          </p>
-        )}
-      </div>
 
       {error && <p className="text-xs text-red-600">{error}</p>}
 
