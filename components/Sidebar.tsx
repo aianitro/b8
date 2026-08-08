@@ -4,11 +4,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, PieChart, Landmark, ArrowLeftRight, Zap,
-  Tag, Building2, Home, Sparkles, Upload,
+  Tag, Building2, Home, Wallet, Sparkles, Upload,
 } from 'lucide-react';
 
 const NAV = [
   { href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard },
+  { href: '/net-worth',    label: 'Net Worth',     icon: Wallet },
   { href: '/budget',       label: 'Budget',        icon: PieChart },
   { href: '/balances',     label: 'Balances',      icon: Landmark },
   { href: '/transactions', label: 'Transactions',  icon: ArrowLeftRight },

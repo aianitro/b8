@@ -13,6 +13,18 @@ export interface NetWorthAccount {
   propertyId: number | null;
 }
 
+export type NetWorthComponent = 'operational' | 'capitalFinancial' | 'realEstateEquity' | 'liabilities';
+
+/** One line item behind a component total, so a page can show its makeup without re-deriving
+ *  the classification rules — the one place a double-count could creep back in. */
+export interface NetWorthContribution {
+  kind: 'account' | 'property';
+  id: string;
+  component: NetWorthComponent;
+  /** Signed exactly as it lands in the component total. */
+  value: number;
+}
+
 export interface NetWorthBreakdown {
   operational: number;
   capitalFinancial: number;
@@ -21,6 +33,7 @@ export interface NetWorthBreakdown {
   total: number;
   /** Properties with no valuation on record: excluded entirely, and worth disclosing. */
   unvaluedPropertyIds: number[];
+  contributions: NetWorthContribution[];
 }
 
 /**
@@ -50,6 +63,7 @@ export function computeNetWorthBreakdown(
   let capitalFinancial = 0;
   let liabilities = 0;
   let linkedMortgageTotal = 0;
+  const contributions: NetWorthContribution[] = [];
 
   for (const a of accounts) {
     const isValuation = a.valuationMode === 'valuation';
@@ -60,12 +74,16 @@ export function computeNetWorthBreakdown(
     if (isValuation && a.isLiability && a.propertyId !== null) {
       // Netted against its property below — unless that property has no valuation, in which
       // case the pair is dropped together rather than leaving a naked debt.
-      if (!excluded.has(a.propertyId)) linkedMortgageTotal += magnitude;
+      if (!excluded.has(a.propertyId)) {
+        linkedMortgageTotal += magnitude;
+        contributions.push({ kind: 'account', id: a.id, component: 'realEstateEquity', value: -magnitude });
+      }
       continue;
     }
 
     if (isValuation && a.isLiability) {
       liabilities -= magnitude; // stored as a positive amount owed; the sign is derived here
+      contributions.push({ kind: 'account', id: a.id, component: 'liabilities', value: -magnitude });
       continue;
     }
 
@@ -73,15 +91,23 @@ export function computeNetWorthBreakdown(
     // negative by construction), so it is added as-is regardless of is_liability.
     if (a.landscape === 'operational') operational += magnitude;
     else capitalFinancial += magnitude;
+    contributions.push({
+      kind: 'account', id: a.id,
+      component: a.landscape === 'operational' ? 'operational' : 'capitalFinancial',
+      value: magnitude,
+    });
   }
 
   let propertyTotal = 0;
   for (const [id, value] of latestPropertyValues) {
-    if (!excluded.has(id)) propertyTotal += value;
+    if (!excluded.has(id)) {
+      propertyTotal += value;
+      contributions.push({ kind: 'property', id: String(id), component: 'realEstateEquity', value });
+    }
   }
 
   const realEstateEquity = propertyTotal - linkedMortgageTotal;
   const total = operational + capitalFinancial + realEstateEquity + liabilities;
 
-  return { operational, capitalFinancial, realEstateEquity, liabilities, total, unvaluedPropertyIds };
+  return { operational, capitalFinancial, realEstateEquity, liabilities, total, unvaluedPropertyIds, contributions };
 }
