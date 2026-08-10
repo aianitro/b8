@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ChevronDown } from 'lucide-react';
 import type { DriftFinding } from '@/lib/domain/drift';
 
 const fmt = (n: number) =>
@@ -18,6 +18,11 @@ export default function DriftAlertCard({ findings }: { findings: DriftFinding[] 
   const [, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Collapsed by default: with a handful of accounts this was consistently the tallest thing
+  // on the dashboard, competing with the numbers the page actually exists to show. The
+  // one-line summary plus Reconcile stay reachable without expanding — expansion is for the
+  // per-account detail, not for the primary action.
+  const [expanded, setExpanded] = useState(false);
 
   // Silence when everything reconciles — a card that says "all good" daily is noise competing
   // with the numbers the page exists to show.
@@ -47,15 +52,34 @@ export default function DriftAlertCard({ findings }: { findings: DriftFinding[] 
       <div className="flex items-start gap-3">
         <AlertTriangle size={16} className="text-amber-600 shrink-0 mt-0.5" />
         <div className="min-w-0 flex-1">
+          {/* Two SIBLING interactive elements, not one nested in the other — a <button> cannot
+              legally contain other interactive content, and nesting Reconcile inside the
+              disclosure toggle would also mean one click landing on two different actions is
+              only one DOM edit away, which is not a mistake worth risking in a money app. */}
           <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-amber-900">
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              className="min-w-0 text-left flex-1"
+            >
+              <p className="text-sm font-semibold text-amber-900 flex items-center gap-1.5">
                 {findings.length} account{findings.length === 1 ? '' : 's'} {findings.length === 1 ? 'does not' : 'do not'} match the bank
+                <ChevronDown
+                  size={14}
+                  className={`text-amber-700/60 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                />
               </p>
-              <p className="text-xs text-amber-700/80 mt-0.5">
-                The balance computed from recorded transactions differs from what the bank reports.
-              </p>
-            </div>
+              {!expanded && (
+                <p className="text-xs text-amber-700/80 mt-0.5 truncate">
+                  {findings.map((f) => f.name).join(', ')}
+                </p>
+              )}
+              {expanded && (
+                <p className="text-xs text-amber-700/80 mt-0.5">
+                  The balance computed from recorded transactions differs from what the bank reports.
+                </p>
+              )}
+            </button>
             {derivable.length > 0 && (
               <button
                 onClick={() => reconcile(derivable.map((f) => f.accountId))}
@@ -67,46 +91,51 @@ export default function DriftAlertCard({ findings }: { findings: DriftFinding[] 
             )}
           </div>
 
-          {derivable.length > 0 && (
-            <p className="text-[11px] text-amber-700/70 mt-2">
-              These accounts have no opening balance recorded for this year, so the ledger starts
-              from $0. Reconciling sets each opening balance to the figure that makes it agree
-              with the bank — no transaction is changed.
-            </p>
-          )}
+          {expanded && (
+            <>
+              {derivable.length > 0 && (
+                <p className="text-[11px] text-amber-700/70 mt-2">
+                  These accounts have no opening balance recorded for this year, so the ledger starts
+                  from $0. Reconciling sets each opening balance to the figure that makes it agree
+                  with the bank — no transaction is changed.
+                </p>
+              )}
 
-          <ul className="space-y-1.5 mt-3">
-            {findings.map((f) => (
-              <li key={f.accountId} className="flex items-center justify-between gap-4 text-xs">
-                <span className="flex items-center gap-2 min-w-0">
-                  <Link href={`/accounts/${f.accountId}`} className="font-medium text-amber-900 hover:underline truncate">
-                    {f.name}
-                  </Link>
-                  {!f.safeToDerive && (
-                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-200/70 text-amber-900 font-medium">
-                      check transactions
+              <ul className="space-y-1.5 mt-3">
+                {findings.map((f) => (
+                  <li key={f.accountId} className="flex items-center justify-between gap-4 text-xs">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <Link href={`/accounts/${f.accountId}`} className="font-medium text-amber-900 hover:underline truncate">
+                        {f.name}
+                      </Link>
+                      {!f.safeToDerive && (
+                        <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-200/70 text-amber-900 font-medium">
+                          check transactions
+                        </span>
+                      )}
                     </span>
-                  )}
-                </span>
-                <span className="flex items-center gap-3 shrink-0 font-mono">
-                  <span className="text-amber-700/70" title="Computed from recorded transactions">{fmt(f.ledgerBalance)}</span>
-                  <span className="text-amber-700/50">vs</span>
-                  <span className="text-amber-700/70" title="Reported by the bank">{fmt(f.expectedBalance)}</span>
-                  <span className="font-semibold text-amber-900 w-24 text-right" title="Difference">{fmtSigned(f.drift)}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
+                    <span className="flex items-center gap-3 shrink-0 font-mono">
+                      <span className="text-amber-700/70" title="Computed from recorded transactions">{fmt(f.ledgerBalance)}</span>
+                      <span className="text-amber-700/50">vs</span>
+                      <span className="text-amber-700/70" title="Reported by the bank">{fmt(f.expectedBalance)}</span>
+                      <span className="font-semibold text-amber-900 w-24 text-right" title="Difference">{fmtSigned(f.drift)}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
 
-          {/* An account that already had an opening balance and still disagrees is a different
-              problem: the gap is evidence of a missing or duplicated transaction, and moving
-              the opening figure would bury it. Deliberately not offered a one-click fix. */}
-          {needsInvestigation.length > 0 && (
-            <p className="text-[11px] text-amber-800 mt-3 pt-3 border-t border-amber-200">
-              {needsInvestigation.length} account{needsInvestigation.length === 1 ? '' : 's'} already had an opening
-              balance, so the gap points to a missing or duplicated transaction. Adjusting the opening
-              figure would hide that rather than fix it — open the account and check its transactions.
-            </p>
+              {/* An account that already had an opening balance and still disagrees is a
+                  different problem: the gap is evidence of a missing or duplicated
+                  transaction, and moving the opening figure would bury it. Deliberately not
+                  offered a one-click fix. */}
+              {needsInvestigation.length > 0 && (
+                <p className="text-[11px] text-amber-800 mt-3 pt-3 border-t border-amber-200">
+                  {needsInvestigation.length} account{needsInvestigation.length === 1 ? '' : 's'} already had an opening
+                  balance, so the gap points to a missing or duplicated transaction. Adjusting the opening
+                  figure would hide that rather than fix it — open the account and check its transactions.
+                </p>
+              )}
+            </>
           )}
 
           {error && <p className="text-xs text-red-700 mt-2">{error}</p>}
