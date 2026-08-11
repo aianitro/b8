@@ -5,6 +5,7 @@ import { AlertTriangle } from 'lucide-react';
 import db from '@/lib/db';
 import { computeCurrentNetWorth } from '@/lib/netWorth';
 import NetWorthTrendChart, { type NetWorthTrendPoint } from '@/components/charts/NetWorthTrendChart';
+import NetWorthBreakdown, { type BreakdownComponent } from '@/components/NetWorthBreakdown';
 import type { NetWorthComponent } from '@/lib/domain/netWorth';
 
 const fmt = (n: number) =>
@@ -69,6 +70,22 @@ export default async function NetWorthPage() {
 
   const unvaluedNames = netWorth.unvaluedPropertyIds.map((id) => labels.properties.get(String(id)) ?? `Property ${id}`);
 
+  // Names/hrefs resolved here, server-side, so NetWorthBreakdown stays a small client
+  // component with no need for the accounts/properties label maps of its own.
+  const breakdownComponents: BreakdownComponent[] = COMPONENTS.map((c) => ({
+    key: c.key,
+    label: c.label,
+    accent: c.accent,
+    amount: amountOf(c.key),
+    lines: (byComponent.get(c.key) ?? []).map((l) => ({
+      kind: l.kind,
+      id: l.id,
+      value: l.value,
+      name: l.kind === 'property' ? labels.properties.get(l.id) ?? `Property ${l.id}` : labels.accounts.get(l.id) ?? l.id,
+      href: l.kind === 'property' ? `/properties/${l.id}` : `/accounts/${l.id}`,
+    })),
+  }));
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
       <div className="mb-6">
@@ -127,45 +144,7 @@ export default async function NetWorthPage() {
         <NetWorthTrendChart data={snapshots} />
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">What makes it up</h2>
-        <div className="space-y-5">
-          {COMPONENTS.map((c) => {
-            const lines = (byComponent.get(c.key) ?? []).slice().sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-            if (lines.length === 0) return null;
-            return (
-              <div key={c.key}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="flex items-center gap-2">
-                    <span className={`w-1.5 h-1.5 rounded-full ${c.accent}`} />
-                    <span className="text-xs font-semibold text-slate-700">{c.label}</span>
-                  </span>
-                  <span className="text-xs font-mono font-semibold text-slate-700">{signed(amountOf(c.key))}</span>
-                </div>
-                <ul className="divide-y divide-slate-50">
-                  {lines.map((l) => {
-                    const name = l.kind === 'property'
-                      ? labels.properties.get(l.id) ?? `Property ${l.id}`
-                      : labels.accounts.get(l.id) ?? l.id;
-                    const href = l.kind === 'property' ? `/properties/${l.id}` : `/accounts/${l.id}`;
-                    return (
-                      <li key={`${l.kind}-${l.id}`} className="flex items-center justify-between py-1.5 text-xs">
-                        <Link href={href} className="text-slate-500 hover:text-slate-800 truncate transition-colors">
-                          {name}
-                          {l.kind === 'property' && <span className="text-slate-300 ml-1.5">property</span>}
-                        </Link>
-                        <span className={`font-mono shrink-0 ${l.value < 0 ? 'text-red-500' : 'text-slate-600'}`}>
-                          {signed(l.value)}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <NetWorthBreakdown components={breakdownComponents} />
     </div>
   );
 }
