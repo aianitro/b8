@@ -45,6 +45,8 @@ export default function PropertyLinkedAccounts({ propertyId, accounts }: Props) 
   }
 
   const linked = accounts.filter((a) => a.linked);
+  const cashAccounts = linked.filter((a) => !a.isLiability && a.balance !== null);
+  const operatingCash = cashAccounts.reduce((sum, a) => sum + (a.balance ?? 0), 0);
   const q = filter.trim().toLowerCase();
   // Linked first so an account just ticked doesn't jump out of view while the panel is open.
   const editable = [...linked, ...accounts.filter((a) => !a.linked)]
@@ -125,7 +127,21 @@ export default function PropertyLinkedAccounts({ propertyId, accounts }: Props) 
           mortgage and operating account.
         </p>
       ) : (
-        <ul className="space-y-1">{linked.map((a) => row(a, false))}</ul>
+        <>
+          <ul className="space-y-1">{linked.map((a) => row(a, false))}</ul>
+          {/* Lives here rather than in the page header: this card already lists the very
+              accounts it totals, so the number is explained by what sits above it. Cash is
+              reported separately from equity on purpose — it is liquid and equity is not. */}
+          {cashAccounts.length > 0 && (
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+              <span className="text-[11px] text-slate-500">
+                Operating cash
+                {cashAccounts.length > 1 && <span className="text-slate-400"> · {cashAccounts.length} accounts</span>}
+              </span>
+              <span className="text-xs font-mono font-semibold text-slate-700">{fmt(operatingCash)}</span>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

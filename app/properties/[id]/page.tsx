@@ -136,13 +136,6 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
     balance: a.balance === null ? null : Number(a.balance),
   }));
 
-  // Operating cash: the linked non-liability accounts. Reported alongside equity rather than
-  // folded into it — cash is liquid and equity is not, and adding them would make "equity" stop
-  // meaning what you would net on a sale, which the P&L's total-return math depends on.
-  const operatingCash = linkableAccounts
-    .filter((a) => a.property_id !== null && !a.is_liability && a.balance !== null)
-    .reduce((sum, a) => sum + Number(a.balance), 0);
-  const hasOperatingCash = linkableAccounts.some((a) => a.property_id !== null && !a.is_liability);
 
   // Appreciation is measured between the first and last valuation recorded *within the year*,
   // so it reflects this year's movement rather than the whole history. One reading gives no
@@ -184,29 +177,24 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
           <h1 className="text-2xl font-bold text-slate-900">{property.nickname}</h1>
           <p className="text-sm text-slate-500 mt-1">{property.address || 'No address'}</p>
         </div>
+        {/* One figure, not four. Value and Mortgage are the *inputs* to equity, not its peers —
+            given equal weight they read as four unrelated facts to reconcile. Equity leads;
+            its derivation sits underneath in small text where it explains rather than competes.
+            A mortgage-free property skips the derivation entirely and simply reports its value,
+            since "$1,551,992 less $0 mortgage" is noise. Operating cash moved to the linked
+            accounts card, which already lists the very accounts it totals. */}
         {latest && (
-          <div className="flex items-center gap-6 text-right">
-            <div>
-              <p className="text-[10px] uppercase tracking-wide text-slate-400">Value</p>
-              <p className="text-lg font-mono font-semibold text-slate-800">{fmt(latest.value)}</p>
-            </div>
+          <div className="text-right shrink-0">
+            <p className="text-[10px] uppercase tracking-wide text-slate-400">
+              {latest.mortgage !== null ? 'Equity' : 'Value'}
+            </p>
+            <p className="text-3xl font-mono font-semibold text-slate-900 leading-tight">
+              {fmt(latest.mortgage !== null ? (latest.equity ?? 0) : latest.value)}
+            </p>
             {latest.mortgage !== null && (
-              <div>
-                <p className="text-[10px] uppercase tracking-wide text-slate-400">Mortgage</p>
-                <p className="text-lg font-mono font-semibold text-red-500">−{fmt(latest.mortgage)}</p>
-              </div>
-            )}
-            {latest.equity !== null && (
-              <div>
-                <p className="text-[10px] uppercase tracking-wide text-slate-400">Equity</p>
-                <p className="text-lg font-mono font-semibold text-violet-600">{fmt(latest.equity)}</p>
-              </div>
-            )}
-            {hasOperatingCash && (
-              <div>
-                <p className="text-[10px] uppercase tracking-wide text-slate-400">Operating cash</p>
-                <p className="text-lg font-mono font-semibold text-slate-600">{fmt(operatingCash)}</p>
-              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {fmt(latest.value)} value − {fmt(latest.mortgage)} mortgage
+              </p>
             )}
           </div>
         )}
