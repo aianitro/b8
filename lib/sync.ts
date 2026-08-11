@@ -3,6 +3,11 @@ import { reconcileAccountIds } from './plaidReconcile';
 import { recordPlaidBalances } from './plaidBalances';
 import db from './db';
 import { createLogger } from './logger';
+import { matchReissuedTransactions } from './domain/txnMatch';
+// Reused rather than re-written: node-postgres hands back a DATE column as a JS Date at local
+// midnight, and toISOString() would shift it a day earlier at any UTC+ offset. That trap is
+// already solved (and tested) there; duplicating the logic here is how the two drift apart.
+import { toDateInputValue as toDateOnly } from './domain/property';
 
 const log = createLogger('sync');
 
@@ -44,6 +49,47 @@ async function syncItem(
 
     const knownIds = new Set(accountIds);
 
+    // A re-auth gives the bank a new Plaid Item, and transaction_id is scoped to the Item — so
+    // the same real transactions arrive with brand-new ids and the upsert below, keyed on
+    // plaid_transaction_id, sees no conflict and stores history twice. Before inserting, pair
+    // each incoming row against a stored one that Plaid no longer refers to by id and update
+    // that row's id in place instead: the transaction keeps its row, and with it whatever
+    // category, hidden flag and transfer group it had.
+    const eligible = newTxns.filter((t) => knownIds.has(t.account_id) && !t.pending);
+    const reidentified = new Set<string>();
+    if (eligible.length > 0) {
+      const dates = eligible.map((t) => t.date);
+      const existingRows = await db.query<{
+        id: number; plaid_transaction_id: string; account_id: string; date: Date; amount: string; name: string | null;
+      }>(
+        `SELECT id, plaid_transaction_id, account_id, date, amount, name
+           FROM transactions
+          WHERE account_id = ANY($1) AND date BETWEEN $2 AND $3`,
+        [accountIds, dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b))]
+      );
+
+      const { reidentify } = matchReissuedTransactions(
+        eligible.map((t) => ({
+          plaidTransactionId: t.transaction_id, accountId: t.account_id,
+          date: t.date, amount: t.amount, name: t.name ?? null,
+        })),
+        existingRows.rows.map((r) => ({
+          id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id,
+          date: toDateOnly(r.date), amount: Number(r.amount), name: r.name,
+        }))
+      );
+
+      for (const m of reidentify) {
+        await db.query('UPDATE transactions SET plaid_transaction_id = $1 WHERE id = $2', [
+          m.newPlaidTransactionId, m.existingId,
+        ]);
+        reidentified.add(m.newPlaidTransactionId);
+      }
+      if (reidentify.length > 0) {
+        log.info('re-identified transactions after item change', { count: reidentify.length });
+      }
+    }
+
     for (const txn of newTxns) {
       if (!knownIds.has(txn.account_id)) {
         unmatchedAccountIds.add(txn.account_id); // unrecognized even after reconciliation — surfaced, not silently dropped
@@ -57,6 +103,9 @@ async function syncItem(
       if (txn.pending) continue;
       const plaidCategory = txn.personal_finance_category?.primary ?? null;
       const { mapped, ruleApplied } = applyRule(plaidCategory, rules);
+      // Re-identified rows now carry this id, so the upsert below finds them by conflict and
+      // refreshes their Plaid-sourced fields — deliberately without touching mapped_category,
+      // which the DO UPDATE clause already leaves alone.
       await db.query(
         `INSERT INTO transactions
            (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied)
@@ -71,7 +120,9 @@ async function syncItem(
         [txn.transaction_id, txn.account_id, txn.date, txn.amount,
          txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied]
       );
-      added++;
+      // A re-identified row is not new to the ledger, only newly-numbered — counting it as
+      // added would report a re-auth as hundreds of fresh transactions.
+      if (!reidentified.has(txn.transaction_id)) added++;
     }
 
     for (const txn of modified) {
