@@ -44,11 +44,20 @@ export async function POST(req: NextRequest) {
     await Promise.all(
       accounts.map((a) =>
         db.query(
+          // cursor is reset whenever access_token changes. A transactionsSync cursor is scoped
+          // to the Item that issued it, so carrying one across a re-auth makes every subsequent
+          // sync fail with INVALID_FIELD: "cursor not associated with access_token" — and
+          // because last_synced_at only advances on success, the connection then goes silently
+          // stale while Plaid itself reports the Item as perfectly healthy. Nothing is lost by
+          // resetting: a null cursor makes the next sync a full backfill, and transactions
+          // upsert on plaid_transaction_id.
           `INSERT INTO accounts (id, name, type, subtype, mask, persistent_account_id, access_token, bank)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (id) DO UPDATE
              SET name = EXCLUDED.name, mask = EXCLUDED.mask, persistent_account_id = EXCLUDED.persistent_account_id,
                  access_token = EXCLUDED.access_token,
+                 cursor = CASE WHEN accounts.access_token IS DISTINCT FROM EXCLUDED.access_token
+                               THEN NULL ELSE accounts.cursor END,
                  bank = COALESCE(accounts.bank, EXCLUDED.bank)`,
           [a.account_id, a.name, a.type, a.subtype ?? null, a.mask ?? null, a.persistent_account_id ?? null, access_token, bankName]
         ).then(async (res) => {
@@ -72,8 +81,13 @@ export async function POST(req: NextRequest) {
             );
             if (dup.rows.length > 0) {
               const existingId = dup.rows[0].id;
+              // Same cursor reset as above, and unconditional here: this branch only runs when
+              // the account is being repointed at a different Item, so its cursor is
+              // necessarily from the old one.
               await db.query(
-                'UPDATE accounts SET access_token = $1, mask = $2, persistent_account_id = $3, bank = COALESCE(bank, $4) WHERE id = $5',
+                `UPDATE accounts SET access_token = $1, mask = $2, persistent_account_id = $3,
+                        cursor = NULL, bank = COALESCE(bank, $4)
+                   WHERE id = $5`,
                 [access_token, a.mask ?? null, a.persistent_account_id ?? null, bankName, existingId]
               );
               await db.query('DELETE FROM accounts WHERE id = $1', [a.account_id]);
