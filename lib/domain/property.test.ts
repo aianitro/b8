@@ -122,33 +122,33 @@ describe('computePropertyEquity', () => {
 });
 
 describe('valueAsOf — day granularity', () => {
+  // Dates are built from LOCAL components on purpose. valueAsOf compares local calendar days
+  // (matching toDateInputValue and how pg hands back a DATE), so a literal like
+  // '2026-08-07T18:00:00-07:00' is the 7th in Pacific but the 8th in UTC — which passed here
+  // and failed in CI. Constructing from parts keeps "same day" true in any timezone.
+  const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m - 1, d, h, min);
+
   it('matches an observation recorded LATER the same day', () => {
     // The real bug: a hand-entered valuation is midnight, a synced balance is 06:17 the same
     // morning. Instant comparison excluded it and equity vanished from the property header.
-    expect(valueAsOf(
-      [{ value: 232464.89, valuedAt: '2026-08-07T06:17:13-07:00' }],
-      '2026-08-07T00:00:00-07:00'
-    )).toBe(232464.89);
+    expect(valueAsOf([{ value: 232464.89, valuedAt: at(2026, 8, 7, 6, 17) }], at(2026, 8, 7))).toBe(232464.89);
   });
 
   it('still excludes the following day', () => {
-    expect(valueAsOf(
-      [{ value: 100, valuedAt: '2026-08-08T00:00:01-07:00' }],
-      '2026-08-07T00:00:00-07:00'
-    )).toBeNull();
+    expect(valueAsOf([{ value: 100, valuedAt: at(2026, 8, 8, 0, 1) }], at(2026, 8, 7))).toBeNull();
   });
 
   it('picks the latest observation within the matching day', () => {
     expect(valueAsOf([
-      { value: 1, valuedAt: '2026-08-07T02:00:00-07:00' },
-      { value: 2, valuedAt: '2026-08-07T18:00:00-07:00' },
-    ], '2026-08-07T00:00:00-07:00')).toBe(2);
+      { value: 1, valuedAt: at(2026, 8, 7, 2) },
+      { value: 2, valuedAt: at(2026, 8, 7, 18) },
+    ], at(2026, 8, 7))).toBe(2);
   });
 
   it('still prefers a same-day reading over an older one', () => {
     expect(valueAsOf([
-      { value: 90, valuedAt: '2026-08-01T12:00:00-07:00' },
-      { value: 99, valuedAt: '2026-08-07T06:17:00-07:00' },
-    ], '2026-08-07T00:00:00-07:00')).toBe(99);
+      { value: 90, valuedAt: at(2026, 8, 1, 12) },
+      { value: 99, valuedAt: at(2026, 8, 7, 6, 17) },
+    ], at(2026, 8, 7))).toBe(99);
   });
 });
