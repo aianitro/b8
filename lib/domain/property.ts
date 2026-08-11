@@ -62,13 +62,26 @@ export function toDateInputValue(d: Date | string | null): string {
  *
  * Step rather than linear interpolation: a balance stays what it was until the next reading
  * replaces it. Inventing intermediate values would be presenting a guess as an observation.
+ *
+ * Compared at DAY granularity, not by exact timestamp, and that distinction is load-bearing: a
+ * hand-entered property valuation lands at midnight (the date picker submits a date, not a
+ * time) while a synced mortgage balance carries the real clock time it arrived — 06:17 the same
+ * morning. Comparing instants meant a balance recorded hours *after* midnight on the very same
+ * day failed the "at or before" test, so a same-day pair could never match and equity silently
+ * vanished from the property header. Within a day, the latest observation still wins.
  */
+const dayOf = (d: Date | string): number => {
+  const x = new Date(d);
+  return Date.UTC(x.getFullYear(), x.getMonth(), x.getDate());
+};
+
 export function valueAsOf(rows: PropertyValuationRow[] | { value: number; valuedAt: Date | string }[], asOf: Date | string): number | null {
-  const asOfMs = new Date(asOf).getTime();
+  const asOfDay = dayOf(asOf);
   let best: { value: number; ms: number } | null = null;
   for (const row of rows) {
+    if (dayOf(row.valuedAt) > asOfDay) continue;
     const ms = new Date(row.valuedAt).getTime();
-    if (ms <= asOfMs && (best === null || ms > best.ms)) best = { value: row.value, ms };
+    if (best === null || ms > best.ms) best = { value: row.value, ms };
   }
   return best?.value ?? null;
 }

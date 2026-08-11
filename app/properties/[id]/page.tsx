@@ -64,12 +64,28 @@ async function getValuations(id: string): Promise<ValuationRow[]> {
 // Every account eligible to be this property's mortgage: valuation-mode liabilities that are
 // either unlinked or already linked here. Scoping lives in the query rather than the DB — see
 // the note on PATCH /api/accounts/[id]'s property_id handling.
-async function getLinkableAccounts(propertyId: string) {
-  const result = await db.query<{ id: string; name: string; is_liability: boolean; property_id: number | null }>(
-    `SELECT id, name, is_liability, property_id FROM accounts
-      WHERE property_id IS NULL OR property_id = $1
-      ORDER BY is_liability DESC, name`,
-    [propertyId]
+// Balance is resolved per account's own regime: a valuation-mode account (a mortgage) reports
+// its latest recorded valuation, a ledger one its opening balance plus this year's transactions
+// — the same two-regime rule computeNetWorthBreakdown() applies, so the figures shown here
+// cannot disagree with the ones on /net-worth.
+async function getLinkableAccounts(propertyId: string, year: number) {
+  const result = await db.query<{
+    id: string; name: string; is_liability: boolean; property_id: number | null;
+    valuation_mode: string; balance: string | null;
+  }>(
+    `SELECT a.id, a.name, a.is_liability, a.property_id, a.valuation_mode,
+            CASE WHEN a.valuation_mode = 'valuation'
+                 THEN (SELECT v.value FROM account_valuations v
+                        WHERE v.account_id = a.id ORDER BY v.valued_at DESC LIMIT 1)
+                 ELSE COALESCE((SELECT b.beginning_balance FROM account_balances b
+                                 WHERE b.account_id = a.id AND b.year = $2), 0)
+                    + COALESCE((SELECT SUM(-t.amount) FROM transactions t
+                                 WHERE t.account_id = a.id AND EXTRACT(YEAR FROM t.date) = $2), 0)
+            END AS balance
+       FROM accounts a
+      WHERE a.property_id IS NULL OR a.property_id = $1
+      ORDER BY a.is_liability DESC, a.name`,
+    [propertyId, year]
   );
   return result.rows;
 }
@@ -106,7 +122,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
   const year = new Date().getFullYear();
 
   const [property, valuations, linkableAccounts, pnlTransactions] = await Promise.all([
-    getProperty(id), getValuations(id), getLinkableAccounts(id), getPnlTransactions(id, year),
+    getProperty(id), getValuations(id), getLinkableAccounts(id, year), getPnlTransactions(id, year),
   ]);
 
   if (!property) notFound();
@@ -117,7 +133,16 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
 
   const accountsForLinking: LinkableAccount[] = linkableAccounts.map((a) => ({
     id: a.id, name: a.name, isLiability: a.is_liability, linked: a.property_id !== null,
+    balance: a.balance === null ? null : Number(a.balance),
   }));
+
+  // Operating cash: the linked non-liability accounts. Reported alongside equity rather than
+  // folded into it — cash is liquid and equity is not, and adding them would make "equity" stop
+  // meaning what you would net on a sale, which the P&L's total-return math depends on.
+  const operatingCash = linkableAccounts
+    .filter((a) => a.property_id !== null && !a.is_liability && a.balance !== null)
+    .reduce((sum, a) => sum + Number(a.balance), 0);
+  const hasOperatingCash = linkableAccounts.some((a) => a.property_id !== null && !a.is_liability);
 
   // Appreciation is measured between the first and last valuation recorded *within the year*,
   // so it reflects this year's movement rather than the whole history. One reading gives no
@@ -175,6 +200,12 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
               <div>
                 <p className="text-[10px] uppercase tracking-wide text-slate-400">Equity</p>
                 <p className="text-lg font-mono font-semibold text-violet-600">{fmt(latest.equity)}</p>
+              </div>
+            )}
+            {hasOperatingCash && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-slate-400">Operating cash</p>
+                <p className="text-lg font-mono font-semibold text-slate-600">{fmt(operatingCash)}</p>
               </div>
             )}
           </div>

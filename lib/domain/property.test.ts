@@ -120,3 +120,35 @@ describe('computePropertyEquity', () => {
     expect(result.map((r) => r.equity)).toEqual([140000, 70000, 1800000]);
   });
 });
+
+describe('valueAsOf — day granularity', () => {
+  it('matches an observation recorded LATER the same day', () => {
+    // The real bug: a hand-entered valuation is midnight, a synced balance is 06:17 the same
+    // morning. Instant comparison excluded it and equity vanished from the property header.
+    expect(valueAsOf(
+      [{ value: 232464.89, valuedAt: '2026-08-07T06:17:13-07:00' }],
+      '2026-08-07T00:00:00-07:00'
+    )).toBe(232464.89);
+  });
+
+  it('still excludes the following day', () => {
+    expect(valueAsOf(
+      [{ value: 100, valuedAt: '2026-08-08T00:00:01-07:00' }],
+      '2026-08-07T00:00:00-07:00'
+    )).toBeNull();
+  });
+
+  it('picks the latest observation within the matching day', () => {
+    expect(valueAsOf([
+      { value: 1, valuedAt: '2026-08-07T02:00:00-07:00' },
+      { value: 2, valuedAt: '2026-08-07T18:00:00-07:00' },
+    ], '2026-08-07T00:00:00-07:00')).toBe(2);
+  });
+
+  it('still prefers a same-day reading over an older one', () => {
+    expect(valueAsOf([
+      { value: 90, valuedAt: '2026-08-01T12:00:00-07:00' },
+      { value: 99, valuedAt: '2026-08-07T06:17:00-07:00' },
+    ], '2026-08-07T00:00:00-07:00')).toBe(99);
+  });
+});
