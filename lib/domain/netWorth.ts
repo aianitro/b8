@@ -23,6 +23,11 @@ export interface NetWorthContribution {
   component: NetWorthComponent;
   /** Signed exactly as it lands in the component total. */
   value: number;
+  /** Set only within realEstateEquity, on both a property's own line and its linked mortgage's
+   *  line — the join key groupRealEstateEquity() uses to merge the pair into one net-equity
+   *  line. Null everywhere else; a mortgage that isn't property-linked lands in `liabilities`
+   *  instead and was never given one. */
+  propertyId: number | null;
 }
 
 export interface NetWorthBreakdown {
@@ -76,14 +81,14 @@ export function computeNetWorthBreakdown(
       // case the pair is dropped together rather than leaving a naked debt.
       if (!excluded.has(a.propertyId)) {
         linkedMortgageTotal += magnitude;
-        contributions.push({ kind: 'account', id: a.id, component: 'realEstateEquity', value: -magnitude });
+        contributions.push({ kind: 'account', id: a.id, component: 'realEstateEquity', value: -magnitude, propertyId: a.propertyId });
       }
       continue;
     }
 
     if (isValuation && a.isLiability) {
       liabilities -= magnitude; // stored as a positive amount owed; the sign is derived here
-      contributions.push({ kind: 'account', id: a.id, component: 'liabilities', value: -magnitude });
+      contributions.push({ kind: 'account', id: a.id, component: 'liabilities', value: -magnitude, propertyId: null });
       continue;
     }
 
@@ -95,6 +100,7 @@ export function computeNetWorthBreakdown(
       kind: 'account', id: a.id,
       component: a.landscape === 'operational' ? 'operational' : 'capitalFinancial',
       value: magnitude,
+      propertyId: null,
     });
   }
 
@@ -102,7 +108,7 @@ export function computeNetWorthBreakdown(
   for (const [id, value] of latestPropertyValues) {
     if (!excluded.has(id)) {
       propertyTotal += value;
-      contributions.push({ kind: 'property', id: String(id), component: 'realEstateEquity', value });
+      contributions.push({ kind: 'property', id: String(id), component: 'realEstateEquity', value, propertyId: id });
     }
   }
 
@@ -110,4 +116,29 @@ export function computeNetWorthBreakdown(
   const total = operational + capitalFinancial + realEstateEquity + liabilities;
 
   return { operational, capitalFinancial, realEstateEquity, liabilities, total, unvaluedPropertyIds, contributions };
+}
+
+export interface RealEstateEquityLine {
+  propertyId: number;
+  /** Property's own value plus its linked mortgage's (already-negative) contribution — the
+   *  same arithmetic computePropertyEquity() does in lib/domain/property.ts, arrived at here
+   *  from the contribution list instead so the two views can never disagree. */
+  value: number;
+}
+
+/**
+ * Collapses realEstateEquity's per-account, per-property lines into one net-equity line per
+ * property — a rental's value and its mortgage are two contributions to the same total, not
+ * two things a reader needs to net in their head. Every realEstateEquity contribution carries
+ * a propertyId for exactly this grouping; nothing else in the breakdown does, and nothing else
+ * needs merging the same way, since only real estate splits an asset from its financing across
+ * two separate rows to begin with.
+ */
+export function groupRealEstateEquity(contributions: NetWorthContribution[]): RealEstateEquityLine[] {
+  const byProperty = new Map<number, number>();
+  for (const c of contributions) {
+    if (c.component !== 'realEstateEquity' || c.propertyId === null) continue;
+    byProperty.set(c.propertyId, (byProperty.get(c.propertyId) ?? 0) + c.value);
+  }
+  return [...byProperty.entries()].map(([propertyId, value]) => ({ propertyId, value }));
 }

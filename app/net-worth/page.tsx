@@ -6,7 +6,7 @@ import db from '@/lib/db';
 import { computeCurrentNetWorth } from '@/lib/netWorth';
 import NetWorthTrendChart, { type NetWorthTrendPoint } from '@/components/charts/NetWorthTrendChart';
 import NetWorthBreakdown, { type BreakdownComponent } from '@/components/NetWorthBreakdown';
-import type { NetWorthComponent } from '@/lib/domain/netWorth';
+import { groupRealEstateEquity, type NetWorthComponent } from '@/lib/domain/netWorth';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -70,6 +70,19 @@ export default async function NetWorthPage() {
 
   const unvaluedNames = netWorth.unvaluedPropertyIds.map((id) => labels.properties.get(String(id)) ?? `Property ${id}`);
 
+  // Real estate is the one component where an asset and its financing are split across two
+  // separate contributions (the property's value, its mortgage's balance) — everywhere else a
+  // contribution already IS the whole line. groupRealEstateEquity() merges each property's
+  // pair into one net-equity line, so "Rental A" shows once, at its equity, not as a value line
+  // and a mortgage line a reader has to net in their head.
+  const realEstateLines = groupRealEstateEquity(netWorth.contributions).map((l) => ({
+    kind: 'property' as const,
+    id: String(l.propertyId),
+    value: l.value,
+    name: labels.properties.get(String(l.propertyId)) ?? `Property ${l.propertyId}`,
+    href: `/properties/${l.propertyId}`,
+  }));
+
   // Names/hrefs resolved here, server-side, so NetWorthBreakdown stays a small client
   // component with no need for the accounts/properties label maps of its own.
   const breakdownComponents: BreakdownComponent[] = COMPONENTS.map((c) => ({
@@ -77,13 +90,15 @@ export default async function NetWorthPage() {
     label: c.label,
     accent: c.accent,
     amount: amountOf(c.key),
-    lines: (byComponent.get(c.key) ?? []).map((l) => ({
-      kind: l.kind,
-      id: l.id,
-      value: l.value,
-      name: l.kind === 'property' ? labels.properties.get(l.id) ?? `Property ${l.id}` : labels.accounts.get(l.id) ?? l.id,
-      href: l.kind === 'property' ? `/properties/${l.id}` : `/accounts/${l.id}`,
-    })),
+    lines: c.key === 'realEstateEquity'
+      ? realEstateLines
+      : (byComponent.get(c.key) ?? []).map((l) => ({
+          kind: l.kind,
+          id: l.id,
+          value: l.value,
+          name: l.kind === 'property' ? labels.properties.get(l.id) ?? `Property ${l.id}` : labels.accounts.get(l.id) ?? l.id,
+          href: l.kind === 'property' ? `/properties/${l.id}` : `/accounts/${l.id}`,
+        })),
   }));
 
   return (

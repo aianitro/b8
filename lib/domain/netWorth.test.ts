@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeNetWorthBreakdown, type NetWorthAccount } from './netWorth';
+import { computeNetWorthBreakdown, groupRealEstateEquity, type NetWorthAccount } from './netWorth';
 
 const acct = (
   id: string,
@@ -112,8 +112,8 @@ describe('contributions', () => {
       new Map([['chk', 8000]]), new Map([['401k', 400000]]), new Map(), []
     );
     expect(r.contributions).toEqual([
-      { kind: 'account', id: 'chk', component: 'operational', value: 8000 },
-      { kind: 'account', id: '401k', component: 'capitalFinancial', value: 400000 },
+      { kind: 'account', id: 'chk', component: 'operational', value: 8000, propertyId: null },
+      { kind: 'account', id: '401k', component: 'capitalFinancial', value: 400000, propertyId: null },
     ]);
   });
 
@@ -123,8 +123,8 @@ describe('contributions', () => {
       [acct('mtg', 'capital', 'valuation', true, 1)],
       new Map(), new Map([['mtg', 310000]]), new Map([[1, 450000]]), [1]
     );
-    expect(r.contributions).toContainEqual({ kind: 'account', id: 'mtg', component: 'realEstateEquity', value: -310000 });
-    expect(r.contributions).toContainEqual({ kind: 'property', id: '1', component: 'realEstateEquity', value: 450000 });
+    expect(r.contributions).toContainEqual({ kind: 'account', id: 'mtg', component: 'realEstateEquity', value: -310000, propertyId: 1 });
+    expect(r.contributions).toContainEqual({ kind: 'property', id: '1', component: 'realEstateEquity', value: 450000, propertyId: 1 });
     expect(r.contributions.filter((c) => c.component === 'liabilities')).toEqual([]);
   });
 
@@ -154,5 +154,61 @@ describe('contributions', () => {
     expect(sumOf('realEstateEquity')).toBe(r.realEstateEquity);
     expect(sumOf('liabilities')).toBe(r.liabilities);
     expect(r.contributions.reduce((s, x) => s + x.value, 0)).toBe(r.total);
+  });
+});
+
+describe('groupRealEstateEquity', () => {
+  it('merges a property line and its mortgage line into one net-equity line', () => {
+    const r = computeNetWorthBreakdown(
+      [acct('mtg', 'capital', 'valuation', true, 1)],
+      new Map(), new Map([['mtg', 310000]]), new Map([[1, 450000]]), [1]
+    );
+    expect(groupRealEstateEquity(r.contributions)).toEqual([{ propertyId: 1, value: 140000 }]);
+  });
+
+  it('leaves a mortgage-free property as its own single line, value unchanged', () => {
+    const r = computeNetWorthBreakdown([], new Map(), new Map(), new Map([[3, 1800000]]), [3]);
+    expect(groupRealEstateEquity(r.contributions)).toEqual([{ propertyId: 3, value: 1800000 }]);
+  });
+
+  it('groups a realistic multi-property portfolio independently, one mortgaged and one not', () => {
+    const r = computeNetWorthBreakdown(
+      [acct('mtgA', 'capital', 'valuation', true, 1), acct('mtgB', 'capital', 'valuation', true, 2)],
+      new Map(),
+      new Map([['mtgA', 310000], ['mtgB', 180000]]),
+      new Map([[1, 450000], [2, 250000], [3, 1800000]]),
+      [1, 2, 3]
+    );
+    const lines = groupRealEstateEquity(r.contributions).sort((a, b) => a.propertyId - b.propertyId);
+    expect(lines).toEqual([
+      { propertyId: 1, value: 140000 },
+      { propertyId: 2, value: 70000 },
+      { propertyId: 3, value: 1800000 },
+    ]);
+  });
+
+  it('ignores contributions from other components entirely', () => {
+    const r = computeNetWorthBreakdown(
+      [acct('chk', 'operational', 'ledger'), acct('loan', 'capital', 'valuation', true, null)],
+      new Map([['chk', 8000]]), new Map([['loan', 25000]]), new Map(), []
+    );
+    expect(groupRealEstateEquity(r.contributions)).toEqual([]);
+  });
+
+  it('sums to the same realEstateEquity total the breakdown itself reports', () => {
+    const r = computeNetWorthBreakdown(
+      [acct('mtgA', 'capital', 'valuation', true, 1), acct('mtgB', 'capital', 'valuation', true, 2)],
+      new Map(),
+      new Map([['mtgA', 310000], ['mtgB', 180000]]),
+      new Map([[1, 450000], [2, 250000]]),
+      [1, 2]
+    );
+    const total = groupRealEstateEquity(r.contributions).reduce((s, l) => s + l.value, 0);
+    expect(total).toBe(r.realEstateEquity);
+  });
+
+  it('returns empty for no real-estate activity at all', () => {
+    const r = computeNetWorthBreakdown([acct('chk', 'operational', 'ledger')], new Map([['chk', 100]]), new Map(), new Map(), []);
+    expect(groupRealEstateEquity(r.contributions)).toEqual([]);
   });
 });
