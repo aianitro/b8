@@ -74,4 +74,25 @@ Ports are published to `127.0.0.1` only, matching the dev/start scripts' own loc
 
 This repo contains only application code and schema — no real account data, transactions, or credentials. All of that lives in a local Postgres database and a gitignored `.env.local`, neither of which is part of this repository.
 
-That includes the screenshots above. They were produced by restoring a backup, loading a wholly synthetic dataset, capturing the pages, and restoring the real database afterwards — so every balance, bank, merchant, property and address shown is invented. Street and city names are fictional and the postal codes are deliberately invalid.
+That includes the screenshots above. They were produced by backing up the database, loading a wholly synthetic dataset, capturing the pages, and restoring afterwards — so every balance, bank, merchant, property and address shown is invented. Street and city names are fictional and the postal codes are deliberately invalid.
+
+### Regenerating the screenshots
+
+`scripts/seed-demo.mjs` produces that dataset. It is anchored to the day it runs, so the figures always look current rather than frozen at whenever the screenshots were last taken.
+
+**It truncates every table before writing**, and the `DATABASE_URL` in `.env.local` is normally the real database — so it refuses to run without an explicit flag, and there is no default-yes path:
+
+```sh
+pg_dump -Fc -d b8_finance -f backup.dump          # back up first
+npm run seed:demo -- --yes-wipe-my-database
+# …capture the pages…
+psql -d b8_finance -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+pg_restore -d b8_finance --no-owner backup.dump   # then verify row counts match
+```
+
+Set `DATABASE_URL` in the environment to point it at a scratch database instead, which is the safer way to try it:
+
+```sh
+createdb b8_demo && DATABASE_URL=postgresql://localhost/b8_demo npx node-pg-migrate up
+DATABASE_URL=postgresql://localhost/b8_demo npm run seed:demo -- --yes-wipe-my-database
+```
