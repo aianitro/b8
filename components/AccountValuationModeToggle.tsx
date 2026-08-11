@@ -41,8 +41,13 @@ export default function AccountValuationModeToggle({ accountId, mode, isLiabilit
 
   return (
     // Neutral while ledger (the default, and true of most accounts) and tinted once it isn't,
-    // so the handful of valuation-mode accounts stand out from a long list of cash ones —
-    // liabilities in red because they subtract from net worth.
+    // so the handful of valuation-mode accounts stand out from a long list of cash ones.
+    // Liability is amber, not red: this is a classification, correctly set, doing exactly what
+    // it should — subtracting from net worth is what a mortgage is *supposed* to do here, not a
+    // problem with the account. Red is reserved elsewhere in this app for an actual mismatch
+    // (DriftAlertCard's ledger-vs-bank disagreement); reusing it for a normal, working state
+    // read as an error to at least one person looking at it, which is the whole reason to keep
+    // that color meaning exclusive to things that actually need attention.
     <select
       value={value}
       onChange={handleChange}
@@ -52,7 +57,7 @@ export default function AccountValuationModeToggle({ accountId, mode, isLiabilit
         value === 'ledger'
           ? 'bg-white text-slate-500 border-slate-200'
           : value === 'liability'
-            ? 'bg-red-50 text-red-700 border-red-100'
+            ? 'bg-amber-50 text-amber-700 border-amber-100'
             : 'bg-emerald-50 text-emerald-700 border-emerald-100'
       }`}
     >
