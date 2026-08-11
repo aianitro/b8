@@ -7,7 +7,7 @@ import MonthlySpendingChart, { type MonthlySpendingData } from '@/components/cha
 import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
 import CategoryDonutChart, { type CategorySlice } from '@/components/charts/CategoryDonutChart';
 import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts/BudgetVsActualChart';
-import NetWorthChart from '@/components/charts/NetWorthChart';
+import LandscapeBalanceChart from '@/components/charts/LandscapeBalanceChart';
 import Sparkline from '@/components/charts/Sparkline';
 import { STATUS_CLASS, NEUTRAL_HEX, STATUS_HEX, type StatusColor } from '@/lib/chartColors';
 import { computeCurrentNetWorth } from '@/lib/netWorth';
@@ -26,11 +26,18 @@ const fmt = (n: number) =>
 async function getStats() {
   const result = await db.query<{ total_budget: string; ytd_spent: string; uncategorized: string; total_txns: string }>(`
     SELECT
-      (SELECT COALESCE(SUM(annual_budget), 0) FROM budget_categories WHERE exclude_from_budget = FALSE)::text AS total_budget,
+      -- is_income excluded on both halves, matching app/budget/page.tsx's expenseRows filter. A
+      -- salary category carries an annual_budget too, and counting it here made "Annual Budget"
+      -- the sum of what is planned to be spent AND what is expected to come in — so the KPI
+      -- overstated the budget by the whole income side while "Spent" (positive amounts only)
+      -- never included a cent of it.
+      (SELECT COALESCE(SUM(annual_budget), 0) FROM budget_categories
+        WHERE exclude_from_budget = FALSE AND is_income = FALSE)::text AS total_budget,
       (SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)
          FROM transactions t
          JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-         JOIN budget_categories bc ON bc.name = t.mapped_category AND bc.exclude_from_budget = FALSE
+         JOIN budget_categories bc ON bc.name = t.mapped_category
+              AND bc.exclude_from_budget = FALSE AND bc.is_income = FALSE
          WHERE EXTRACT(YEAR FROM t.date) = EXTRACT(YEAR FROM CURRENT_DATE) AND t.hidden = FALSE)::text AS ytd_spent,
       (SELECT COUNT(*) FROM transactions t JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          WHERE t.mapped_category IS NULL AND t.hidden = FALSE)::text AS uncategorized,
@@ -553,7 +560,7 @@ export default async function DashboardPage() {
 
       {/* Charts */}
       <div className="space-y-6">
-        <NetWorthChart data={cashFlowSeries} />
+        <LandscapeBalanceChart data={cashFlowSeries} />
         <MonthlySpendingChart data={monthly} />
         <div className="grid grid-cols-2 gap-6">
           <CategoryDonutChart data={categories} />
