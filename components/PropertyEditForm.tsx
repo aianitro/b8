@@ -6,12 +6,14 @@ import type { Property, PropertyType } from '@/shared/types';
 
 interface Props {
   property: Property;
+  /** Called after a successful save — lets the modal close itself. */
+  onSaved?: () => void;
 }
 
 // Explicit Save rather than the save-on-blur used by the inline editors this replaces. With
 // this many fields, cross-field validation (cost basis vs. purchase price) only makes sense
 // against a complete set, and a dirty-state guard is worth having before navigating away.
-export default function PropertyEditForm({ property }: Props) {
+export default function PropertyEditForm({ property, onSaved }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
@@ -78,14 +80,14 @@ export default function PropertyEditForm({ property }: Props) {
     setSaving(false);
     setSaved(true);
     startTransition(async () => { await router.refresh(); });
+    onSaved?.();
   }
 
   const field = 'w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10';
   const label = 'block text-xs font-medium text-slate-500 mb-1';
 
   return (
-    <form onSubmit={save} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-4">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Details</h2>
+    <form onSubmit={save} className="space-y-4">
 
       <div className="grid grid-cols-2 gap-4">
         <div>

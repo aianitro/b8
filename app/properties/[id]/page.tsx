@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import db from '@/lib/db';
-import PropertyEditForm from '@/components/PropertyEditForm';
+import PropertyEditModal from '@/components/PropertyEditModal';
 import PropertyValuationHistory, { type ValuationRow } from '@/components/PropertyValuationHistory';
 import PropertyValueChart, { type PropertyValuePoint } from '@/components/charts/PropertyValueChart';
 import PropertyLinkedAccounts, { type LinkableAccount } from '@/components/PropertyLinkedAccounts';
@@ -173,8 +173,11 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
       </Link>
 
       <div className="flex items-end justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">{property.nickname}</h1>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-slate-900 truncate">{property.nickname}</h1>
+            <PropertyEditModal property={property} />
+          </div>
           <p className="text-sm text-slate-500 mt-1">{property.address || 'No address'}</p>
         </div>
         {/* One figure, not four. Value and Mortgage are the *inputs* to equity, not its peers —
@@ -205,12 +208,9 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
       </div>
 
       <div className="grid grid-cols-2 gap-6 items-start">
+        <PropertyPnlCard pnl={pnl} year={year} />
         <div className="space-y-6">
-          <PropertyEditForm property={property} />
           <PropertyLinkedAccounts propertyId={property.id} accounts={accountsForLinking} />
-        </div>
-        <div className="space-y-6">
-          <PropertyPnlCard pnl={pnl} year={year} />
           <PropertyValuationHistory propertyId={property.id} rows={valuations} />
         </div>
       </div>
