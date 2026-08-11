@@ -4,12 +4,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { usePlaidLink } from 'react-plaid-link';
 import { Plus } from 'lucide-react';
+import AccountClassifyModal from './AccountClassifyModal';
+import type { LinkedAccountSummary } from '@/shared/types';
 
 export default function PlaidLinkButton() {
   const router = useRouter();
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newAccounts, setNewAccounts] = useState<LinkedAccountSummary[] | null>(null);
 
   useEffect(() => {
     fetch('/api/plaid/create-link-token', { method: 'POST' })
@@ -32,8 +35,17 @@ export default function PlaidLinkButton() {
           body: JSON.stringify({ public_token: publicToken }),
         });
         const data = await res.json();
-        if (data.success) router.refresh();
-        else setError('Failed to link account');
+        if (!data.success) { setError('Failed to link account'); return; }
+
+        // Only accounts genuinely new to this app prompt classification — a reconnect's
+        // accounts already have whatever valuation_mode they were given the first time.
+        // Most links have none of these (checking/savings/cards are correct as 'ledger' by
+        // default), so the modal only appears when there is something worth asking about.
+        if (data.data.new_accounts.length > 0) {
+          setNewAccounts(data.data.new_accounts);
+        } else {
+          router.refresh();
+        }
       } catch {
         setError('Failed to link account');
       } finally {
@@ -48,16 +60,25 @@ export default function PlaidLinkButton() {
   if (error) return <p className="text-red-500 text-xs">{error}</p>;
 
   return (
-    <button
-      onClick={() => open()}
-      disabled={!ready || loading}
-      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors"
-    >
-      {loading
-        ? <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-        : <Plus size={15} />
-      }
-      {loading ? 'Linking…' : 'Connect'}
-    </button>
+    <>
+      <button
+        onClick={() => open()}
+        disabled={!ready || loading}
+        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors"
+      >
+        {loading
+          ? <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          : <Plus size={15} />
+        }
+        {loading ? 'Linking…' : 'Connect'}
+      </button>
+
+      {newAccounts && (
+        <AccountClassifyModal
+          accounts={newAccounts}
+          onDone={() => { setNewAccounts(null); router.refresh(); }}
+        />
+      )}
+    </>
   );
 }
