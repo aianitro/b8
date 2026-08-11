@@ -20,8 +20,7 @@ export default function PropertyValueChart({ data }: { data: PropertyValuePoint[
   const hasMortgage = data.some((d) => d.mortgage !== null);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-5">Value over time</p>
+    <div>
 
       {/* A line needs two points to be a line. Recharts renders a single-point series as an
           almost-invisible dot on a collapsed axis, which reads as "the chart is broken" rather

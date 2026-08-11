@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import db from '@/lib/db';
 import PropertyEditModal from '@/components/PropertyEditModal';
-import PropertyValuationHistory, { type ValuationRow } from '@/components/PropertyValuationHistory';
-import PropertyValueChart, { type PropertyValuePoint } from '@/components/charts/PropertyValueChart';
+import { type ValuationRow } from '@/components/PropertyValuationHistory';
+import { type PropertyValuePoint } from '@/components/charts/PropertyValueChart';
+import PropertyValueCard from '@/components/PropertyValueCard';
 import PropertyLinkedAccounts, { type LinkableAccount } from '@/components/PropertyLinkedAccounts';
 import PropertyPnlCard from '@/components/PropertyPnlCard';
 import { computePropertyPnl, type PnlTransaction } from '@/lib/domain/propertyPnl';
@@ -204,15 +205,12 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
       </div>
 
       <div className="mb-6">
-        <PropertyValueChart data={chartData} />
+        <PropertyValueCard propertyId={property.id} chartData={chartData} rows={valuations} />
       </div>
 
       <div className="grid grid-cols-2 gap-6 items-start">
         <PropertyPnlCard pnl={pnl} year={year} />
-        <div className="space-y-6">
-          <PropertyLinkedAccounts propertyId={property.id} accounts={accountsForLinking} />
-          <PropertyValuationHistory propertyId={property.id} rows={valuations} />
-        </div>
+        <PropertyLinkedAccounts propertyId={property.id} accounts={accountsForLinking} />
       </div>
     </div>
   );

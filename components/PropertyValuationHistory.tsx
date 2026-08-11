@@ -66,8 +66,7 @@ export default function PropertyValuationHistory({ propertyId, rows }: Props) {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">Valuations</h2>
+    <div>
 
       <form onSubmit={add} className="flex items-end gap-2 mb-4">
         <div className="flex-1">
