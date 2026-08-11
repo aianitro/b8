@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import { LANDSCAPE_HEX } from '@/lib/chartColors';
 
-export interface NetWorthPoint {
+export interface LandscapeBalancePoint {
   month: string;
   operational: number;
   capital: number;
@@ -16,10 +16,16 @@ export interface NetWorthPoint {
 const fmt = (v: number | undefined) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v ?? 0);
 
-export default function NetWorthChart({ data }: { data: NetWorthPoint[] }) {
+// Running ledger balances by landscape, month by month — beginning balance plus transactions.
+// It was titled "Net Worth Over Time", which it has never been: valuation-mode accounts and
+// property equity contribute nothing to this series, so it sat directly beneath a net-worth
+// hero reading several times larger and invited the reader to assume one explained the other.
+// The dashboard already renamed its data `cashFlowSeries`; this is the title catching up.
+export default function LandscapeBalanceChart({ data }: { data: LandscapeBalancePoint[] }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-5">Net Worth Over Time</p>
+      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Account Balances Over Time</p>
+      <p className="text-[11px] text-slate-400 mb-4">Cash in tracked accounts — excludes investments and property</p>
       <ResponsiveContainer width="100%" height={260}>
         <ComposedChart data={data} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
