@@ -4,34 +4,26 @@
 // computed by joining the two, not stored anywhere — same "derived read, never a stored
 // column" stance as latestValuationByAccount.
 //
-// latestValuationByProperty below duplicates latestValuationByAccount's "pick the newest row"
-// logic rather than sharing it. Deliberate for now: this module and valuation.ts are being
-// developed on separate, not-yet-merged branches, and a shared generic helper would create a
-// cross-branch dependency neither one currently has. Worth consolidating once both land on
-// main — small enough that leaving a fork here is cheaper than coordinating an interface
-// through two Phase 0 branches for a ~10-line function.
+// latestValuationByProperty below once duplicated latestValuationByAccount's "pick the newest
+// row" logic, deliberately, to avoid a cross-branch dependency while this module and
+// valuation.ts were being built on separate unmerged Phase 0 branches. Both landed on main, so
+// the reason expired and the fork was consolidated into observations.ts (2026-08-13) — the
+// generic is keyed by a caller-supplied extractor precisely because the key type differs
+// (TEXT account id vs. INT property id) while the reduction does not.
+
+import { latestValueByKey, type Observation } from './observations';
 
 export interface Property {
   id: number;
   nickname: string;
 }
 
-export interface PropertyValuationRow {
+export interface PropertyValuationRow extends Observation {
   propertyId: number;
-  value: number;
-  valuedAt: Date | string;
 }
 
 export function latestValuationByProperty(rows: PropertyValuationRow[]): Map<number, number> {
-  const latest = new Map<number, { value: number; valuedAtMs: number }>();
-  for (const row of rows) {
-    const valuedAtMs = new Date(row.valuedAt).getTime();
-    const existing = latest.get(row.propertyId);
-    if (!existing || valuedAtMs > existing.valuedAtMs) {
-      latest.set(row.propertyId, { value: row.value, valuedAtMs });
-    }
-  }
-  return new Map([...latest].map(([propertyId, v]) => [propertyId, v.value]));
+  return latestValueByKey(rows, (row) => row.propertyId);
 }
 
 /**
@@ -75,7 +67,10 @@ const dayOf = (d: Date | string): number => {
   return Date.UTC(x.getFullYear(), x.getMonth(), x.getDate());
 };
 
-export function valueAsOf(rows: PropertyValuationRow[] | { value: number; valuedAt: Date | string }[], asOf: Date | string): number | null {
+// Takes bare Observations rather than a union of the two row shapes: it reads only value and
+// valuedAt, and it is genuinely called with both a property's valuation series and a mortgage
+// account's balance series — the union spelled that out one shape at a time.
+export function valueAsOf(rows: readonly Observation[], asOf: Date | string): number | null {
   const asOfDay = dayOf(asOf);
   let best: { value: number; ms: number } | null = null;
   for (const row of rows) {

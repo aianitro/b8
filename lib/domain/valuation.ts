@@ -6,6 +6,7 @@
 
 import type { Landscape, ValuationMode } from '../../shared/types';
 import { roundCents } from '../budgetMath';
+import { latestValueByKey, type Observation } from './observations';
 
 export type { ValuationMode };
 
@@ -16,10 +17,8 @@ export interface AccountRegime {
   isLiability: boolean;
 }
 
-export interface ValuationRow {
+export interface ValuationRow extends Observation {
   accountId: string;
-  value: number;
-  valuedAt: Date | string;
 }
 
 export interface AccountContribution {
@@ -40,17 +39,13 @@ export interface NetWorthStatement {
  * account's most recent observation. account_valuations is append-only by design (§1f will
  * later replay this same history into net_worth_snapshots), so "current value" is always a
  * derived read, never a stored column.
+ *
+ * Kept as a named function over latestValueByKey() rather than inlining the generic at call
+ * sites: "latest valuation by account" is the domain vocabulary, and the key choice belongs
+ * here — with the schema it reflects — not in each consumer.
  */
 export function latestValuationByAccount(rows: ValuationRow[]): Map<string, number> {
-  const latest = new Map<string, { value: number; valuedAtMs: number }>();
-  for (const row of rows) {
-    const valuedAtMs = new Date(row.valuedAt).getTime();
-    const existing = latest.get(row.accountId);
-    if (!existing || valuedAtMs > existing.valuedAtMs) {
-      latest.set(row.accountId, { value: row.value, valuedAtMs });
-    }
-  }
-  return new Map([...latest].map(([accountId, v]) => [accountId, v.value]));
+  return latestValueByKey(rows, (row) => row.accountId);
 }
 
 export interface ObservedBalance {
