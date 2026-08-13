@@ -12,7 +12,9 @@ import PropertyLinkedAccounts, { type LinkableAccount } from '@/components/Prope
 import PropertyPnlCard from '@/components/PropertyPnlCard';
 import PropertyLedgerCard from '@/components/PropertyLedgerCard';
 import { computePropertyPnl, toPnlTransaction, type PnlTransaction } from '@/lib/domain/propertyPnl';
-import { buildPropertyLedger, type LedgerInput } from '@/lib/domain/propertyLedger';
+// The ledger itself is built client-side now: its running balance depends on which categories
+// are visible, which is client state.
+import { type LedgerInput } from '@/lib/domain/propertyLedger';
 import { toDateInputValue, valueAsOf } from '@/lib/domain/property';
 import type { Property, PropertyType } from '@/shared/types';
 
@@ -125,7 +127,7 @@ async function getPnlTransactions(propertyId: string, year: number): Promise<Pnl
                      WHERE bc.name = t.mapped_category AND bc.is_debt_service)
               AS in_debt_service_category
        FROM transactions t
-       JOIN accounts a ON a.id = t.account_id
+       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
       WHERE COALESCE(t.property_id, a.property_id) = $1
         AND EXTRACT(YEAR FROM t.date) = $2 AND t.hidden = FALSE
         AND NOT EXISTS (SELECT 1 FROM budget_categories bc
@@ -148,6 +150,14 @@ async function getPnlTransactions(propertyId: string, year: number): Promise<Pnl
 // drops. Moving $3,120 from savings into the rental's new checking account is not income and
 // must never reach the P&L — but it is unquestionably a movement of this property's cash, and
 // a ledger that hid it would fail to reconcile against the bank, which is its only job.
+//
+// Both queries honour `track_transactions`, as every other consumer in the app does. That flag
+// is how an account says "my balance is meaningful, my transactions are not" — which is exactly
+// true of a Plaid-linked mortgage: its rows are servicer accounting (ESCROW ADVANCE RECOVERY,
+// HOMEOWNERS INSURANCE, and a PAYMENT signed from the loan's point of view), not movements of
+// the property's cash. Ignoring the flag double-counted every Myrtle Beach mortgage payment —
+// once leaving the trust checking, once arriving at the loan — and put sign-inverted servicer
+// entries in a cash ledger. The mortgage still reaches net worth through its valuation.
 async function getLedgerTransactions(propertyId: string, year: number): Promise<LedgerInput[]> {
   const result = await db.query<{
     id: number; date: Date; name: string | null; merchant_name: string | null;
@@ -157,7 +167,7 @@ async function getLedgerTransactions(propertyId: string, year: number): Promise<
             a.name AS account_name,
             (t.property_id IS NOT NULL) AS tagged_directly
        FROM transactions t
-       JOIN accounts a ON a.id = t.account_id
+       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
       WHERE COALESCE(t.property_id, a.property_id) = $1
         AND EXTRACT(YEAR FROM t.date) = $2 AND t.hidden = FALSE
       ORDER BY t.date, t.id`,
@@ -172,6 +182,18 @@ async function getLedgerTransactions(propertyId: string, year: number): Promise<
     accountName: r.account_name,
     taggedDirectly: r.tagged_directly,
   }));
+}
+
+// Categories the ledger hides until asked. Derived from exclude_from_budget rather than a
+// hardcoded list of names, because that flag already marks exactly the categories that are
+// movements of your own money rather than the property's performance — `Transfer` today. A
+// name list would have to be maintained per property and would silently stop matching the
+// first time a category was renamed.
+async function getDefaultHiddenCategories(): Promise<string[]> {
+  const result = await db.query<{ name: string }>(
+    'SELECT DISTINCT name FROM budget_categories WHERE exclude_from_budget'
+  );
+  return result.rows.map((r) => r.name);
 }
 
 async function getBeginningBalance(propertyId: string, year: number): Promise<number> {
@@ -195,11 +217,13 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
 
   const year = new Date().getFullYear();
 
-  const [property, valuations, linkableAccounts, pnlTransactions, ledgerTransactions, beginningBalance] =
-    await Promise.all([
-      getProperty(id), getValuations(id), getLinkableAccounts(id, year), getPnlTransactions(id, year),
-      getLedgerTransactions(id, year), getBeginningBalance(id, year),
-    ]);
+  const [
+    property, valuations, linkableAccounts, pnlTransactions,
+    ledgerTransactions, beginningBalance, defaultHiddenCategories,
+  ] = await Promise.all([
+    getProperty(id), getValuations(id), getLinkableAccounts(id, year), getPnlTransactions(id, year),
+    getLedgerTransactions(id, year), getBeginningBalance(id, year), getDefaultHiddenCategories(),
+  ]);
 
   if (!property) notFound();
 
@@ -295,7 +319,9 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         <PropertyLedgerCard
           propertyId={property.id}
           year={year}
-          ledger={buildPropertyLedger(beginningBalance, ledgerTransactions)}
+          beginningBalance={beginningBalance}
+          transactions={ledgerTransactions}
+          defaultHiddenCategories={defaultHiddenCategories}
         />
       </div>
     </div>

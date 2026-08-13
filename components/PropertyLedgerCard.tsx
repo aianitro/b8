@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Link2Off, Pencil, Check, X } from 'lucide-react';
-import type { PropertyLedger } from '@/lib/domain/propertyLedger';
+import { Link2Off, Pencil, Check, X, Filter, EyeOff } from 'lucide-react';
+import { buildPropertyLedger, type PropertyLedger, type LedgerInput } from '@/lib/domain/propertyLedger';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
@@ -80,10 +80,77 @@ function BeginningBalanceCell({
 }
 
 export default function PropertyLedgerCard({
-  propertyId, year, ledger,
-}: { propertyId: number; year: number; ledger: PropertyLedger }) {
+  propertyId, year, beginningBalance, transactions, defaultHiddenCategories,
+}: {
+  propertyId: number;
+  year: number;
+  beginningBalance: number;
+  transactions: LedgerInput[];
+  defaultHiddenCategories: string[];
+}) {
   const router = useRouter();
   const [busyId, setBusyId] = useState<number | null>(null);
+  // Seeded from the server-supplied defaults so the first paint already matches what the
+  // filter button claims — starting empty and correcting in an effect would flash the hidden
+  // rows and, worse, briefly show a balance the filter is about to change.
+  const [hiddenCats, setHiddenCats] = useState<Set<string>>(new Set(defaultHiddenCategories));
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const storageKey = `ledgerHiddenCats:${propertyId}`;
+
+  // Restored in an effect rather than a lazy initializer: sessionStorage doesn't exist during
+  // SSR, so reading it while rendering would make the client's first pass disagree with the
+  // server HTML — a real hydration mismatch, since the filter controls which rows exist. Same
+  // trade the transactions table makes for its saved sort order.
+  useEffect(() => {
+    const saved = sessionStorage.getItem(storageKey);
+    if (!saved) return;
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHiddenCats(new Set(JSON.parse(saved) as string[]));
+    } catch {
+      /* a corrupt entry just means no filter */
+    }
+  }, [storageKey]);
+
+  function toggleCat(cat: string) {
+    setHiddenCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat); else next.add(cat);
+      sessionStorage.setItem(storageKey, JSON.stringify([...next]));
+      return next;
+    });
+  }
+
+  function showAll() {
+    setHiddenCats(new Set());
+    sessionStorage.setItem(storageKey, JSON.stringify([]));
+  }
+
+  const UNCATEGORIZED = '— uncategorized —';
+  const catOf = (c: string | null) => c ?? UNCATEGORIZED;
+
+  const categories = [...new Set(transactions.map((r) => catOf(r.category)))].sort();
+
+  // Partitioned and rebuilt together, keyed on the only two things that can change the result.
+  // Splitting them into separate useMemos would defeat the point, since `visible` would be a
+  // fresh array identity on every render and the ledger memo below would never hit.
+  const { visible, hidden, ledger } = useMemo(() => {
+    const isHidden = (c: string | null) => hiddenCats.has(c ?? UNCATEGORIZED);
+    const vis = transactions.filter((r) => !isHidden(r.category));
+    return {
+      visible: vis,
+      hidden: transactions.filter((r) => isHidden(r.category)),
+      // Built from the VISIBLE rows, so the Balance column always adds up down the page — each
+      // row's balance is the one above it plus that row's own movement, with nothing invisible
+      // in between. The cost is that the closing figure is a filtered subtotal rather than the
+      // account's real position whenever anything is hidden, which the note below says outright.
+      ledger: buildPropertyLedger(beginningBalance, vis) as PropertyLedger,
+    };
+  }, [transactions, hiddenCats, beginningBalance]);
+
+  const hiddenIn = hidden.filter((r) => r.amount < 0).reduce((s, r) => s - r.amount, 0);
+  const hiddenOut = hidden.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
 
   // Untagging restores inheritance from the account rather than detaching the transaction, so
   // the button is only offered on rows that were tagged by hand — an account-linked row has
@@ -103,7 +170,51 @@ export default function PropertyLedgerCard({
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
       <div className="flex items-baseline justify-between mb-1">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Ledger</h2>
-        <span className="text-[10px] text-slate-400">{year}</span>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={() => setPickerOpen((o) => !o)}
+              className={`inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border transition-colors ${
+                hiddenCats.size > 0
+                  ? 'border-amber-200 bg-amber-50 text-amber-700'
+                  : 'border-slate-200 text-slate-500 hover:bg-slate-50'
+              }`}
+            >
+              <Filter size={11} />
+              {hiddenCats.size > 0 ? `${categories.length - hiddenCats.size} of ${categories.length}` : 'Filter'}
+            </button>
+
+            {pickerOpen && (
+              <>
+                {/* Click-away layer rather than a document listener: one element, no cleanup,
+                    and it cannot leak past unmount. */}
+                <div className="fixed inset-0 z-10" onClick={() => setPickerOpen(false)} />
+                <div className="absolute right-0 mt-1 z-20 w-60 bg-white rounded-xl border border-slate-200 shadow-lg p-2">
+                  <div className="flex items-center justify-between px-2 py-1 mb-1">
+                    <span className="text-[10px] uppercase tracking-wide text-slate-400">Categories</span>
+                    {hiddenCats.size > 0 && (
+                      <button onClick={showAll} className="text-[10px] text-blue-600 hover:underline">
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  {categories.map((c) => (
+                    <label key={c} className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-slate-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!hiddenCats.has(c)}
+                        onChange={() => toggleCat(c)}
+                        className="rounded border-slate-300"
+                      />
+                      <span className="text-xs text-slate-600 truncate">{c}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <span className="text-[10px] text-slate-400">{year}</span>
+        </div>
       </div>
       <p className="text-[11px] text-slate-400 mb-4">
         Every movement of this property&apos;s cash, in order — including transfers, which the P&amp;L
@@ -168,6 +279,37 @@ export default function PropertyLedgerCard({
               </tr>
             ))}
 
+            {/* Sits inside the table, directly above the totals, because with the balance now
+                built from visible rows only, this note is the entire explanation for why the
+                closing figure is not the account's real position. A caption below the card
+                would be too far from the number it qualifies. */}
+            {hidden.length > 0 && (
+              <tr className="bg-amber-50/40">
+                <td colSpan={6} className="py-2 px-1">
+                  <button
+                    onClick={showAll}
+                    className="group/h flex items-center gap-2 text-left w-full"
+                    title="Show every category again"
+                  >
+                    <EyeOff size={12} className="text-amber-600 shrink-0" />
+                    <span className="text-[11px] text-amber-800">
+                      <span className="font-medium">
+                        {hidden.length} transaction{hidden.length === 1 ? '' : 's'} hidden
+                      </span>
+                      {' · '}
+                      {hiddenIn > 0 && <>{fmt(hiddenIn)} in</>}
+                      {hiddenIn > 0 && hiddenOut > 0 && ', '}
+                      {hiddenOut > 0 && <>{fmt(hiddenOut)} out</>}
+                      <span className="text-amber-600">
+                        {' — excluded from the balance below.'}
+                      </span>
+                      <span className="ml-1 underline opacity-70 group-hover/h:opacity-100">Show all</span>
+                    </span>
+                  </button>
+                </td>
+              </tr>
+            )}
+
             <tr className="border-t border-slate-200">
               <td className="py-2 pr-3" />
               <td className="py-2 pr-3 text-xs font-semibold text-slate-700" colSpan={2}>
@@ -187,10 +329,20 @@ export default function PropertyLedgerCard({
         </table>
       </div>
 
-      {ledger.rows.length === 0 && (
+      {transactions.length === 0 && (
         <p className="text-xs text-slate-400 italic mt-3">
           No transactions attributed to this property yet. Link an account, or tag individual
           transactions to it from the Transactions page.
+        </p>
+      )}
+
+      {/* Distinct from the empty state above: there IS activity, the filter is just hiding all
+          of it. Telling someone "no transactions" when they have a filter on would send them
+          looking for a data problem that doesn't exist. */}
+      {transactions.length > 0 && visible.length === 0 && (
+        <p className="text-xs text-slate-400 italic mt-3">
+          Every category is filtered out.{' '}
+          <button onClick={showAll} className="text-blue-600 hover:underline not-italic">Show all</button>
         </p>
       )}
     </div>
