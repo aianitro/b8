@@ -14,6 +14,10 @@ type TxRow = Transaction & {
   account_landscape: string;
   transfer_group_id: number | null;
   group_peers: GroupPeer[] | null;
+  /** Explicit tag; null means the attribution is inherited from the account. */
+  property_id: number | null;
+  /** Nickname of the property this lands on either way — null if it lands on none. */
+  effective_property: string | null;
 };
 
 type AccountOption = { id: string; name: string; landscape: string };
@@ -84,12 +88,15 @@ async function getData(
 
   const where = conds.length ? `AND ${conds.join(' AND ')}` : '';
 
-  const [txns, cats, counts, accounts] = await Promise.all([
+  const [txns, cats, counts, accounts, props] = await Promise.all([
     db.query<TxRow>(
       `SELECT t.id, t.plaid_transaction_id, t.account_id, t.date::text AS date,
               t.amount, t.name, t.merchant_name, t.plaid_category, t.mapped_category,
               t.rule_applied, t.created_at, t.transfer_group_id, t.hidden,
               a.name AS account_name, a.landscape AS account_landscape,
+              t.property_id,
+              (SELECT p.nickname FROM properties p
+                WHERE p.id = COALESCE(t.property_id, a.property_id)) AS effective_property,
               (SELECT jsonb_agg(jsonb_build_object('account_name', a2.name, 'amount', t2.amount) ORDER BY t2.id)
                  FROM transactions t2 JOIN accounts a2 ON a2.id = t2.account_id
                 WHERE t2.transfer_group_id = t.transfer_group_id AND t2.id != t.id
@@ -117,6 +124,9 @@ async function getData(
        GROUP BY a.id, a.name, a.landscape
        ORDER BY a.name`
     ),
+    db.query<{ id: number; nickname: string }>(
+      'SELECT id, nickname FROM properties ORDER BY nickname'
+    ),
   ]);
   return {
     transactions: txns.rows,
@@ -125,6 +135,7 @@ async function getData(
     uncategorized: Number(counts.rows[0].uncategorized),
     sum: Number(counts.rows[0].sum),
     accounts: accounts.rows,
+    properties: props.rows,
   };
 }
 
@@ -154,7 +165,7 @@ export default async function TransactionsPage({
   const amountMaxValue = amountMax ? parseFloat(amountMax) : null;
   const transferGroupValue = transferGroup ? parseInt(transferGroup, 10) : null;
 
-  const { transactions, categories, total, uncategorized, sum, accounts } = await getData(
+  const { transactions, categories, total, uncategorized, sum, accounts, properties } = await getData(
     uncategorizedOnly, accountId, drillCategory, drillMonth, searchQuery,
     dateFromValue, dateToValue,
     amountMinValue !== null && !isNaN(amountMinValue) ? amountMinValue : null,
@@ -231,7 +242,7 @@ export default async function TransactionsPage({
           </p>
         </div>
       ) : (
-        <TransactionTable transactions={transactions} categories={categories} accounts={accounts} />
+        <TransactionTable transactions={transactions} categories={categories} accounts={accounts} properties={properties} />
       )}
     </div>
   );

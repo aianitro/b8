@@ -10,7 +10,9 @@ import { type PropertyValuePoint } from '@/components/charts/PropertyValueChart'
 import PropertyValueCard from '@/components/PropertyValueCard';
 import PropertyLinkedAccounts, { type LinkableAccount } from '@/components/PropertyLinkedAccounts';
 import PropertyPnlCard from '@/components/PropertyPnlCard';
+import PropertyLedgerCard from '@/components/PropertyLedgerCard';
 import { computePropertyPnl, toPnlTransaction, type PnlTransaction } from '@/lib/domain/propertyPnl';
+import { buildPropertyLedger, type LedgerInput } from '@/lib/domain/propertyLedger';
 import { toDateInputValue, valueAsOf } from '@/lib/domain/property';
 import type { Property, PropertyType } from '@/shared/types';
 
@@ -91,7 +93,11 @@ async function getLinkableAccounts(propertyId: string, year: number) {
   return result.rows;
 }
 
-// Transactions attributed to this property: everything in its linked accounts for the year.
+// Transactions attributed to this property: everything in its linked accounts for the year,
+// plus anything tagged to it directly. COALESCE(t.property_id, a.property_id) makes the
+// explicit tag win and the account supply the default — so a payment made from an account that
+// belongs to a different property (or none) still reaches the right statement. See the
+// property-transaction-attribution migration for why the account alone was not enough.
 //
 // Debt service resolves from the account OR the category — a Plaid-linked mortgage puts its
 // payments on an is_liability account, a manual one puts them on the rental's operating account
@@ -120,7 +126,8 @@ async function getPnlTransactions(propertyId: string, year: number): Promise<Pnl
               AS in_debt_service_category
        FROM transactions t
        JOIN accounts a ON a.id = t.account_id
-      WHERE a.property_id = $1 AND EXTRACT(YEAR FROM t.date) = $2 AND t.hidden = FALSE
+      WHERE COALESCE(t.property_id, a.property_id) = $1
+        AND EXTRACT(YEAR FROM t.date) = $2 AND t.hidden = FALSE
         AND NOT EXISTS (SELECT 1 FROM budget_categories bc
                          WHERE bc.name = t.mapped_category AND bc.exclude_from_budget)`,
     [propertyId, year]
@@ -137,6 +144,44 @@ async function getPnlTransactions(propertyId: string, year: number): Promise<Pnl
   );
 }
 
+// The ledger's row set is deliberately WIDER than the P&L's: it keeps transfers, which the P&L
+// drops. Moving $3,120 from savings into the rental's new checking account is not income and
+// must never reach the P&L — but it is unquestionably a movement of this property's cash, and
+// a ledger that hid it would fail to reconcile against the bank, which is its only job.
+async function getLedgerTransactions(propertyId: string, year: number): Promise<LedgerInput[]> {
+  const result = await db.query<{
+    id: number; date: Date; name: string | null; merchant_name: string | null;
+    mapped_category: string | null; amount: string; account_name: string; tagged_directly: boolean;
+  }>(
+    `SELECT t.id, t.date, t.name, t.merchant_name, t.mapped_category, t.amount,
+            a.name AS account_name,
+            (t.property_id IS NOT NULL) AS tagged_directly
+       FROM transactions t
+       JOIN accounts a ON a.id = t.account_id
+      WHERE COALESCE(t.property_id, a.property_id) = $1
+        AND EXTRACT(YEAR FROM t.date) = $2 AND t.hidden = FALSE
+      ORDER BY t.date, t.id`,
+    [propertyId, year]
+  );
+  return result.rows.map((r) => ({
+    id: r.id,
+    date: toDateInputValue(r.date),
+    description: r.merchant_name || r.name || '—',
+    category: r.mapped_category,
+    amount: Number(r.amount),
+    accountName: r.account_name,
+    taggedDirectly: r.tagged_directly,
+  }));
+}
+
+async function getBeginningBalance(propertyId: string, year: number): Promise<number> {
+  const result = await db.query<{ beginning_balance: string }>(
+    'SELECT beginning_balance FROM property_balances WHERE property_id = $1 AND year = $2',
+    [propertyId, year]
+  );
+  return result.rows.length > 0 ? Number(result.rows[0].beginning_balance) : 0;
+}
+
 async function getMortgageBalances(accountId: string): Promise<Series[]> {
   const result = await db.query<{ value: string; valued_at: Date }>(
     'SELECT value, valued_at FROM account_valuations WHERE account_id = $1 ORDER BY valued_at',
@@ -150,9 +195,11 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
 
   const year = new Date().getFullYear();
 
-  const [property, valuations, linkableAccounts, pnlTransactions] = await Promise.all([
-    getProperty(id), getValuations(id), getLinkableAccounts(id, year), getPnlTransactions(id, year),
-  ]);
+  const [property, valuations, linkableAccounts, pnlTransactions, ledgerTransactions, beginningBalance] =
+    await Promise.all([
+      getProperty(id), getValuations(id), getLinkableAccounts(id, year), getPnlTransactions(id, year),
+      getLedgerTransactions(id, year), getBeginningBalance(id, year),
+    ]);
 
   if (!property) notFound();
 
@@ -239,6 +286,17 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
       <div className="grid grid-cols-2 gap-6 items-start">
         <PropertyPnlCard pnl={pnl} year={year} />
         <PropertyLinkedAccounts propertyId={property.id} accounts={accountsForLinking} />
+      </div>
+
+      {/* Below the P&L, not beside it: the P&L is the summary and this is its evidence, so the
+          reading order is conclusion first, then the rows it was drawn from. Full width because
+          a ledger with a wrapped description column is unreadable. */}
+      <div className="mt-6">
+        <PropertyLedgerCard
+          propertyId={property.id}
+          year={year}
+          ledger={buildPropertyLedger(beginningBalance, ledgerTransactions)}
+        />
       </div>
     </div>
   );

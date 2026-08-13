@@ -13,9 +13,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       'UPDATE transactions SET mapped_category = $1, rule_applied = false WHERE id = $2',
       [body.mapped_category ?? null, id]
     );
+  } else if ('property_id' in body) {
+    // null clears the tag, restoring inheritance from the account — it does not mean
+    // "belongs to no property". See the migration's note on COALESCE resolution order.
+    const propertyId = body.property_id === null ? null : Number(body.property_id);
+    if (propertyId !== null && !Number.isInteger(propertyId)) {
+      return Response.json(
+        { success: false, error: { code: 'INVALID_INPUT', message: 'property_id must be an integer or null' } } satisfies ApiResponse<never>,
+        { status: 400 }
+      );
+    }
+    await db.query('UPDATE transactions SET property_id = $1 WHERE id = $2', [propertyId, id]);
   } else {
     return Response.json(
-      { success: false, error: { code: 'INVALID_INPUT', message: 'mapped_category or hidden required' } } satisfies ApiResponse<never>,
+      { success: false, error: { code: 'INVALID_INPUT', message: 'mapped_category, hidden, or property_id required' } } satisfies ApiResponse<never>,
       { status: 400 }
     );
   }

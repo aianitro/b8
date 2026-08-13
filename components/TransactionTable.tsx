@@ -23,7 +23,13 @@ type TxRow = {
   account_name: string;
   account_landscape: string;
   hidden: boolean;
+  /** Explicit per-transaction tag; null means it inherits from the account. */
+  property_id: number | null;
+  /** Nickname of the property this actually lands on, tag or inherited — null if neither. */
+  effective_property: string | null;
 };
+
+type PropertyOption = { id: number; nickname: string };
 
 import type { Landscape } from '@/shared/types';
 type CategoryOption = { name: string; landscape: Landscape; exclude_from_budget: boolean };
@@ -32,6 +38,7 @@ interface Props {
   transactions: TxRow[];
   categories: CategoryOption[];
   accounts: AccountOption[];
+  properties: PropertyOption[];
 }
 
 const fmt = (n: number) =>
@@ -326,10 +333,11 @@ const LANDSCAPE_BADGE: Record<string, string> = {
   capital: 'bg-violet-50 text-violet-600',
 };
 
-export default function TransactionTable({ transactions, categories, accounts }: Props) {
+export default function TransactionTable({ transactions, categories, accounts, properties }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkCategory, setBulkCategory] = useState('');
+  const [bulkProperty, setBulkProperty] = useState('');
   const [isPending, startTransition] = useTransition();
   const [sortField, setSortField] = useState<'date' | 'amount'>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -417,6 +425,30 @@ export default function TransactionTable({ transactions, categories, accounts }:
       setSelected(new Set());
       setBulkCategory('');
       setBulkUndo({ prevById, category, count: ids.length });
+      await router.refresh();
+    });
+  }
+
+  // Tagging is separate from the category bulk-apply rather than folded into one "Apply": the
+  // two answer different questions (what kind of spending is this / which property is it for),
+  // and the case this exists for — attributing a property's history from before it had its own
+  // account — is a pure property operation with no category change involved.
+  function applyBulkProperty() {
+    if (!bulkProperty || selected.size === 0) return;
+    const propertyId = bulkProperty === '__clear__' ? null : Number(bulkProperty);
+    const ids = Array.from(selected);
+    startTransition(async () => {
+      const res = await fetch('/api/transactions/bulk', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, property_id: propertyId }),
+      });
+      if (!res.ok) {
+        console.error('Bulk property tag failed', await res.text());
+        return;
+      }
+      setSelected(new Set());
+      setBulkProperty('');
       await router.refresh();
     });
   }
@@ -551,6 +583,17 @@ export default function TransactionTable({ transactions, categories, accounts }:
                       <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${LANDSCAPE_BADGE[t.account_landscape] ?? ''}`}>
                         {t.account_landscape}
                       </span>
+                      {/* Shown only for an explicit tag, in amber to match the ledger's marker
+                          for the same thing. An inherited attribution is already implied by the
+                          account name sitting right beside it, so badging that too would put a
+                          property chip on every row of a rental's account and teach the reader
+                          to ignore the one case that is actually worth noticing. */}
+                      {t.property_id !== null && t.effective_property && (
+                        <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 whitespace-nowrap"
+                              title="Tagged to this property, overriding the account">
+                          {t.effective_property}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-4 py-3.5 text-slate-400 text-xs whitespace-nowrap">{t.plaid_category ?? '—'}</td>
@@ -632,6 +675,30 @@ export default function TransactionTable({ transactions, categories, accounts }:
           >
             {isPending ? 'Applying…' : 'Apply'}
           </button>
+
+          {properties.length > 0 && (
+            <>
+              <span className="w-px h-6 bg-slate-700" />
+              <select
+                value={bulkProperty}
+                onChange={(e) => setBulkProperty(e.target.value)}
+                className="text-sm bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-white focus:outline-none focus:ring-2 focus:ring-white/20 min-w-[150px]"
+              >
+                <option value="">Tag to property…</option>
+                <option value="__clear__">— Remove tag —</option>
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nickname}</option>
+                ))}
+              </select>
+              <button
+                onClick={applyBulkProperty}
+                disabled={!bulkProperty || isPending}
+                className="px-4 py-1.5 bg-white text-slate-900 rounded-lg text-sm font-semibold hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {isPending ? 'Tagging…' : 'Tag'}
+              </button>
+            </>
+          )}
           <button
             onClick={() => setSelected(new Set())}
             className="p-1.5 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-800"
