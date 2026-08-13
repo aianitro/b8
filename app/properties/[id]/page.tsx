@@ -10,7 +10,7 @@ import { type PropertyValuePoint } from '@/components/charts/PropertyValueChart'
 import PropertyValueCard from '@/components/PropertyValueCard';
 import PropertyLinkedAccounts, { type LinkableAccount } from '@/components/PropertyLinkedAccounts';
 import PropertyPnlCard from '@/components/PropertyPnlCard';
-import { computePropertyPnl, type PnlTransaction } from '@/lib/domain/propertyPnl';
+import { computePropertyPnl, toPnlTransaction, type PnlTransaction } from '@/lib/domain/propertyPnl';
 import { toDateInputValue, valueAsOf } from '@/lib/domain/property';
 import type { Property, PropertyType } from '@/shared/types';
 
@@ -92,21 +92,49 @@ async function getLinkableAccounts(propertyId: string, year: number) {
 }
 
 // Transactions attributed to this property: everything in its linked accounts for the year.
-// Debt service is flagged from the account rather than the category so a mortgage payment is
-// kept out of operating expenses even when it is categorized generically.
+//
+// Debt service resolves from the account OR the category — a Plaid-linked mortgage puts its
+// payments on an is_liability account, a manual one puts them on the rental's operating account
+// where only the category can identify them. See PnlTransaction.isDebtService.
+//
+// Transfers are excluded via exclude_from_budget, the same convention the dashboard uses: moving
+// money from savings into the rental's operating account is not rental income, and counting it
+// as such inflated Gastonia's gross income by the size of whatever float was moved that year.
+//
+// Both category lookups are EXISTS rather than a JOIN on purpose. mapped_category is not an FK
+// and budget_categories is UNIQUE(name, landscape), so a name living in both landscapes would
+// match twice and a JOIN would silently duplicate the transaction row — double-counting it in
+// the totals. EXISTS asks the yes/no question without multiplying rows. Matching on name alone
+// (not name + landscape) is deliberate too: "Transfer" is defined only in the operational
+// landscape but is applied to capital accounts, so landscape-scoping it would stop excluding
+// exactly the transfers this is meant to drop.
 async function getPnlTransactions(propertyId: string, year: number): Promise<PnlTransaction[]> {
-  const result = await db.query<{ mapped_category: string | null; amount: string; is_liability: boolean }>(
-    `SELECT t.mapped_category, t.amount, a.is_liability
+  const result = await db.query<{
+    mapped_category: string | null; amount: string;
+    on_liability_account: boolean; in_debt_service_category: boolean;
+  }>(
+    `SELECT t.mapped_category, t.amount,
+            a.is_liability AS on_liability_account,
+            EXISTS (SELECT 1 FROM budget_categories bc
+                     WHERE bc.name = t.mapped_category AND bc.is_debt_service)
+              AS in_debt_service_category
        FROM transactions t
        JOIN accounts a ON a.id = t.account_id
-      WHERE a.property_id = $1 AND EXTRACT(YEAR FROM t.date) = $2 AND t.hidden = FALSE`,
+      WHERE a.property_id = $1 AND EXTRACT(YEAR FROM t.date) = $2 AND t.hidden = FALSE
+        AND NOT EXISTS (SELECT 1 FROM budget_categories bc
+                         WHERE bc.name = t.mapped_category AND bc.exclude_from_budget)`,
     [propertyId, year]
   );
-  return result.rows.map((r) => ({
-    category: r.mapped_category,
-    amount: Number(r.amount),
-    isDebtService: r.is_liability,
-  }));
+  // Both signals go to the domain layer rather than being resolved in SQL, because the account
+  // also determines the amount's sign convention — the two decisions are one decision.
+  return result.rows.map((r) =>
+    toPnlTransaction({
+      category: r.mapped_category,
+      amount: Number(r.amount),
+      onLiabilityAccount: r.on_liability_account,
+      inDebtServiceCategory: r.in_debt_service_category,
+    })
+  );
 }
 
 async function getMortgageBalances(accountId: string): Promise<Series[]> {

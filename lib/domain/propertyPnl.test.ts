@@ -1,14 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { computePropertyPnl, type PnlTransaction } from './propertyPnl';
+import { computePropertyPnl, toPnlTransaction, type PnlTransaction } from './propertyPnl';
 
 const rent = (amount: number, category = 'Rent Myrtle Beach'): PnlTransaction =>
   ({ category, amount: -amount, isDebtService: false }); // inflow is negative by app convention
 const expense = (amount: number, category: string): PnlTransaction =>
   ({ category, amount, isDebtService: false });
-// A mortgage PAYMENT arrives from a loan account as a NEGATIVE amount — it reduces what is
-// owed. The fixture mirrors that real convention rather than a convenient one.
+
+// The two real shapes a mortgage payment arrives in. Both fixtures go through
+// toPnlTransaction() rather than hand-setting the normalized values, so the tests pin the
+// actual boundary behavior instead of a convenient restatement of it.
+
+// Plaid-linked mortgage: the payment sits on the loan account and is stored NEGATIVE, because
+// from the loan's perspective it reduces what is owed.
 const mortgage = (amountPaid: number): PnlTransaction =>
-  ({ category: 'Mortgage', amount: -amountPaid, isDebtService: true });
+  toPnlTransaction({
+    category: 'Mortgage', amount: -amountPaid,
+    onLiabilityAccount: true, inDebtServiceCategory: false,
+  });
+
+// Manual mortgage: the payment sits on the rental's checking account and is stored POSITIVE,
+// because money left the building. Only the category identifies it.
+const manualMortgage = (amountPaid: number): PnlTransaction =>
+  toPnlTransaction({
+    category: 'Mortgage Gastonia', amount: amountPaid,
+    onLiabilityAccount: false, inDebtServiceCategory: true,
+  });
 
 describe('computePropertyPnl', () => {
   it('separates income from expenses using the transaction sign', () => {
@@ -43,6 +59,34 @@ describe('computePropertyPnl', () => {
     const r = computePropertyPnl([mortgage(2154.61)], null, null);
     expect(r.debtService).toBe(2154.61);
     expect(r.cashFlow).toBe(-2154.61);
+  });
+
+  it('reads a positively-signed checking-account payment as cash going OUT too', () => {
+    // The Gastonia bug: a manual mortgage's payments live on the rental's CHECKING account,
+    // stored with the opposite sign to a loan account's. Run through the loan-account rule they
+    // produced NEGATIVE debt service — a mortgage read as rental income. Both shapes must land
+    // on the same answer.
+    const r = computePropertyPnl([manualMortgage(1754.23)], null, null);
+    expect(r.debtService).toBe(1754.23);
+    expect(r.cashFlow).toBe(-1754.23);
+  });
+
+  it('agrees on debt service regardless of which account observed the payment', () => {
+    const viaLoanAccount = computePropertyPnl([mortgage(1754.23)], null, null);
+    const viaChecking = computePropertyPnl([manualMortgage(1754.23)], null, null);
+    expect(viaChecking.debtService).toBe(viaLoanAccount.debtService);
+    expect(viaChecking.cashFlow).toBe(viaLoanAccount.cashFlow);
+  });
+
+  it('keeps a manual mortgage payment out of operating expenses', () => {
+    // What made Gastonia's NOI wrong: the payment fell through to the expense bucket, so NOI
+    // absorbed ~$8.8K/yr of financing cost. Cash flow was right the whole time, which is
+    // precisely why it went unnoticed — so both are asserted.
+    const r = computePropertyPnl([rent(2000, 'Rent Gastonia'), manualMortgage(1754.23)], null, null);
+    expect(r.totalOperatingExpenses).toBe(0);
+    expect(r.netOperatingIncome).toBe(2000);
+    expect(r.debtService).toBe(1754.23);
+    expect(r.cashFlow).toBe(245.77);
   });
 
   it('flags principal paydown as not yet included', () => {

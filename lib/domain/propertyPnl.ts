@@ -6,6 +6,10 @@
 // ("Property Taxes", "Utilities/Maintenance") — so a category-based split would silently
 // attribute a primary-residence repair to a rental. A dedicated trust account per property does
 // not have that ambiguity, which is what accounts.property_id was deliberately left generic for.
+//
+// *Which* property a transaction belongs to is therefore always an account question. Whether it
+// is debt service is a separate question that the account can only sometimes answer — see
+// PnlTransaction.isDebtService.
 
 import { roundCents } from '../budgetMath';
 
@@ -13,8 +17,51 @@ export interface PnlTransaction {
   category: string | null;
   /** App convention: positive is an outflow, negative is an inflow. */
   amount: number;
-  /** True when the transaction belongs to a linked mortgage/loan account. */
+  /**
+   * True when this transaction is a payment on the property's debt.
+   *
+   * Two ways to earn it, because mortgages reach the app in two shapes. A Plaid-linked mortgage
+   * carries its own payment stream, so the transaction sits on an `is_liability` account and the
+   * account alone identifies it. A manual mortgage carries only a balance — its payments appear
+   * as an outflow from the rental's operating account, which is emphatically not a liability —
+   * so there the signal has to come from the category (`budget_categories.is_debt_service`).
+   * Resolved by toPnlTransaction(), which also reconciles the two sign conventions.
+   */
   isDebtService: boolean;
+}
+
+/** A transaction as stored, before the account's sign convention has been normalized away. */
+export interface RawPnlTransaction {
+  category: string | null;
+  /** Signed as stored, i.e. in the convention of whichever account it sits on. */
+  amount: number;
+  /** The account this sits on is a liability (loan/credit). */
+  onLiabilityAccount: boolean;
+  /** This transaction's category is marked `is_debt_service`. */
+  inDebtServiceCategory: boolean;
+}
+
+/**
+ * Normalizes a stored transaction into the one convention computePropertyPnl expects
+ * (positive = outflow) and decides whether it is debt service.
+ *
+ * This exists because the same mortgage payment reaches the app with opposite signs depending
+ * on which account observes it. On a Plaid-linked loan account a PAYMENT is stored NEGATIVE —
+ * from the loan's point of view it reduces what is owed. On the rental's checking account the
+ * identical payment is stored POSITIVE, because money left the building. Both are correct in
+ * their own frame, and the frame is a property of the account, not of the payment.
+ *
+ * Getting this wrong is not a rounding error: feeding a checking-account payment through the
+ * loan-account rule yields NEGATIVE debt service, which reads a mortgage as rental income and
+ * flips a loss-making property to profitable. Same class of inversion normalizePlaidBalance()
+ * handles for credit/loan balances.
+ */
+export function toPnlTransaction(raw: RawPnlTransaction): PnlTransaction {
+  return {
+    category: raw.category,
+    amount: raw.onLiabilityAccount ? -raw.amount : raw.amount,
+    isDebtService: raw.onLiabilityAccount || raw.inDebtServiceCategory,
+  };
 }
 
 export interface PnlLine {
@@ -68,12 +115,10 @@ export function computePropertyPnl(
       // a mortgage payment in would make the property look unprofitable at the operating level
       // when it may not be.
       //
-      // Negated because loan accounts carry the opposite sign convention: a mortgage PAYMENT
-      // arrives as a negative amount, since from the loan's perspective it *reduces* what is
-      // owed — while in this app negative means an inflow. Taken raw, a year of mortgage
-      // payments reads as income and the property looks cash-flow positive when it is not.
-      // Same inversion normalizePlaidBalance() handles for credit/loan balances.
-      debtService += -t.amount;
+      // Added as-is: `amount` is already in this function's one convention (positive = outflow),
+      // because toPnlTransaction() resolved the loan-vs-checking sign difference at the
+      // boundary, where the account — and therefore the convention — is known.
+      debtService += t.amount;
       continue;
     }
     const label = t.category ?? UNCATEGORIZED;
