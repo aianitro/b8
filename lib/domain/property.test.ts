@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { computePropertyEquity, latestValuationByProperty, toDateInputValue, valueAsOf, type Property } from './property';
+import {
+  computePropertyEquity, latestValuationByProperty, resolveTenantHeldFunds, toDateInputValue, valueAsOf,
+  type Property, type TenantFundRow,
+} from './property';
 
 describe('toDateInputValue', () => {
   it('formats a Date as YYYY-MM-DD from its local components', () => {
@@ -150,5 +153,42 @@ describe('valueAsOf — day granularity', () => {
       { value: 90, valuedAt: at(2026, 8, 1, 12) },
       { value: 99, valuedAt: at(2026, 8, 7, 6, 17) },
     ], at(2026, 8, 7))).toBe(99);
+  });
+});
+
+describe('resolveTenantHeldFunds', () => {
+  // Fabricated throughout. Property 1 is the "entered, then waived" case, property 2 the "never
+  // entered" one, and the two are asserted against each other in the same test because the whole
+  // risk here is that a later refactor collapses them into a single `?? 0`.
+  const rows: TenantFundRow[] = [
+    { propertyId: 1, kind: 'security_deposit', value: 2500, valuedAt: '2026-01-15T00:00:00Z' },
+    { propertyId: 1, kind: 'security_deposit', value: 0, valuedAt: '2026-05-01T00:00:00Z' },
+    { propertyId: 1, kind: 'last_month_rent', value: 1800, valuedAt: '2026-01-15T00:00:00Z' },
+    { propertyId: 1, kind: 'last_month_rent', value: 0, valuedAt: '2026-05-01T00:00:00Z' },
+    { propertyId: 2, kind: 'last_month_rent', value: 3000, valuedAt: '2026-05-01T00:00:00Z' },
+    { propertyId: 3, kind: 'security_deposit', value: 2200, valuedAt: '2026-05-01T00:00:00Z' },
+  ];
+
+  it('resolves a security deposit to null when never recorded, distinct from an explicit zero', () => {
+    // Property 2 has last-month rows only and no deposit ever: unknown, and the page must print
+    // "—". Property 1's deposit was waived down to 0 in May, which is a real reading and prints
+    // "$0". Reporting the first as $0 would state on the page that a tenant paid nothing.
+    expect(resolveTenantHeldFunds(rows, 2).securityDeposit).toBeNull();
+    expect(resolveTenantHeldFunds(rows, 1).securityDeposit).toBe(0);
+    expect(resolveTenantHeldFunds(rows, 1).securityDeposit).not.toBeNull();
+
+    // The 0 is the newest reading winning over January's 2500, not the last row of an unsorted
+    // list — the same newest-wins rule latestValueByKey applies everywhere else.
+    expect(resolveTenantHeldFunds(rows, 3).securityDeposit).toBe(2200);
+  });
+
+  it('resolves a last-month-rent-held amount to null when never recorded, distinct from an explicit zero', () => {
+    // Property 3 holds a deposit but no last month's rent — some rentals collect one and not the
+    // other, so "unknown" and "zero" have to stay separate on this series too. Property 1's
+    // last-month holding was applied and not re-collected: a recorded 0.
+    expect(resolveTenantHeldFunds(rows, 3).lastMonthRent).toBeNull();
+    expect(resolveTenantHeldFunds(rows, 1).lastMonthRent).toBe(0);
+    expect(resolveTenantHeldFunds(rows, 1).lastMonthRent).not.toBeNull();
+    expect(resolveTenantHeldFunds(rows, 2).lastMonthRent).toBe(3000);
   });
 });

@@ -12,6 +12,7 @@
 // (TEXT account id vs. INT property id) while the reduction does not.
 
 import { latestValueByKey, type Observation } from './observations';
+import type { TenantFundKind } from '../../shared/types';
 
 export interface Property {
   id: number;
@@ -110,4 +111,71 @@ export function computePropertyEquity(
       equity: value === null ? null : value - mortgageBalance,
     };
   });
+}
+
+// ── Tenant-held funds (P0-09a) ────────────────────────────────────────────────────────────────
+// A rental holds money that arrived from its tenant, recorded in property_tenant_funds as the
+// same append-only observation motif as property_valuations: enter a reading, newest wins, no
+// stored "current" column. Two kinds, discriminated by `kind`, and the difference between them
+// is the whole point — see shared/types.ts's TenantFundKind and db/schema.sql for the recorded
+// reasoning. In short: a security deposit is owed back and reduces net worth (in the
+// `liabilities` component, lib/domain/netWorth.ts); last month's rent is the owner's money,
+// already recognized as income on a cash basis, and reduces nothing.
+//
+// Type-agnostic on purpose: nothing here branches on properties.type. Restricting *entry* to
+// rentals is a UI affordance, and conflating the two would mean a deposit recorded against a
+// primary residence silently stopped counting toward net worth.
+
+export interface TenantFundRow extends Observation {
+  propertyId: number;
+  kind: TenantFundKind;
+}
+
+/**
+ * Latest recorded amount per property for ONE kind of tenant fund.
+ *
+ * Filters by `kind` first and then reduces through the shared latestValueByKey — rather than
+ * keying on a composite (propertyId, kind), which would need a serialized key and a second
+ * unpacking step at every call site. The filter also means the two series cannot bleed into
+ * each other: the caller names the kind it wants, and a row of the other kind cannot reach the
+ * result no matter what order the query returned it in.
+ *
+ * Not a second newest-wins reducer: this is the third series in the app with this shape, and
+ * writing one more "last row wins" loop is exactly the defect this module's header records
+ * having already been fixed once.
+ */
+export function latestTenantFundByProperty(
+  rows: readonly TenantFundRow[],
+  kind: TenantFundKind
+): Map<number, number> {
+  return latestValueByKey(rows.filter((row) => row.kind === kind), (row) => row.propertyId);
+}
+
+export interface TenantHeldFunds {
+  /** null: never recorded — unknown, not zero. An explicit 0 is a real reading (a waived
+   *  deposit) and must stay distinguishable from it all the way to the render. */
+  securityDeposit: number | null;
+  /** null: never recorded. An explicit 0 means last month's rent was applied and has not been
+   *  re-collected — which is a different statement from "this property holds none on record." */
+  lastMonthRent: number | null;
+}
+
+/**
+ * Resolves one property's two currently-held amounts for display.
+ *
+ * `Map.has()` rather than `?? 0`: the absence of a row means the amount is unknown, and a
+ * property that has never had a deposit entered must render "—", not "$0". Collapsing the two
+ * is the regression this feature exists to prevent — it would state, in the owner's own words
+ * on the page, that a tenant paid nothing.
+ */
+export function resolveTenantHeldFunds(
+  rows: readonly TenantFundRow[],
+  propertyId: number
+): TenantHeldFunds {
+  const deposits = latestTenantFundByProperty(rows, 'security_deposit');
+  const lastMonth = latestTenantFundByProperty(rows, 'last_month_rent');
+  return {
+    securityDeposit: deposits.has(propertyId) ? deposits.get(propertyId)! : null,
+    lastMonthRent: lastMonth.has(propertyId) ? lastMonth.get(propertyId)! : null,
+  };
 }

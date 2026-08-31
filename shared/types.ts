@@ -7,6 +7,14 @@ export type ValuationMode = 'ledger' | 'valuation';
 
 export type PropertyType = 'primary' | 'rental';
 
+// The two kinds of tenant money a rental holds (property_tenant_funds.kind). Spelled out in the
+// type, not left to the SQL CHECK alone, because the entire point of the pair is that they are
+// treated differently: a security deposit is owed back and reduces net worth, while last month's
+// rent is the owner's money already recognized as income on a cash basis and reduces nothing.
+// Typed as `string`, a mistyped literal in the filter that separates them matches no rows — and a
+// deposit that quietly stops counting is a wrong number that looks like a right one.
+export type TenantFundKind = 'security_deposit' | 'last_month_rent';
+
 export interface Property {
   id: number;
   nickname: string;
