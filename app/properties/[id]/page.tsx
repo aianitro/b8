@@ -11,12 +11,16 @@ import PropertyValueCard from '@/components/PropertyValueCard';
 import PropertyLinkedAccounts, { type LinkableAccount } from '@/components/PropertyLinkedAccounts';
 import PropertyPnlCard from '@/components/PropertyPnlCard';
 import PropertyLedgerCard from '@/components/PropertyLedgerCard';
+import PropertyTenantFundsCard from '@/components/PropertyTenantFundsCard';
 import { computePropertyPnl, toPnlTransaction, type PnlTransaction } from '@/lib/domain/propertyPnl';
 // The ledger itself is built client-side now: its running balance depends on which categories
 // are visible, which is client state.
 import { type LedgerInput } from '@/lib/domain/propertyLedger';
-import { toDateInputValue, valueAsOf } from '@/lib/domain/property';
-import type { Property, PropertyType } from '@/shared/types';
+import {
+  resolveTenantHeldFunds, toDateInputValue, valueAsOf,
+  type TenantFundRow, type TenantHeldFunds,
+} from '@/lib/domain/property';
+import type { Property, PropertyType, TenantFundKind } from '@/shared/types';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -204,6 +208,28 @@ async function getBeginningBalance(propertyId: string, year: number): Promise<nu
   return result.rows.length > 0 ? Number(result.rows[0].beginning_balance) : 0;
 }
 
+// The tenant money this property currently holds — a security deposit owed back, and last
+// month's rent that is already the owner's. Both come out of one append-only series and are
+// resolved newest-wins by the domain layer rather than by an ORDER BY here, so a query change
+// cannot quietly start reporting a superseded reading as current. No ORDER BY, deliberately:
+// resolveTenantHeldFunds compares valued_at, and an ORDER BY here would only make it look as
+// though the order mattered.
+//
+// A property with no reading on record resolves to null, never 0 — see TenantHeldFunds.
+async function getTenantHeldFunds(propertyId: string): Promise<TenantHeldFunds> {
+  const result = await db.query<{ property_id: number; kind: string; value: string; valued_at: Date }>(
+    'SELECT property_id, kind, value, valued_at FROM property_tenant_funds WHERE property_id = $1',
+    [propertyId]
+  );
+  const rows: TenantFundRow[] = result.rows.map((r) => ({
+    propertyId: r.property_id,
+    kind: r.kind as TenantFundKind,
+    value: Number(r.value),
+    valuedAt: r.valued_at,
+  }));
+  return resolveTenantHeldFunds(rows, Number(propertyId));
+}
+
 async function getMortgageBalances(accountId: string): Promise<Series[]> {
   const result = await db.query<{ value: string; valued_at: Date }>(
     'SELECT value, valued_at FROM account_valuations WHERE account_id = $1 ORDER BY valued_at',
@@ -219,10 +245,11 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
 
   const [
     property, valuations, linkableAccounts, pnlTransactions,
-    ledgerTransactions, beginningBalance, defaultHiddenCategories,
+    ledgerTransactions, beginningBalance, defaultHiddenCategories, tenantHeldFunds,
   ] = await Promise.all([
     getProperty(id), getValuations(id), getLinkableAccounts(id, year), getPnlTransactions(id, year),
     getLedgerTransactions(id, year), getBeginningBalance(id, year), getDefaultHiddenCategories(),
+    getTenantHeldFunds(id),
   ]);
 
   if (!property) notFound();
@@ -264,6 +291,15 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
     });
 
   const latest = chartData.at(-1) ?? null;
+
+  // Entry is a rental-only affordance; display is not gated on it. Both halves matter: a
+  // primary residence has no tenant, so offering the form there invites recording something that
+  // cannot exist — but a reading that already exists counts toward net worth regardless of the
+  // property's type, so hiding it would leave a number moving the total with nowhere to see it.
+  const showTenantFunds =
+    property.type === 'rental' ||
+    tenantHeldFunds.securityDeposit !== null ||
+    tenantHeldFunds.lastMonthRent !== null;
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
@@ -311,6 +347,22 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
         <PropertyPnlCard pnl={pnl} year={year} />
         <PropertyLinkedAccounts propertyId={property.id} accounts={accountsForLinking} />
       </div>
+
+      {/* Sits under the linked accounts, which is where the cash it refers to actually lives:
+          the deposit is money already counted at full value in one of those accounts, and this
+          card is the statement of how much of it is owed back. Shown whenever there is something
+          to show — a primary residence with nothing recorded gets no empty card, but one that
+          somehow carries a reading still shows it, since a figure that reduces net worth must
+          never be invisible on the page it belongs to. */}
+      {showTenantFunds && (
+        <div className="mt-6">
+          <PropertyTenantFundsCard
+            propertyId={property.id}
+            funds={tenantHeldFunds}
+            canRecord={property.type === 'rental'}
+          />
+        </div>
+      )}
 
       {/* Below the P&L, not beside it: the P&L is the summary and this is its evidence, so the
           reading order is conclusion first, then the rows it was drawn from. Full width because

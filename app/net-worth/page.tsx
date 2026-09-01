@@ -18,7 +18,7 @@ const COMPONENTS: { key: NetWorthComponent; label: string; href: string; hint: s
   { key: 'operational', label: 'Operational', href: '/balances', hint: 'Day-to-day cash and cards', accent: 'bg-blue-500' },
   { key: 'capitalFinancial', label: 'Capital', href: '/accounts', hint: 'Savings, brokerage, retirement', accent: 'bg-violet-500' },
   { key: 'realEstateEquity', label: 'Real estate', href: '/properties', hint: 'Property value less its mortgage', accent: 'bg-emerald-500' },
-  { key: 'liabilities', label: 'Other debt', href: '/accounts', hint: 'Loans not secured against a property', accent: 'bg-red-500' },
+  { key: 'liabilities', label: 'Other debt', href: '/accounts', hint: 'Unsecured loans and tenant deposits held', accent: 'bg-red-500' },
 ];
 
 async function getSnapshots(): Promise<NetWorthTrendPoint[]> {

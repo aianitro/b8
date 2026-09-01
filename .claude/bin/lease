@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# contract lease — opens/closes the G1 window during which the contract surface is writable.
+#
+# The lease IS the contract-freeze protocol (BUILD.md §6), made mechanical. The orchestrator
+# opens it immediately before dispatching contract-guardian and closes it the moment G1
+# passes. Outside that window, shared/types.ts, shared/contracts/**, migrations/** and
+# db/schema.sql are frozen for every agent — the guardian included.
+#
+#   .claude/bin/lease open <task-id>   # begin the G1 window
+#   .claude/bin/lease close            # end it (contracts frozen for implementation)
+#   .claude/bin/lease status           # who holds it, since when
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+LEASE="$ROOT/.claude/.contract-lease"
+LOG="$ROOT/.claude/.contract-lease.log"
+
+case "${1:-status}" in
+  open)
+    task="${2:-}"
+    [ -n "$task" ] || { echo "usage: lease open <task-id>" >&2; exit 1; }
+    if [ -f "$LEASE" ]; then
+      echo "lease already held by: $(head -1 "$LEASE")" >&2
+      echo "close it before opening another — the contract surface is single-writer." >&2
+      exit 1
+    fi
+    printf '%s\n%s\n' "$task" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LEASE"
+    printf '%s\topen\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$task" >> "$LOG"
+    echo "lease OPEN for $task — contract surface writable"
+    ;;
+  close)
+    if [ ! -f "$LEASE" ]; then echo "no lease held"; exit 0; fi
+    task="$(head -1 "$LEASE")"
+    rm -f "$LEASE"
+    printf '%s\tclose\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$task" >> "$LOG"
+    echo "lease CLOSED (was $task) — contracts frozen"
+    ;;
+  status)
+    if [ -f "$LEASE" ]; then
+      echo "HELD by $(head -1 "$LEASE") since $(sed -n 2p "$LEASE")"
+    else
+      echo "CLOSED — the contract surface is frozen"
+    fi
+    ;;
+  *) echo "usage: lease {open <task-id>|close|status}" >&2; exit 1 ;;
+esac

@@ -39,6 +39,13 @@ export interface NetWorthBreakdown {
   /** Properties with no valuation on record: excluded entirely, and worth disclosing. */
   unvaluedPropertyIds: number[];
   contributions: NetWorthContribution[];
+  /** The portion of `liabilities` that is tenant security deposits, signed exactly as it lands
+   *  there (so <= 0). Returned rather than left to the caller to re-derive because
+   *  net_worth_snapshots.liabilities_security_deposits exists solely to mark where the
+   *  definition of `liabilities`/`total` changed — a marker computed a second, independent way
+   *  is free to disagree with the figure it claims to decompose, which is worse than no marker.
+   *  Accumulated by the very loop that applies it below. */
+  liabilitiesSecurityDeposits: number;
 }
 
 /**
@@ -53,13 +60,23 @@ export interface NetWorthBreakdown {
  * Both alternatives are wrong — counting a $0 house understates net worth by the whole
  * property, counting the debt alone makes equity wildly negative — so neither is chosen
  * silently: the ids come back in unvaluedPropertyIds for the caller to disclose.
+ *
+ * securityDepositsByProperty is required rather than defaulted to an empty Map, and that is
+ * deliberate: an omitted argument would read as "this portfolio holds no tenant deposits" and
+ * silently overstate net worth by every deposit owed. There is exactly one production caller
+ * (lib/netWorth.ts), so the compiler is a cheap way to make a second one decide on purpose.
  */
 export function computeNetWorthBreakdown(
   accounts: NetWorthAccount[],
   ledgerBalances: Map<string, number>,
   latestAccountValuations: Map<string, number>,
   latestPropertyValues: Map<number, number>,
-  allPropertyIds: number[]
+  allPropertyIds: number[],
+  /** Latest security-deposit magnitude per property, already reduced newest-wins by the caller
+   *  (latestTenantFundByProperty in lib/domain/property.ts). Positive magnitudes, as stored;
+   *  the sign is derived below. Last-month-rent holdings are deliberately NOT accepted here —
+   *  see the deposit loop for why they belong to no component at all. */
+  securityDepositsByProperty: Map<number, number>
 ): NetWorthBreakdown {
   const unvaluedPropertyIds = allPropertyIds.filter((id) => !latestPropertyValues.has(id));
   const excluded = new Set(unvaluedPropertyIds);
@@ -112,10 +129,45 @@ export function computeNetWorthBreakdown(
     }
   }
 
+  // Tenant security deposits. The cash itself sits in the property's trust checking account and
+  // is already counted at full value there (operational/capitalFinancial), so this is the one
+  // and only place the obligation to hand it back is subtracted — the ledger in
+  // domain/propertyLedger.ts still reconciles the account against the bank statement untouched.
+  //
+  // Deliberately NOT gated on `excluded`/unvaluedPropertyIds, unlike the linked mortgage above,
+  // and the asymmetry is the point: a mortgage is netted *against* its property's value, so a
+  // naked mortgage with no value to offset it reads as wildly negative equity and the pair is
+  // dropped together. A deposit is netted against nothing. It is owed in full whether or not
+  // the house has been revalued this quarter, so it is a function of the deposit observation
+  // alone — this loop consults no valuation input at all. A property can simultaneously be
+  // "equity unknown" and "owes a tenant $X"; both are true, and neither implies the other.
+  //
+  // Last month's rent held is absent from this function entirely rather than being passed in
+  // and skipped: it is the owner's own money, already recognized as rent income on the day it
+  // landed by the cash-basis P&L, and booking it as a liability here would make the net-worth
+  // statement and the P&L disagree about the same dollar (see db/schema.sql on the table).
+  let liabilitiesSecurityDeposits = 0;
+  for (const [propertyId, magnitude] of securityDepositsByProperty) {
+    liabilities -= magnitude; // stored as a positive amount owed; the sign is derived here
+    liabilitiesSecurityDeposits -= magnitude;
+    // propertyId stays null on the contribution: the field is documented as exclusive to
+    // realEstateEquity, where it is the join key groupRealEstateEquity() merges a property with
+    // its mortgage on. Identity for this line travels through kind + id, exactly as it does for
+    // every other non-realEstateEquity contribution, which is already all /net-worth needs to
+    // resolve the name and link to /properties/{id}.
+    // `0 - magnitude`, not `-magnitude`: an explicitly recorded $0 deposit (a waived one) is a
+    // real reading that still emits a line, and `-0` is a value Intl.NumberFormat renders as
+    // "-$0" and Object.is distinguishes from 0. Subtracting from zero yields positive zero.
+    contributions.push({ kind: 'property', id: String(propertyId), component: 'liabilities', value: 0 - magnitude, propertyId: null });
+  }
+
   const realEstateEquity = propertyTotal - linkedMortgageTotal;
   const total = operational + capitalFinancial + realEstateEquity + liabilities;
 
-  return { operational, capitalFinancial, realEstateEquity, liabilities, total, unvaluedPropertyIds, contributions };
+  return {
+    operational, capitalFinancial, realEstateEquity, liabilities, total,
+    unvaluedPropertyIds, contributions, liabilitiesSecurityDeposits,
+  };
 }
 
 export interface RealEstateEquityLine {
