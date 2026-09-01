@@ -576,3 +576,44 @@ applying if time has passed.
 
 **Not merged.** G4 passing makes this mergeable, not merged. Two commits sit on
 `p0.5-28/category-control-mode`, unpushed, per the owner's standing instruction.
+
+## Post-G4 — N4 fixed, 2026-09-01
+
+Owner asked for N4. Dispatched to implementer (`lib/**` is its surface, not the orchestrator's per
+§5.1). Not a rework cycle — G0–G4 all passed and no BLOCK was raised; **cycle count stays 0 / 3**.
+
+Within the frozen spec, not an amendment to it: acceptance #2 deliberately asserts exit 0 rather than
+an exact total, precisely so tests may be added. That G0-3 finding is what makes this fix possible
+without reopening the spec.
+
+**Verified independently:**
+
+| Check | Result |
+|---|---|
+| Diff scope | `lib/domain/adherence.test.ts` + `EVIDENCE.md` only |
+| Production code, contracts, route unchanged | `git diff --stat 2e3b66b` over `adherence.ts`, `shared/types.ts`, `route.ts`, `db/schema.sql`, `migrations/` → **empty** |
+| `tsc --noEmit` | exit 0 (after clearing regenerated build artifacts — see below) |
+| Suite | 19 files / **311 tests** (307 + 4) |
+| `adherence.test.ts` | 13 passed, 0 skipped |
+| Acceptance #3–8 | `1`,`1`,`1`,`1`,`1`,`1` — no substring collision with the four new names |
+| Lint | exit 0, the one pre-existing warning |
+| **Mutation check** | applied `!== true` / `!== 'fixed'` → **6 failed / 7 passed**; restored → 13 passed, file byte-identical |
+
+The mutation check is the only evidence that actually establishes the fix. Four tests that pass are
+worth nothing on their own; four tests that **fail the specific refactor N4 predicts** are the
+contract N4 asked for. I ran it myself rather than accepting the implementer's identical claim.
+
+### Environment note — the macOS `" 2"` artifacts regenerate
+
+`npx tsc --noEmit` failed on first run here with the two errors P0-09a's gate log describes and I
+had recorded as *resolved* at G0:
+`.next/types/routes.d 2.ts` and `.next/types/cache-life.d 2.ts`, plus nine more under `.next/`.
+
+They came back because `npx next build` at G4 recreated the source files and the same duplicating
+process copied them again. So the condition is **not** resolved as I recorded at G0 — it is
+**recurrent**, and any `next build` can reintroduce it. `.next/` is gitignored, so nothing reaches
+the repo; the cost is a spurious `tsc` failure that looks like a regression.
+
+Deleting the duplicates restores `tsc` to exit 0. Any future gate seeing exactly these errors should
+clear `.next` and re-run before treating it as a real failure. Plausibly the same external actor as
+the unexplained `HEAD` checkout recorded above — recorded as a correlation, not a diagnosis.

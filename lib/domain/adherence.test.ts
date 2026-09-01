@@ -81,4 +81,47 @@ describe('isScoredCategory', () => {
     };
     expect(isScoredCategory(row)).toBe(true);
   });
+
+  // Out-of-contract rows: what the predicate must do with a value the type system says cannot
+  // exist. `isScoredCategory` already handles these correctly, and only as a consequence of `===`
+  // — nothing below it is asserted anywhere else in this file, because every fixture above supplies
+  // one of the three valid literals. The cases here turn that consequence into a contract.
+  //
+  // This is not a hypothetical. `app/categories/page.tsx:9` runs its own explicit-column SELECT
+  // that omits `control_mode` and reads the result as `BudgetCategory` (NITS.md N1), so rows
+  // shaped exactly like the first case exist at runtime today while typed as fully formed. The
+  // refactor these cases exist to catch is a plausible one: rewriting the fourth conjunct as
+  // `control_mode !== 'fixed'` — tempting once `variable-necessary` grows handling of its own —
+  // would admit every one of those rows into the scored set, and without these tests the suite
+  // would stay green while the headline silently averaged over them.
+  //
+  // The cast is deliberately confined to this one helper. TypeScript resisting a missing or
+  // unknown `control_mode` is the type system working, not an obstacle: the escape hatch models
+  // the row an out-of-contract query actually produces, which is precisely what the compiler
+  // cannot see. Nothing in `shared/types.ts` is widened to make these compile — `ControlMode` and
+  // `ScorableCategory` stay exactly as narrow as they are.
+  const outOfContract = (over: Record<string, unknown>): ScorableCategory =>
+    ({ ...category(), ...over }) as unknown as ScorableCategory;
+
+  it('excludes a row whose control_mode is absent, the shape an out-of-contract SELECT produces at runtime', () => {
+    expect(isScoredCategory(outOfContract({ control_mode: undefined }))).toBe(false);
+  });
+
+  it('excludes a row whose control_mode is an unrecognized string, rather than reading anything not-fixed as scored', () => {
+    // The same string acceptance #15 proves the database CHECK rejects. A value that cannot reach
+    // the column through the schema can still reach this function through a hand-written SELECT,
+    // a fixture, or a future third mode added to the column before it is added to the union.
+    expect(isScoredCategory(outOfContract({ control_mode: 'whatever' }))).toBe(false);
+  });
+
+  it('excludes a row whose exclude_from_budget arrives null, rather than reading a missing flag as not-excluded', () => {
+    // `=== false` and `!== true` differ exactly here, and the difference points the wrong way: a
+    // row whose exclusion flag never made it into the SELECT would read as "not excluded" and be
+    // scored. Fail closed — an unknown flag is not a cleared flag.
+    expect(isScoredCategory(outOfContract({ exclude_from_budget: null }))).toBe(false);
+  });
+
+  it('excludes a row whose is_income arrives undefined, rather than reading a missing flag as not-income', () => {
+    expect(isScoredCategory(outOfContract({ is_income: undefined }))).toBe(false);
+  });
 });

@@ -737,6 +737,165 @@ contains any of the six pinned names as a substring, so #3–8 each still count 
 - **Real financial data never left the machine:** fabricated fixtures only, throwaway databases
   only, and no real amount in this file, in any command output above, or in anything I reported.
 
+## 9. Follow-up: NITS.md N4 — the predicate's fail-safe direction, pinned
+
+**Added after G4, on the already-merged-quality commit `2e3b66b`.** Scope: `lib/domain/adherence.test.ts`
+only — four new cases, no production code touched. `isScoredCategory` is unchanged and was already
+correct; these assert what it already does. SPEC.md stays FROZEN: acceptance #2 asserts exit 0 rather
+than an exact test total precisely so tests may be added, so this is inside the spec, not an amendment.
+
+**Why it matters now rather than later.** N1 is live: `app/categories/page.tsx:9` runs its own
+explicit-column SELECT that omits `control_mode` and reads the result as `BudgetCategory`, so rows
+carrying `control_mode: undefined` exist at runtime today. Nothing in the suite covered them, because
+every fixture supplied one of the three valid literals. A future rewrite of the fourth conjunct as
+`control_mode !== 'fixed'` would admit all of them into the scored set and stay green.
+
+### 9.1 The four new tests, names verbatim
+
+| # | Name | Asserts |
+|---|---|---|
+| a | `excludes a row whose control_mode is absent, the shape an out-of-contract SELECT produces at runtime` | `control_mode: undefined` → `false` (N4's first required case; the N1 row shape) |
+| b | `excludes a row whose control_mode is an unrecognized string, rather than reading anything not-fixed as scored` | `control_mode: 'whatever'` → `false` (N4's second required case) |
+| c | `excludes a row whose exclude_from_budget arrives null, rather than reading a missing flag as not-excluded` | a missing exclusion flag is not a cleared one |
+| d | `excludes a row whose is_income arrives undefined, rather than reading a missing flag as not-income` | the same, for the third conjunct |
+
+(c) and (d) are the optional extension N4 leaves to judgement. They were worth taking: `=== false` and
+`!== true` differ exactly on `null`/`undefined`, and the difference points the wrong way — a row whose
+flag never made it into the SELECT would read as qualifying.
+
+None of the four contains any of the six names pinned by acceptance #3–8 as a substring; §9.3 measures
+that rather than asserting it.
+
+**The cast.** TypeScript refuses `undefined` where `ControlMode` is required, and that refusal is the
+point of the exercise, so it is confined to one helper at the fixture boundary with a comment saying
+why: the value models the row an out-of-contract runtime query actually produces, which the compiler
+cannot see. **Nothing in `shared/types.ts` was widened** — `ControlMode`, `BudgetCategory` and
+`ScorableCategory` are byte-identical to `2e3b66b`.
+
+### 9.2 `npx tsc --noEmit` and the suites
+
+```
+$ npx tsc --noEmit; echo "EXIT=$?"
+EXIT=0
+```
+
+```
+$ npm test -- --pool=threads; echo "EXIT=$?"
+
+> app@0.1.0 test
+> vitest run --pool=threads
+
+
+ RUN  v4.1.10 /Users/andreianpilogov/Documents/b8/app
+
+
+ Test Files  19 passed (19)
+      Tests  311 passed (311)
+   Start at  14:09:17
+   Duration  4.33s (transform 408ms, setup 0ms, import 725ms, tests 4.24s, environment 1ms)
+
+EXIT=0
+```
+
+Full suite: **19 files / 311 tests passed**, up from 307 at G2 — exactly the four added, nothing else
+moved.
+
+```
+$ npx vitest run --pool=threads lib/domain/adherence.test.ts; echo "EXIT=$?"
+
+ RUN  v4.1.10 /Users/andreianpilogov/Documents/b8/app
+
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  14:09:22
+   Duration  81ms (transform 14ms, setup 0ms, import 20ms, tests 2ms, environment 0ms)
+
+EXIT=0
+```
+
+```
+$ npx vitest run --pool=threads --reporter=verbose lib/domain/adherence.test.ts; echo "EXIT=$?"
+
+ RUN  v4.1.10 /Users/andreianpilogov/Documents/b8/app
+
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > includes an operational, non-excluded, non-income category classified discretionary in the scored set 1ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > excludes a fixed category from the scored set even though it is operational, not excluded, and not income 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > excludes a variable-necessary category from the scored set — tracked and reported, never scored, same as fixed 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > excludes a capital-landscape category from the scored set even when its control_mode is discretionary 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > excludes an exclude_from_budget category from the scored set even when its control_mode is discretionary 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > excludes an is_income category from the scored set even when its control_mode is discretionary 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > treats the two non-discretionary modes identically rather than ranking them 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > stays out when more than one conjunct fails at once 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > accepts a whole BudgetCategory row, so no caller needs a local shape for it 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > excludes a row whose control_mode is absent, the shape an out-of-contract SELECT produces at runtime 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > excludes a row whose control_mode is an unrecognized string, rather than reading anything not-fixed as scored 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > excludes a row whose exclude_from_budget arrives null, rather than reading a missing flag as not-excluded 0ms
+ ✓ lib/domain/adherence.test.ts > isScoredCategory > excludes a row whose is_income arrives undefined, rather than reading a missing flag as not-income 0ms
+
+ Test Files  1 passed (1)
+      Tests  13 passed (13)
+   Start at  14:09:44
+   Duration  83ms (transform 13ms, setup 0ms, import 19ms, tests 2ms, environment 0ms)
+
+EXIT=0
+```
+
+**13 passed, 0 skipped, 0 failed** in `adherence.test.ts` (9 at G2 + 4). Every line above is a `✓`;
+N6 notes that a name-grep alone cannot tell a pass from a skip, so the verbose listing and the summary
+line are both reproduced here.
+
+### 9.3 Acceptance #3–8 re-run, each still exactly `1`
+
+```
+$ npx vitest run --pool=threads --reporter=verbose lib/ | grep -cF "includes an operational, non-excluded, non-income category classified discretionary in the scored set"
+1
+
+$ npx vitest run --pool=threads --reporter=verbose lib/ | grep -cF "excludes a fixed category from the scored set even though it is operational, not excluded, and not income"
+1
+
+$ npx vitest run --pool=threads --reporter=verbose lib/ | grep -cF "excludes a variable-necessary category from the scored set — tracked and reported, never scored, same as fixed"
+1
+
+$ npx vitest run --pool=threads --reporter=verbose lib/ | grep -cF "excludes a capital-landscape category from the scored set even when its control_mode is discretionary"
+1
+
+$ npx vitest run --pool=threads --reporter=verbose lib/ | grep -cF "excludes an exclude_from_budget category from the scored set even when its control_mode is discretionary"
+1
+
+$ npx vitest run --pool=threads --reporter=verbose lib/ | grep -cF "excludes an is_income category from the scored set even when its control_mode is discretionary"
+1
+```
+
+### 9.4 Mutation check — these tests are not vacuous
+
+The refactor N4 predicts was applied temporarily to `lib/domain/adherence.ts`
+(`exclude_from_budget !== true`, `is_income !== true`, `control_mode !== 'fixed'`), the file run, and
+the predicate then restored with `git checkout --`:
+
+```
+ × ... > excludes a variable-necessary category from the scored set — tracked and reported, never scored, same as fixed 3ms
+ × ... > treats the two non-discretionary modes identically rather than ranking them 0ms
+ × ... > excludes a row whose control_mode is absent, the shape an out-of-contract SELECT produces at runtime 0ms
+ × ... > excludes a row whose control_mode is an unrecognized string, rather than reading anything not-fixed as scored 0ms
+ × ... > excludes a row whose exclude_from_budget arrives null, rather than reading a missing flag as not-excluded 0ms
+ × ... > excludes a row whose is_income arrives undefined, rather than reading a missing flag as not-income 0ms
+      Tests  6 failed | 7 passed (13)
+```
+
+All four new cases go red under exactly the mutation this fix exists to catch. Before this change the
+same mutation took only two existing tests with it, neither of which covers an out-of-contract value.
+`git diff --stat` after the restore showed one file changed — `lib/domain/adherence.test.ts` — confirming
+the predicate is back to its committed bytes.
+
+### 9.5 What was not re-run, and why
+
+Acceptance **#9–#22** were not re-run for this follow-up. #9–12 grep `shared/types.ts`,
+`db/schema.sql` and `app/api/categories/route.ts`; #13–22 exercise the database. This diff touches one
+test file and no production code, schema, migration or contract, so none of those commands can observe
+it. Their G2 results in §2 and §3 stand unchanged. Stated plainly rather than implied: **I did not run
+them in this pass.**
+
 ## Appendix A — acceptance #20, full verbatim output (second of two runs)
 
 ```

@@ -57,7 +57,7 @@ follow-up contract task — and a reason to consider whether anything mechanical
 # From adversarial review (REVIEW-1, G3) — N4–N8
 All ACCEPT_WITH_NITS. None blocked the gate; none is a defect in the shipped diff.
 
-## N4 — no test pins the predicate's fail-safe behaviour for an out-of-union value
+## N4 — ~~no test pins the predicate's fail-safe behaviour for an out-of-union value~~ **FIXED 2026-09-01**
 `adherence.test.ts` supplies one of the three valid literals in every fixture. `isScoredCategory`
 excludes `undefined` and unknown strings correctly, but only as a *consequence* of `===`, never as an
 asserted contract.
@@ -68,7 +68,24 @@ plausible future refactor — rewriting the fourth conjunct as `control_mode !==
 `variable-necessary` grows its own handling — would silently admit every one of those rows into the
 scored set, and nothing in the suite would go red.
 
-Fix: two cases pinning `undefined` and `'whatever'` to `false`. Cheap, and it locks the direction.
+**Fixed 2026-09-01** in `lib/domain/adherence.test.ts` — four cases, not two. The required pair
+(`control_mode` absent, `control_mode` an unrecognized string) plus the optional extension for
+`exclude_from_budget: null` and `is_income: undefined`, which was worth taking: `=== false` and
+`!== true` diverge exactly on those values and diverge in the *unsafe* direction.
+
+Out-of-contract values reach the predicate through one `outOfContract()` helper that casts at the
+fixture boundary. Nothing in `shared/types.ts` was widened to make them compile — `ControlMode` and
+`ScorableCategory` are byte-identical to `2e3b66b`, verified by `git diff --stat`.
+
+**Proven non-vacuous by mutation, run by the orchestrator rather than accepted from the
+implementer.** Applying N4's own predicted refactor to `isScoredCategory`
+(`exclude_from_budget !== true`, `is_income !== true`, `control_mode !== 'fixed'`) turns the file
+**6 failed / 7 passed**; restoring gives 13 passed and a byte-identical file. So the four new cases
+fail the exact refactor N4 warned about, which is the property that makes them worth having — a test
+that passes both before and after the mutation would have documented nothing.
+
+Suite 19 files / 311 tests. Acceptance #3–8 each still count exactly `1`; none of the four new names
+contains a pinned name as a substring (measured, not assumed).
 
 ## N5 — acceptance #21 is structurally vacuous
 `SELECT COUNT(*) … WHERE control_mode IS NULL` returns `0` for any implementation with a `NOT NULL`
