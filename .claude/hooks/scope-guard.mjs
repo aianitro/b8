@@ -40,7 +40,7 @@
 // Exit codes: 0 = allow, 2 = block (stderr is fed back to the calling agent).
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 const ALLOW = 0;
@@ -177,6 +177,23 @@ function specIsFrozen(rel, root) {
   return Boolean(m) && existsSync(path.join(root, m[1], '.frozen'));
 }
 
+/**
+ * Every frozen task's SPEC.md, repo-relative. The Edit/Write route resolves one concrete path and
+ * asks `specIsFrozen` about it; a shell command names no path the hook can resolve, so the Bash
+ * route has to enumerate the frozen specs and look for a write to any of them.
+ */
+function frozenSpecPaths(root) {
+  let entries;
+  try {
+    entries = readdirSync(path.join(root, 'plan', 'tasks'), { withFileTypes: true });
+  } catch {
+    return []; // no plan/tasks yet — nothing is frozen
+  }
+  return entries
+    .filter((e) => e.isDirectory() && existsSync(path.join(root, 'plan', 'tasks', e.name, '.frozen')))
+    .map((e) => `plan/tasks/${e.name}/SPEC.md`);
+}
+
 function deny(msg) {
   process.stderr.write(msg.trim() + '\n');
   process.exit(BLOCK);
@@ -249,6 +266,20 @@ function checkBash(rawCommand, root) {
           `  ${command.trim().slice(0, 200)}\n` +
           'These files come from `npm ci` / `next build`. Never write them directly.\n' +
           '(Deleting them is fine — they regenerate.)'
+      );
+    }
+  }
+
+  // Deliberately ahead of the lease early-return below: a frozen spec stays frozen during the G1
+  // window too. The lease opens the CONTRACT surface to the guardian; it never opens a spec.
+  for (const spec of frozenSpecPaths(root)) {
+    if (mutates(command, spec)) {
+      deny(
+        'BLOCKED by scope-guard: shell write to a frozen spec\n' +
+          `  ${command.trim().slice(0, 200)}\n` +
+          'This spec is frozen at G0 (BUILD.md §6). Acceptance criteria may not be edited to fit\n' +
+          'an implementation — that inverts the contract-first invariant.\n' +
+          'If the spec is genuinely wrong, the task returns to spec-writer and restarts at G0.'
       );
     }
   }
