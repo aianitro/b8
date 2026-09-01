@@ -672,3 +672,39 @@ that verifies the app is not entitled to stop the app.
 `npx node-pg-migrate down 1` with an explicit `DATABASE_URL` — but note the `down` drops
 `property_tenant_funds` and its hand-entered rows, which exist nowhere else. Take the `\copy`
 backup the migration's own `down` section specifies first.
+
+---
+
+## Merge — 2026-09-01
+
+Branch `p0-09a/tenant-held-funds` merged to `main` and pushed. Re-run independently at merge time
+rather than trusted from the bundle above; every command run against the branch tip:
+
+| Gate | Command | Result |
+|---|---|---|
+| Tests | `npm test` | 298 passed / 18 files |
+| Types | `npx tsc --noEmit` | clean |
+| Lint | `npm run lint` | 0 errors (1 pre-existing warning, `scripts/seed-demo.mjs:438`) |
+| Build | `npm run build` | succeeded |
+| Secrets | `gitleaks detect --source .` | no leaks, 86 commits scanned |
+| Migration | `node-pg-migrate up / down / up` | clean round trip |
+
+**The migration round trip is new evidence, not a re-run.** `EVIDENCE.md` §2 records "No migration
+was run" — correct and correctly reasoned at the time, since `npm run migrate:*` reads `.env.local`
+and points at real data, and the dev-database application logged above was a one-way `up`. Neither
+established that `down` reverses cleanly or that `up` is replayable, which is what CI's migrate job
+asserts and what the next contributor's fresh database depends on. Run here against a throwaway
+`b8_migrate_check` database built from an empty schema — never `.env.local` — and dropped after.
+Verified post-migration: `property_tenant_funds` carries both CHECK constraints the design argues
+for (`kind` in the two-value enum, `value >= 0`), the `(property_id, kind, valued_at DESC)` index,
+and the FK to `properties`; `net_worth_snapshots` carries `liabilities_security_deposits` as a
+nullable eighth column, so existing rows keep the NULL that means "predates deposit modelling".
+
+**Not re-verified at merge:** the live-surface HTTP checks above, which need a running server and a
+database holding real figures. Unchanged code, already recorded 2026-08-31.
+
+**No property DELETE route exists**, so the new FK's lack of an `ON DELETE` rule cannot strand a
+delete today — worth knowing before one is added, since `property_valuations` has the same shape.
+
+Carried follow-ups stay open in `NITS.md`; N2 (the dashboard YTD delta straddling the definition
+change) is a live wrong number from this merge onward, not a latent one.
