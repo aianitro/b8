@@ -6,9 +6,9 @@
 |---|---|---|---|
 | G0 spec | FAIL → FAIL → **PASS** (draft 3) | 2026-09-01 | 5 findings across two rounds, all resolved; every fix re-verified by command, not accepted. Draft 3 frozen (`.frozen` created). Freeze enforcement audited and found **partial** — see "Process defect P-1". See "G0 review 3". |
 | G1 contract | **PASS** | 2026-09-01 | Diff confined to 3 contract files; round-trip clean; all 7 constraint controls executed, not read; change class adjudicated on evidence; consumers intact (tsc 0, 298 tests). Guardian's parser hypothesis refuted by command — and the inverse hazard it led me to is real. Lease CLOSED. See "G1 review". |
-| G2 build | *pending* | — | |
-| G3 adversarial | *pending* | — | |
-| G4 integration | *pending* | — | |
+| G2 build | **PASS** | 2026-09-01 | All 22 acceptance commands re-run independently by the orchestrator; all 22 match. Diff inside the declared surface, zero out-of-scope files. Seed conformance re-verified from the database side. See "G2 review". |
+| G3 adversarial | **PASS** | 2026-09-01 | `REVIEW-1.md` ACCEPT_WITH_NITS: 29 hypotheses, 0 BLOCK, 0 scope violations, 5 nits → `NITS.md`. All 6 INCONCLUSIVE items converted to commands and run by the orchestrator; all resolved, none adverse. See "G3 review". |
+| G4 integration | **PASS** | 2026-09-01 | Suite 19/307, tsc 0, lint 0, production build 0, migration round-trip clean, AGENTS.md not regenerated dirty, all 6 INCONCLUSIVE items run at G3. See "G4 review". |
 
 **Cycle count:** 0 / 3
 <!-- G2/G3-BLOCK/G4 failures increment. A reviewer-fault (empty falsification log) does NOT. -->
@@ -422,3 +422,157 @@ The guardian's instinct was sound and its reasoning direction was backwards; inv
 The CSV-backup projection the guardian specified for the implementer (id/name/landscape/flags, deliberately no amounts) is sound and carries to G2.
 
 **Lease closed. The contract surface is frozen for the remainder of this task.**
+
+## G2 review — 2026-09-01 — **PASS**
+
+Every one of the 22 acceptance commands re-run by me, not read from `EVIDENCE.md`. All 22 match the
+frozen spec's expected values.
+
+| # | Result | Want |
+|---|---|---|
+| 1 `tsc --noEmit` | exit 0 | 0 ✅ |
+| 2 full suite | exit 0, **19 files / 307 tests** | exit 0 ✅ |
+| 3–8 pinned test names | `1`, `1`, `1`, `1`, `1`, `1` | all `1` ✅ |
+| 9 `variable-necessary` in types | 2 | ≥1 ✅ |
+| 10 `control_mode` in schema.sql | 8 | ≥1 ✅ |
+| 11 `is_debt_service` in schema.sql | 4 | ≥1 ✅ |
+| 12 `control_mode` in GET select | 1 | ≥1 ✅ |
+| 13 operational default | exit 0, prints `fixed` | ✅ |
+| 14 capital default | exit 0, prints `fixed` | ✅ |
+| 15 bad enum value | exit 1 | ✅ |
+| 16 explicit NULL | exit 1 | ✅ |
+| 17 coupling on INSERT | exit 1 | ✅ |
+| 18 coupling accept-case | exit 0, prints `fixed` | ✅ |
+| 19 coupling on UPDATE | exit 1 | ✅ |
+| 20 seed probe | exit 0; **re-run a second time, exit 0 again** (NC #16) | ✅ |
+| 21 no NULL operational rows | `0` | ✅ |
+| 22 six-row spot check | the six expected lines exactly, incl. `variable-necessary` on Gas/Pets | ✅ |
+
+**Seed conformance re-verified from the other side.** G1 compared the SQL text against the frozen
+table; here I read the 21 rows back out of the migrated probe database and diffed them against the
+same table — **identical, 21/21**. A seed that parsed correctly but applied wrongly would pass the
+G1 check and fail this one.
+
+**Diff inside the declared surface.** `git status` shows exactly four paths: `lib/domain/adherence.ts`,
+`lib/domain/adherence.test.ts`, `app/api/categories/route.ts`, `EVIDENCE.md`. Explicitly checked and
+**not** touched: `propertyPnl.ts`, `app/properties/[id]/page.tsx`, `app/categories/page.tsx`,
+`CategoryManager.tsx`, `budgetMath.ts`, `shared/types.ts`, `db/schema.sql`, `migrations/`. Zero
+out-of-scope files — NC #14 holds.
+
+The route diff is a single `@@ -8,7 +8,7 @@` hunk inside `GET`; `POST`, `PATCH` and `DELETE` are
+untouched, satisfying the spec's evidence requirement. Lint exit 0 with the one pre-existing
+`seed-demo.mjs:438` warning.
+
+**Predicate reviewed as written** (the reviewer will do this adversarially; this is the gate's own
+read): four conjuncts, `&&`-joined, strict `=== false` / `=== 'discretionary'` — no truthiness
+coercion that would let a `'false'` string or a `null` slip through. `ScorableCategory` is a `Pick`
+off the frozen `BudgetCategory` rather than a re-declared local shape, which is the right call
+against the duplicate-definition failure this module's own comment cites. `is_debt_service` is
+deliberately absent, correctly — the DB CHECK already forces those rows to `fixed`.
+
+**Implementer's honesty check.** It reported 22/22 and 307 tests; both are exactly what I measured.
+It also self-reported the branch discrepancy and the three items it deliberately did not do
+(no dev-database contact, no CSV backup, N1–N3 untouched) rather than quietly resolving them. No
+drift between its report and my independent run.
+
+**Cycle count unchanged at 0 / 3.**
+
+## Process note — HEAD moved between two orchestrator commands, 2026-09-01
+
+Recorded because it affects where this task's commits live, and because the implementer caught it
+and I had reported the opposite.
+
+`git reflog`: `dc152c4 HEAD@{13:32:43}: checkout: moving from p0.5-28/category-control-mode to main`.
+That checkout sits between my own `git branch --show-current` (which returned
+`p0.5-28/category-control-mode`) and my first commit at 13:33:48. I did not issue it; no command I
+ran in this session contains a `checkout`. Cause therefore **unestablished** — recorded as an
+observation, not a diagnosis, per the causal-claim rule.
+
+Consequence: `096b972` (hook fix) and `0985eb2` (contract surface) are on **`main`**, 2 ahead of
+`origin/main`; the task branch still points at `dc152c4`. Nothing is pushed, nothing is lost.
+Raised to the owner for the topology decision rather than rearranged unilaterally.
+
+## G3 review — 2026-09-01 — **PASS** (ACCEPT_WITH_NITS)
+
+29 hypotheses, 26 refuted outright, 0 BLOCK, 0 scope violations, 5 nits. The falsification log is
+substantive rather than confirmatory — it went after the fail-open direction of each conjunct, the
+`Pick` assignability question (by enumerating every other `Pick<BudgetCategory,…>` in the repo), the
+`UPDATE…FROM (VALUES)` fan-out hazard, three-valued logic on the coupling CHECK, statement ordering
+inside the migration, and N2's parser hazard against this specific file. It also found weaknesses in
+**the gate commands themselves**, which is the harder thing to see.
+
+### All 6 INCONCLUSIVE items converted to commands and run
+
+| Item | Command run | Result |
+|---|---|---|
+| **I1** — seed keys never compared to the live taxonomy (all verification circular) | Read-only `SELECT name … WHERE landscape='operational' AND NOT exclude_from_budget AND NOT is_income` against dev, sorted, diffed against the 21 seed keys | **EXACT MATCH 21/21.** No silent no-op. |
+| **I1b** — whitespace/case divergence | `WHERE name <> btrim(name)` | **0 rows** |
+| **I2** — "scored set populated at merge" unverified on real data | Copied the real taxonomy (36 rows, names+flags only, every amount fabricated as 1) into a fresh `b8_i2_sim` at the pre-task migration state, applied this task's migration, grouped | **`discretionary,9` / `fixed,5` / `variable-necessary,7`** — exactly as predicted |
+| **I3** — abort precondition is live data | `SELECT name … WHERE landscape='operational' AND is_debt_service` against dev | **0 rows.** Migration will not abort. |
+| **I4** — macOS `" 2"` artifacts would abort the `up` | `ls -1 migrations/*.sql \| wc -l`; `find migrations -name '* 2*'` | **8 files, 0 artifacts** |
+| **I5** — #3–8 cannot distinguish passed from skipped | `npx vitest run lib/domain/adherence.test.ts` | **9 passed, 0 skipped** |
+| **I6** — shape of the `db/schema.sql` hunk | `git diff 0985eb2^ 0985eb2 -- db/schema.sql` | Two hunks, both in the `budget_categories` region. Only removal is `UNIQUE (name, landscape)`, re-added with a trailing comma to admit the new named constraint. `sort_order` untouched, no other table touched. |
+
+**I1 deserves naming as the review's best work.** Every one of the 22 acceptance commands builds its
+fixture from the spec's own 21 names, so the seed's *keys* were never compared against the actual
+`budget_categories.name` values — and the migration's own comment concedes a non-matching name is "a
+silent no-op." A single typo would have left that category at `'fixed'`, reinstating the exact G0-4
+defect the seed exists to fix, **with all 22 commands still green and both G1 and G2 seed checks
+passing**, because both compared the migration to the spec rather than either to reality. The
+reviewer could not run it; I did, and it came back clean. The gate was blind, not wrong.
+
+**I2 did not require the dev migration** the reviewer assumed. Replaying the real taxonomy into a
+throwaway answers it without touching the owner's data — the same technique that makes the dev
+application a separate, owner-owned decision rather than a gate dependency.
+
+Five nits recorded to `NITS.md` as N4–N8. None blocks. **Cycle count unchanged at 0 / 3** — no BLOCK,
+so no rework cycle was charged.
+
+## G4 review — 2026-09-01 — **PASS**
+
+| Check | Result |
+|---|---|
+| Full suite | **19 files / 307 tests passed** (298 baseline + 9) |
+| `npx tsc --noEmit` | exit 0 |
+| `npm run lint` | exit 0; the one pre-existing `scripts/seed-demo.mjs:438` warning, untouched by this task |
+| `npx next build` | exit 0, production build completes |
+| Migration round-trip on `b8_roundtrip_p0528` | `down` → column 0, `up` → column 1 and **both** constraints back. Clean. |
+| `AGENTS.md` regenerated dirty by the build? | **clean** — `next build` did not re-add the block |
+| INCONCLUSIVE items | all 6 run at G3, none adverse |
+
+**Cycle count: 0 / 3.** No BLOCK at any gate; no rework cycle charged at any point.
+
+### What the gates actually caught, since that is the only justification for their cost
+
+- **G0 (3 drafts, 5 defects, none reaching code):** three acceptance commands asserting psql exit `3`
+  where the real code is `1` — frozen as written they would have failed a *correct* implementation and
+  the only route to green would have been weakening the schema; a required toolchain row (Docker)
+  that was both false and the wrong prerequisite; an exact test-total assertion that would have
+  reddened a correct implementation for adding a seventh test; a classification that met the exit
+  criterion's letter while guaranteeing the scored set was permanently empty; and an acceptance
+  command that passed exactly once per database.
+- **G1:** `db/schema.sql` had drifted from migration history (`is_debt_service` missing, with two live
+  consumers) — found by column-set diff, not by reading. The guardian's own parser hypothesis was
+  refuted by execution, and the inverse hazard that test surfaced is real (N2).
+- **G2:** nothing — the implementation was correct first time, and all 22 commands matched
+  independently.
+- **G3:** the seed's keys had never been compared to reality (I1). Every gate up to that point
+  compared the migration to the spec, and the spec to itself.
+- **P-1, found while auditing the freeze:** the G0 freeze was unenforced against Bash — the one tool
+  the implementer holds.
+
+The self-approval failure BUILD.md §1 was written against did not recur: at G2 the implementer's
+report matched my independent run exactly, and at G3 the reviewer attacked its own gate commands
+rather than admiring the diff.
+
+### Remaining, and owner-owned
+
+**The migration is not applied to the dev database.** Committed, verified against a faithful replay
+of the real taxonomy (G3/I2), but the owner's live categories still have no `control_mode`. Applying
+it writes 21 classifications to real financial data and is the owner's call, not a gate's. The
+guardian's CSV backup belongs to that step. I3 (`0` operational debt-service rows) and I1 (21/21 key
+match) were measured today and are properties of the data, so re-run both immediately before
+applying if time has passed.
+
+**Not merged.** G4 passing makes this mergeable, not merged. Two commits sit on
+`p0.5-28/category-control-mode`, unpushed, per the owner's standing instruction.
