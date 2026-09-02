@@ -295,10 +295,14 @@ export function isTrackedCategory(category: ScorableCategory): boolean {
  * function taking `monthly_amounts: number[] | null` cannot dodge deciding what a null schedule
  * means either way. Stated here rather than left implicit.
  *
- * Deliberately private: exporting it would be an invitation to make this the fifth even-spread
- * implementation's home without doing the migration.
+ * Exported for exactly one consumer — `./pacing`, which must resolve a month's budget to the same
+ * cent this module does or the two disagree at the fifth decimal on a $1,000 annual budget. That is
+ * the narrow reason, and it is not the wider one this comment used to disclaim: exporting it is
+ * still NOT an invitation to make this the fifth even-spread implementation's home without doing
+ * the migration. The grid, the grid client's label, the budget page and the chat route keep their
+ * own copies until someone migrates them deliberately.
  */
-function budgetedForMonth(row: AdherenceInput, month: number): number {
+export function budgetedForMonth(row: AdherenceInput, month: number): number {
   const schedule = row.monthly_amounts;
   if (schedule && schedule.length === MONTHS_PER_YEAR && month >= 0 && month < MONTHS_PER_YEAR) {
     return roundCents(schedule[month]);
@@ -350,8 +354,12 @@ function monthVariances(row: AdherenceInput): MonthVariance[] {
  * for a month of flawless adherence is "-0.0% under" — a minus sign that means nothing, attached to
  * the one figure whose sign is load-bearing. `Object.is` is the only way to see the difference, so
  * it is normalised here rather than left for every renderer to remember.
+ *
+ * Exported alongside `budgetedForMonth` for `./pacing`, which reaches `-0` on more paths than this
+ * module does — a projection divides spend by a fraction, and `-0` survives every division on the
+ * way. One definition of "not a sign", imported, rather than a second `n === 0 ? 0 : n` next door.
  */
-function withoutNegativeZero(n: number): number {
+export function withoutNegativeZero(n: number): number {
   return n === 0 ? 0 : n;
 }
 
