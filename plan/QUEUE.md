@@ -26,6 +26,7 @@ the item that justified it.
 | P0.5-28-category-control-mode | Phase 0.5, step 28 ([ITEM.md](tasks/P0.5-28-category-control-mode/ITEM.md)) | **MERGED** 2026-09-01 (G0–G4 ✅, 0 cycles) | — | `shared/types.ts`, `migrations/**`, `db/schema.sql` |
 | P0.5-29-adherence-definition | Phase 0.5, step 29 ([ITEM.md](tasks/P0.5-29-adherence-definition/ITEM.md)) | **MERGED** 2026-09-01 (G0 ✅ G1 SKIP G2–G4 ✅, 0 cycles) | P0.5-28 (merged) | expected none — G1 skipped unless the spec finds otherwise |
 | P0.5-29a-headline-scope | Phase 0.5, addendum to step 29 ([ITEM.md](tasks/P0.5-29a-headline-scope/ITEM.md)) | **MERGED** 2026-09-01 (G0 ✅ G1 SKIP G2 ✅ G3 ✅ G4 ✅, 1 cycle) | P0.5-29 (merged) | **none** — verified: no importer of `scoredHeadline`/`ScoredHeadline` outside its own test |
+| P0.5-30-in-month-pacing | Phase 0.5, step 30 ([ITEM.md](tasks/P0.5-30-in-month-pacing/ITEM.md)) | **MERGED** 2026-09-02 (G0 ✅ G1 SKIP G2 ✅ G3 ✅ G4 ✅, 1 cycle) | P0.5-29 (merged), P0.5-29a (merged) | expected none — G1 skips unless the spec finds otherwise |
 | P1-10-zod-contracts | 10 | BLOCKED — Phase 0.5 precedes Phase 1 (§5) | Phase 0.5 complete | `shared/contracts/**` |
 
 Status: `QUEUED` → `SPEC` → `G0` → `G1` → `IMPL` → `G2` → `REVIEW` → `G3` → `G4` → `MERGED`,
