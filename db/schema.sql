@@ -136,7 +136,32 @@ CREATE INDEX IF NOT EXISTS idx_property_tenant_funds_property_id
 -- Nullable: most accounts (checking, brokerages, unrelated liabilities) have no property.
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS property_id INT REFERENCES properties(id) ON UPDATE CASCADE;
 
--- Budget categories with annual allocations
+-- Budget categories with annual allocations.
+--
+-- A category carries four independent classifications, and confusing any two of them is how a
+-- headline number goes quietly wrong:
+--   landscape            — which book it belongs to (spending vs. savings/investment movement)
+--   exclude_from_budget  — counted in the ledger, absent from budget math (transfers)
+--   is_income            — money in rather than out
+--   control_mode         — how much of a *decision* the spend is (below)
+--
+-- control_mode exists because an adherence figure averaged over every category is diluted by
+-- construction: a mortgage payment and a restaurant dinner are both budget lines and only one of
+-- them is a decision. It makes the set such a metric ranges over nameable out loud —
+--   landscape = 'operational' AND exclude_from_budget = FALSE
+--     AND is_income = FALSE AND control_mode = 'discretionary'
+-- — with all four conjuncts independently required. 'variable-necessary' (utilities, groceries,
+-- fuel: necessary, but the amount moves with circumstance rather than with a decision) and
+-- 'fixed' are tracked and reported, never scored. Three values rather than a boolean precisely
+-- because 'variable-necessary' has nowhere correct to go in a boolean.
+--
+-- NOT NULL, never nullable: a NULL here would be a fourth, unnamed mode that a later AVG() ranges
+-- over silently. This is a stated departure from the repo's "nullable means unknown" rule — a
+-- missing valuation is genuinely unknown; a category's control mode is at worst mis-decided,
+-- never absent. DEFAULT 'fixed' rather than 'discretionary' so an unreviewed category stays out
+-- of the scored set instead of being counted as a behavioural choice it was never checked to be.
+-- Present on capital rows and INERT there: no consumer may read control_mode without first
+-- gating on landscape = 'operational', exactly as exclude_from_budget/is_income are already gated.
 CREATE TABLE IF NOT EXISTS budget_categories (
   id                    SERIAL PRIMARY KEY,
   name                  TEXT NOT NULL,
@@ -144,11 +169,21 @@ CREATE TABLE IF NOT EXISTS budget_categories (
   landscape             TEXT NOT NULL DEFAULT 'operational' CHECK (landscape IN ('operational', 'capital')),
   exclude_from_budget   BOOLEAN NOT NULL DEFAULT FALSE,
   is_income             BOOLEAN NOT NULL DEFAULT FALSE,
+  is_debt_service       BOOLEAN NOT NULL DEFAULT FALSE,  -- category-level debt-service signal, alongside accounts.is_liability: a manual mortgage's balance and its payment stream sit on different accounts and never meet (lib/domain/propertyPnl.ts, app/properties/[id]/page.tsx)
+  control_mode          TEXT NOT NULL DEFAULT 'fixed' CHECK (control_mode IN ('fixed', 'discretionary', 'variable-necessary')),  -- see the note above; only 'discretionary' is ever scored
   sort_order            INT NOT NULL DEFAULT 0,
   dedicated_account_id  TEXT REFERENCES accounts(id) ON UPDATE CASCADE ON DELETE SET NULL,
   monthly_amounts       NUMERIC(12, 2)[], -- expected amount per month (12 values, Jan-Dec); NULL = spread annual_budget evenly across all 12
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (name, landscape)
+  UNIQUE (name, landscape),
+  -- is_debt_service and control_mode classify the same property of a category, and two
+  -- overlapping classifications of one property on one table are how definitions drift. They are
+  -- not merged (is_debt_service is narrower and has its own consumers), so their relationship is
+  -- stated here instead: a debt-service category IS the fixed case. One-directional on purpose —
+  -- the converse must not hold, since most fixed categories (insurance, taxes, subscriptions) are
+  -- not debt service. A CHECK rather than an application check because it also polices UPDATE.
+  CONSTRAINT budget_categories_debt_service_control_mode_check
+    CHECK (NOT is_debt_service OR control_mode = 'fixed')
 );
 
 -- Editable starting balance per category per year, for categories that track a real

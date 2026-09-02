@@ -15,6 +15,17 @@ export type PropertyType = 'primary' | 'rental';
 // deposit that quietly stops counting is a wrong number that looks like a right one.
 export type TenantFundKind = 'security_deposit' | 'last_month_rent';
 
+// How much of a *decision* a budget category's spend is (budget_categories.control_mode) — a
+// dimension orthogonal to landscape / exclude_from_budget / is_income, not a refinement of them.
+// 'fixed': contractually or externally set, not a month-to-month choice. 'discretionary': both
+// whether and how much are behaviour. 'variable-necessary': necessary, but the amount moves with
+// circumstance rather than with a decision — utilities are neither a free choice nor a fixed
+// debit, which is why this is three values and not a boolean.
+// Only 'discretionary' is ever scored; the other two are tracked and reported. A consumer must
+// gate on landscape = 'operational' before acting on this at all — the column is present on
+// capital rows and inert there.
+export type ControlMode = 'fixed' | 'discretionary' | 'variable-necessary';
+
 export interface Property {
   id: number;
   nickname: string;
@@ -47,6 +58,11 @@ export interface BudgetCategory {
   landscape: Landscape;
   exclude_from_budget: boolean;
   is_income: boolean;
+  // Required and non-nullable because the column is NOT NULL DEFAULT 'fixed' — every row has a
+  // value from the moment it exists. Typed optional or nullable it would describe a fourth,
+  // absent state the database cannot produce, and since these rows arrive through an unchecked
+  // db.query<BudgetCategory>() cast, nothing at runtime would contradict the lie.
+  control_mode: ControlMode;
   dedicated_account_id: string | null;
   monthly_amounts: number[] | null;
   created_at: string;

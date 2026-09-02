@@ -8,7 +8,7 @@ const log = createLogger('categories');
 
 export async function GET() {
   const result = await db.query<BudgetCategory>(
-    'SELECT id, name, annual_budget, landscape, exclude_from_budget, is_income, dedicated_account_id, monthly_amounts, created_at FROM budget_categories ORDER BY name'
+    'SELECT id, name, annual_budget, landscape, exclude_from_budget, is_income, control_mode, dedicated_account_id, monthly_amounts, created_at FROM budget_categories ORDER BY name'
   );
   return Response.json({ success: true, data: result.rows } satisfies ApiResponse<BudgetCategory[]>);
 }
