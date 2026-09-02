@@ -269,3 +269,12 @@ cycle charged.
 
 **Not merged.** G4 makes this mergeable. The branch is stacked on `p0.5-28/category-control-mode`,
 which is itself unmerged — so merging this implies a decision about that one first.
+
+## Sealed at merge, 2026-09-01
+
+Merged to `main` as `90e3c76` (`--no-ff`), after P0.5-28's `c675d2f` since this branch was stacked on
+it. Post-merge on `main`: `tsc` exit 0, **19 files / 332 tests**, lint exit 0, tree clean. Not pushed.
+
+**Carried forward, not fixed:** `NITS.md` N11 and N15 both produce demonstrably wrong numbers and
+both sit inside the frozen spec, so neither was a gate failure. **N11 settles before step 31**, which
+is the step that would give the headline a consumer.

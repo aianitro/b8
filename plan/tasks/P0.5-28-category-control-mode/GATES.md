@@ -617,3 +617,14 @@ the repo; the cost is a spurious `tsc` failure that looks like a regression.
 Deleting the duplicates restores `tsc` to exit 0. Any future gate seeing exactly these errors should
 clear `.next` and re-run before treating it as a real failure. Plausibly the same external actor as
 the unexplained `HEAD` checkout recorded above — recorded as a correlation, not a diagnosis.
+
+## Sealed at merge, 2026-09-01
+
+Merged to `main` as `c675d2f` (`--no-ff`, matching the P0-09a precedent). Post-merge on `main`:
+`tsc` exit 0, **19 files / 332 tests**, lint exit 0 with the one pre-existing warning, 8 migrations,
+tree clean. Not pushed.
+
+**Still outstanding and owner-owned:** the migration is *not* applied to the dev database. Merging
+put it in history; it has not touched real financial data. The guardian's CSV backup belongs to that
+step, and I1 (21/21 seed-key match) and I3 (0 operational debt-service rows) were measured on
+2026-09-01 and are properties of the data, not of the diff — re-run both immediately before applying.
