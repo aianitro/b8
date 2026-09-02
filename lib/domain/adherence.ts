@@ -183,20 +183,67 @@ export interface ChronicUnderspendFinding extends FindingBase {
 export type AdherenceFinding = BreachFinding | ChronicUnderspendFinding;
 
 /**
- * The scored set's aggregate over one input's findings — the headline number a dashboard would
+ * The scored set's aggregate over one input's CATEGORIES — the headline number a dashboard would
  * eventually show, computed here so there is exactly one definition of it.
+ *
+ * Two domains live in this one struct, and the field names are what keep them apart. The counts are
+ * FINDING-scoped, because that is the only scale on which they mean anything: a breach is one
+ * month, a defect is one category-window, and the two are not addable — six breach months would
+ * count six against a twelve-month defect's one. The money is CATEGORY-scoped: every month the
+ * caller supplied for every category `isScoredCategory` admits, whether or not that month produced
+ * a finding. A single "how many findings" field used to sit beside them and was removed in
+ * P0.5-29a rather than repaired, because it is the count-shaped instance of exactly the
+ * incommensurability above and nothing legitimate consumes the sum; a caller that wants a total
+ * adds `breachCount + defectCount` and owns that decision.
+ *
+ * `scoredCategoryCount` is the field that makes the split legible from the type alone rather than
+ * from this comment: it says what the money figures range over, so nobody has to infer it from a
+ * count that ranges over something else.
  */
 export interface ScoredHeadline {
-  /** At least 1 by construction: an empty scored set yields `null`, never a row of zeroes. */
-  findingCount: number;
+  /**
+   * Category-scoped: how many rows of the input `isScoredCategory` admitted, and therefore what
+   * `budgeted`/`actual`/`variance` range over. At least 1 by construction — an empty scored set
+   * yields `null`, never a row of zeroes.
+   */
+  scoredCategoryCount: number;
+  /** Finding-scoped: scored breach findings, one per over-budget month. */
   breachCount: number;
+  /** Finding-scoped: scored chronic-underspend findings, one per category window. */
   defectCount: number;
+  /**
+   * Category-scoped: the sum of the already-rounded per-month budgets of every month supplied for
+   * every scored category, re-rounded. Never a raw float sum, and never a finding's budget — a
+   * breach carries one month and a defect carries a whole window, so adding those two is the
+   * defect (N11) this shape exists to make unrepresentable.
+   */
   budgeted: number;
+  /** Category-scoped, same construction as `budgeted`. */
   actual: number;
+  /**
+   * Category-scoped `actual − budgeted`, always in that order. NEGATIVE IS UNDER BUDGET, positive
+   * is over — the same convention `MonthVariance.variance` states one level down, and never an
+   * unsigned magnitude. A surface reads the direction off this sign; re-deriving "under" or "over"
+   * from anything else is re-implementing the comparison that went wrong.
+   */
   variance: number;
   /**
-   * `variance ÷ budgeted` over the months the scored findings cover, or null when those months
-   * budgeted $0 in total — which happens when every scored finding is a $0-budget breach.
+   * `variance ÷ budgeted` over those same months, carrying the same sign as `variance`, or null
+   * when they budgeted $0 in total — a scored category with no observations loaded yet, or one
+   * whose every supplied month sits on a $0 schedule entry.
+   *
+   * Null, never 0, never NaN, never Infinity, never `-0`. This is the identical rule
+   * `MonthVariance.ratio` applies one level down, deliberately: a percentage of $0 has no baseline,
+   * and a second, different answer to the same question one level up is the drifting-definitions
+   * hazard this module exists to avoid. A `0` here would read "on budget" for a category that drew
+   * $75 against nothing budgeted.
+   *
+   * This null and the function's own `ScoredHeadline | null` are two different statements at two
+   * different levels: a null RESULT means "no category in this input is in the scored set"; a null
+   * ratio inside a real struct means "scored categories exist, and their supplied months budgeted
+   * nothing to be a percentage of" — with `variance` still a real signed dollar figure saying what
+   * happened. It is NOT rounded: it is a ratio, not money, and cent-rounding a percentage would
+   * quantize it into 1% steps.
    */
   varianceRatio: number | null;
 }
@@ -275,6 +322,40 @@ function toMonthVariance(row: AdherenceInput, spend: MonthSpend): MonthVariance 
 }
 
 /**
+ * One row's supplied months, in calendar order, resolved into the magnitudes every reader of this
+ * module compares.
+ *
+ * Extracted because `detectAdherence` and `scoredHeadline` must range over exactly the same months
+ * with exactly the same arithmetic — a second copy would drift, and the symptom would be a headline
+ * disagreeing with the findings printed beside it, which is the class of bug P0.5-29a exists to
+ * close. Calendar order is not load-bearing for a sum, but it is for the findings, and one ordered
+ * resolution shared by both is cheaper than two that agree by coincidence.
+ *
+ * The months are exactly the entries in `row.months` — no more and no fewer. Nothing here asks what
+ * "today" is, and nothing assumes twelve: a category with three supplied months of a twelve-month
+ * budget is three months, or a suite whose fixtures mean something different in December than in
+ * March.
+ */
+function monthVariances(row: AdherenceInput): MonthVariance[] {
+  return [...row.months]
+    .sort((a, b) => a.month - b.month)
+    .map((spend) => toMonthVariance(row, spend));
+}
+
+/**
+ * `-0` is a value this module must never emit.
+ *
+ * `roundCents` is `Math.round(n * 100) / 100` and `Math.round(-0.1)` is `-0`, so a variance of `-0`
+ * is reachable from ordinary arithmetic, and `-0 / 1200` is `-0` again. What a surface then prints
+ * for a month of flawless adherence is "-0.0% under" — a minus sign that means nothing, attached to
+ * the one figure whose sign is load-bearing. `Object.is` is the only way to see the difference, so
+ * it is normalised here rather than left for every renderer to remember.
+ */
+function withoutNegativeZero(n: number): number {
+  return n === 0 ? 0 : n;
+}
+
+/**
  * Breach and chronic-underspend findings for every tracked category in `rows`.
  *
  * Both detectors range over every operational, non-excluded, non-income category — wider than the
@@ -294,9 +375,7 @@ export function detectAdherence(rows: AdherenceInput[]): AdherenceFinding[] {
 
     const scored = isScoredCategory(row);
     const base = { categoryId: row.id, category: row.name, scored };
-    const months = [...row.months]
-      .sort((a, b) => a.month - b.month)
-      .map((spend) => toMonthVariance(row, spend));
+    const months = monthVariances(row);
 
     for (const month of months) {
       // Strictly greater. A month landing exactly on its budget is adherence, not a breach, and
@@ -342,34 +421,65 @@ function sumCents(values: number[]): number {
 }
 
 /**
- * The scored set's headline over one run's findings, or NULL when no finding in it is scored.
+ * The scored set's headline over one run's INPUT ROWS, or NULL when no row in it is scored.
  *
- * Null, never 0 and never NaN. This app's own demo dataset produces exactly that input today —
- * `scripts/seed-demo.mjs` never sets `control_mode`, so every seeded row is `fixed` and the scored
- * set is empty (P0.5-28 NITS N7) — and the natural shape of this function, a ratio over the scored
- * findings, divides by zero on it. A zero would be the worse answer of the two available wrong
- * ones: "the budget was followed perfectly" and "there is nothing to score" are different
- * statements, and BUILD.md §10.3's null-is-not-zero rule is the same rule that makes an unvalued
- * property render "—".
+ * Takes the same `AdherenceInput[]` `detectAdherence` takes — one array, two independent reads:
  *
- * No month is double-counted: a chronic window contains only months under half their budget, so
- * none of them can also be a breach, and a $0-budget breach month is never in a window.
+ *     const findings = detectAdherence(rows);
+ *     const headline = scoredHeadline(rows);
+ *
+ * It takes rows rather than findings because a position cannot be computed from findings at all,
+ * and P0.5-29 shipped the proof: ranging over findings makes every compliant month invisible, so a
+ * category budgeted $99.99/month that drew $110 in January and $90 in each of the other eleven
+ * reported "+10% over" when it was 8.3% UNDER (NITS N11, confirmed by execution). The second half
+ * of that defect was scale mixing — a breach's one-month budget added to a defect's whole-window
+ * budget in one denominator. Both causes are gone here for the same structural reason: the
+ * denominator is the scored categories' own supplied months, and a finding's magnitude never enters
+ * an aggregate. Taking `(rows, findings)` would have reopened it, since nothing would force the
+ * findings to have come from those rows, and returning the headline from `detectAdherence` would
+ * have changed that function's observable output.
+ *
+ * Membership is `isScoredCategory` — all FOUR conjuncts, narrower than the three-conjunct
+ * `isTrackedCategory` gate `detectAdherence` uses twenty lines above. `fixed` and
+ * `variable-necessary` categories still produce findings and still must not move this number.
+ *
+ * NULL if and only if no row is in the scored set. Not for perfect adherence — that is a real
+ * headline at variance 0, and rendering "—" for a flawless month is the failure this function used
+ * to have (NITS N12); not for a scored category with no supplied months; not for a $0 total budget.
+ * Those last two are real structs whose `varianceRatio` is null, one level down. "The budget was
+ * followed perfectly" and "there is nothing to score" are different statements, and this signature
+ * can finally tell them apart.
+ *
+ * No month is double-counted: each supplied month of each scored category is resolved once.
  */
-export function scoredHeadline(findings: AdherenceFinding[]): ScoredHeadline | null {
-  const scored = findings.filter((finding) => finding.scored);
-  if (scored.length === 0) return null;
+export function scoredHeadline(rows: AdherenceInput[]): ScoredHeadline | null {
+  const scoredRows = rows.filter((row) => isScoredCategory(row));
+  if (scoredRows.length === 0) return null;
 
-  const budgeted = sumCents(scored.map((finding) => finding.budgeted));
-  const actual = sumCents(scored.map((finding) => finding.actual));
-  const variance = sumCents(scored.map((finding) => finding.variance));
+  const months = scoredRows.flatMap((row) => monthVariances(row));
+
+  // Sums of the already-rounded per-month figures, re-rounded — never raw float sums. On the
+  // $1,000-a-year even spread the two disagree by four cents, and the same discipline governs
+  // `ChronicUnderspendFinding`'s window totals above.
+  const budgeted = sumCents(months.map((month) => month.budgeted));
+  const actual = sumCents(months.map((month) => month.actual));
+  const variance = withoutNegativeZero(sumCents(months.map((month) => month.variance)));
+
+  // The counts come from the detector rather than from a second copy of its thresholds — one
+  // definition of what a breach and a defect are, so the headline can never disagree with the
+  // findings a caller lists beside it. Every finding over scored rows is scored by construction
+  // (the four conjuncts subsume the three), so no `scored` filter is needed or wanted here.
+  const findings = detectAdherence(scoredRows);
 
   return {
-    findingCount: scored.length,
-    breachCount: scored.filter((finding) => finding.kind === 'breach').length,
-    defectCount: scored.filter((finding) => finding.kind === 'chronic-underspend').length,
+    scoredCategoryCount: scoredRows.length,
+    breachCount: findings.filter((finding) => finding.kind === 'breach').length,
+    defectCount: findings.filter((finding) => finding.kind === 'chronic-underspend').length,
     budgeted,
     actual,
     variance,
-    varianceRatio: budgeted > 0 ? variance / budgeted : null,
+    // From the two ROUNDED totals, and itself left unrounded: a ratio is not money, and cent-
+    // rounding it would quantize a percentage into 1% steps.
+    varianceRatio: budgeted > 0 ? withoutNegativeZero(variance / budgeted) : null,
   };
 }

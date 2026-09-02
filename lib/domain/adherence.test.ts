@@ -6,6 +6,7 @@ import {
   type ScorableCategory,
   type AdherenceInput,
   type AdherenceFinding,
+  type ScoredHeadline,
   type BreachFinding,
   type ChronicUnderspendFinding,
   type MonthSpend,
@@ -473,50 +474,407 @@ function evenSpreadDust(): AdherenceInput {
   });
 }
 
+// ---------------------------------------------------------------------------------------------
+// The scored-set headline (P0.5-29a). Every case below asserts a POSITION — what the scored
+// categories did across the months the caller supplied — and not a summary of the findings they
+// happened to produce. The two answer differently, and P0.5-29 shipped the proof: ranging over
+// findings made eleven compliant months invisible and reported a category 8.3% under budget as
+// 10% over (NITS N11). The fixtures are therefore built so that the finding-scoped answer and the
+// category-scoped one are numerically far apart, and every case pins both.
+
+// Fixture A/B: one scored category, over budget in January and comfortably lean in each of the
+// other eleven months. Only January produces a finding, so this is the exact shape on which a
+// finding-scoped headline points the wrong way.
+const overThenLean = (over: Partial<AdherenceInput> = {}): AdherenceInput =>
+  input({ months: months(110, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90), ...over });
+
+// Fixture C: two scored categories in one input, one over budget and one chronically under it, so
+// a single run yields two measured categories, three breach findings and one defect finding —
+// three distinct values, which a struct that collapsed its two domains could not produce at once.
+function twoDomainRows(): AdherenceInput[] {
+  return [
+    input({
+      id: 10,
+      name: 'Fabricated dining out',
+      annual_budget: 1200,
+      months: months(140, 140, 140, 90, 90, 90, 90, 90, 90, 90, 90, 90),
+    }),
+    input({
+      id: 11,
+      name: 'Fabricated home improvement',
+      annual_budget: 2400,
+      months: months(50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50),
+    }),
+  ];
+}
+
+// Fixture I: one row of every shape the four conjuncts exclude, each with extreme variance, so a
+// gate built from three conjuncts instead of four — the plausible slip, since `detectAdherence`
+// twenty lines up correctly uses the three-conjunct one — moves the headline visibly rather than
+// subtly. The first two are tracked and DO produce findings (twelve breaches and one defect),
+// which is what makes a forgotten narrowing visible instead of harmless.
+function unscoredContamination(): AdherenceInput[] {
+  return [
+    input({
+      id: 20,
+      control_mode: 'fixed',
+      name: 'Fabricated fixed obligation',
+      annual_budget: 24000,
+      months: months(2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400, 2400),
+    }),
+    input({
+      id: 21,
+      control_mode: 'variable-necessary',
+      name: 'Fabricated groceries',
+      annual_budget: 24000,
+      months: months(700, 700, 700, 700, 700, 700, 700, 700, 700, 700, 700, 700),
+    }),
+    input({ id: 22, landscape: 'capital', months: months(5000, 5000, 5000) }),
+    input({ id: 23, exclude_from_budget: true, months: months(5000, 5000, 5000) }),
+    input({ id: 24, is_income: true, months: months(5000, 5000, 5000) }),
+  ];
+}
+
+// `scoredHeadline` returns `ScoredHeadline | null` and every case states which it expects. This
+// asserts the non-null half once, so the bodies below read as arithmetic rather than as a run of
+// optional chaining — and so a case that silently started returning null fails here by name
+// instead of quietly satisfying every `?.` assertion after it.
+function realHeadline(rows: AdherenceInput[]): ScoredHeadline {
+  const headline = scoredHeadline(rows);
+  expect(headline).not.toBeNull();
+  if (headline === null) throw new Error('expected a real headline, got null');
+  return headline;
+}
+
 describe('scoredHeadline', () => {
-  it('the scored-set headline is null, not zero or NaN, when no finding in the input belongs to the scored set', () => {
+  it('the scored-set headline is null, not zero or NaN, when no category in the input belongs to the scored set', () => {
     // The shape scripts/seed-demo.mjs produces today: it never sets control_mode, so every seeded
     // row is `fixed` and the scored set is empty (P0.5-28 NITS N7). Findings exist — they are just
     // all unscored — and a ratio over them divides by zero.
-    const findings = detectAdherence([
-      fixedChronic(),
-      input({ id: 2, control_mode: 'fixed', months: months(400, 400, 400) }),
-    ]);
+    const rows = [fixedChronic(), input({ id: 2, control_mode: 'fixed', months: months(400, 400, 400) })];
+    const findings = detectAdherence(rows);
     expect(findings.length).toBeGreaterThan(0);
     expect(findings.every((f) => f.scored === false)).toBe(true);
 
-    const headline = scoredHeadline(findings);
+    const headline = scoredHeadline(rows);
     // "The budget was followed perfectly" and "there is nothing to score" are different
-    // statements. A zero says the first and means the second.
+    // statements. A zero says the first and means the second. Since P0.5-29a this null carries
+    // only the second: perfect adherence is a real struct at variance 0 (below), so the two are
+    // finally distinguishable rather than sharing one answer.
     expect(headline).toBeNull();
     expect(headline).not.toBe(0);
     expect(Number.isNaN(headline as unknown as number)).toBe(false);
 
     // And null is not the constant answer: add one discretionary category and it reports.
-    const withScored = scoredHeadline(
-      detectAdherence([fixedChronic(), fixedChronic({ id: 3, control_mode: 'discretionary' })])
-    );
-    expect(withScored).not.toBeNull();
-    expect(withScored?.findingCount).toBe(1);
-    expect(withScored?.defectCount).toBe(1);
-    expect(withScored?.variance).toBe(-15600);
-    expect(Number.isFinite(withScored?.varianceRatio ?? NaN)).toBe(true);
+    const withScored = realHeadline([
+      fixedChronic(),
+      fixedChronic({ id: 3, control_mode: 'discretionary' }),
+    ]);
+    // One category measured, one defect finding — two counts on two scales, both real.
+    expect(withScored.scoredCategoryCount).toBe(1);
+    expect(withScored.defectCount).toBe(1);
+    // Unchanged by the correction, and deliberately kept: `fixedChronic`'s chronic window is all
+    // twelve months, so its category-scoped and finding-scoped totals coincide. A changed value
+    // here would signal a different bug, not this fix.
+    expect(withScored.variance).toBe(-15600);
+    expect(Number.isFinite(withScored.varianceRatio ?? NaN)).toBe(true);
   });
 
-  it('reports null for the variance ratio when every scored finding sits on a month that budgeted nothing', () => {
-    // The other divide-by-zero: a scored finding can exist with a $0 denominator, and Infinity is
-    // no more acceptable in the headline than it is in a month's ratio.
-    const headline = scoredHeadline(
-      detectAdherence([
-        input({
-          monthly_amounts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1200],
-          months: [{ month: 0, actual: 75 }],
-        }),
-      ])
-    );
+  it('perfect adherence across the scored categories produces a real headline at variance zero rather than null, and the ratio is positive zero so no surface can print minus zero percent', () => {
+    // Twelve months landing exactly on a $100 budget. No breach (strictly greater), no defect —
+    // so the old finding-scoped headline had nothing to range over and answered null, which a
+    // dashboard renders as "—" for a flawless year (NITS N12).
+    const rows = [input({ months: months(100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100) })];
+    expect(detectAdherence(rows)).toEqual([]);
 
-    expect(headline?.budgeted).toBe(0);
-    expect(headline?.variance).toBe(75);
-    expect(headline?.varianceRatio).toBeNull();
+    const headline = realHeadline(rows);
+    expect(headline.scoredCategoryCount).toBe(1);
+    expect(headline.breachCount).toBe(0);
+    expect(headline.defectCount).toBe(0);
+    expect(headline.budgeted).toBe(1200);
+    expect(headline.actual).toBe(1200);
+    expect(headline.variance).toBe(0);
+    expect(headline.varianceRatio).toBe(0);
+    // `Math.round(-0.1)` is `-0` and `-0 / 1200` is `-0` again, and `toBe(0)` cannot see the
+    // difference. Only `Object.is` can, and a surface printing "-0.0% under" for a perfect year
+    // is the whole reason it is worth seeing.
+    expect(Object.is(headline.variance, -0)).toBe(false);
+    expect(Object.is(headline.varianceRatio, -0)).toBe(false);
+  });
+
+  it('per-month variances that cancel to negative float dust report a positive-zero headline variance, so a run that nets out to nothing cannot print minus zero either', () => {
+    // The case above cannot actually reach the normalisation it asserts. Every month there lands
+    // exactly on budget, so each per-month variance is `+0`, and `+0 + +0` is `+0` deterministically
+    // — the assertion holds for a reason that has nothing to do with the guard, which is the same
+    // as not testing the guard at all. This fixture reaches it.
+    //
+    // $100 budgeted every month; three supplied months at $100.01, $99.93 and $100.06. The
+    // per-month variances round to exactly `[0.01, -0.07, 0.06]`, three cent figures that cancel
+    // on paper. They do not cancel in binary: `0.01 + -0.07` is `-0.060000000000000005`, and
+    // adding `0.06` leaves a residue of `-6.938893903907228e-18`. `sumCents` re-rounds that
+    // residue, and `Math.round(-6.938893903907228e-16)` is `-0`, not `0` — so a headline variance
+    // of negative zero falls straight out of three months of ordinary arithmetic, with no
+    // contrived magnitudes anywhere in the input.
+    //
+    // Two months are over budget here, so this is a near-miss run rather than a flawless one. That
+    // is unavoidable: a sum of same-signed cent figures cannot land on float dust, so reaching the
+    // residue at all requires variances of both signs. What the assertion is about is the sign of
+    // the total, and the total is nothing.
+    const rows = [input({ months: months(100.01, 99.93, 100.06) })];
+
+    const headline = realHeadline(rows);
+    expect(headline.scoredCategoryCount).toBe(1);
+    expect(headline.breachCount).toBe(2);
+    expect(headline.defectCount).toBe(0);
+    expect(headline.budgeted).toBe(300);
+    expect(headline.actual).toBe(300);
+
+    // `toBe` compares with `Object.is`, so this line alone already separates `0` from `-0` — the
+    // explicit `Object.is` assertion below states the intent rather than leaving it to be inferred
+    // from a matcher's equality semantics, exactly as the perfect-adherence case does.
+    expect(headline.variance).toBe(0);
+    expect(Object.is(headline.variance, -0)).toBe(false);
+
+    // And the ratio inherits the normalised variance: `0 / 300` is `+0`. Left unnormalised one
+    // line up, `-0 / 300` is `-0`, and a surface reading the sign off this field prints
+    // "-0.0% under" for a category that came out level.
+    expect(headline.varianceRatio).toBe(0);
+    expect(Object.is(headline.varianceRatio, -0)).toBe(false);
+  });
+
+  it('reports null for the variance ratio, inside a real headline, when the scored categories supplied months budgeted nothing in total', () => {
+    // The other divide-by-zero: a December-only schedule, and $75 landed in January. Infinity is
+    // no more acceptable in the headline than it is in a month's ratio, and 0 is worse than
+    // either — it reads "on budget" for a category that spent $75 against nothing budgeted.
+    const headline = realHeadline([
+      input({
+        monthly_amounts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1200],
+        months: [{ month: 0, actual: 75 }],
+      }),
+    ]);
+
+    expect(headline.scoredCategoryCount).toBe(1);
+    expect(headline.breachCount).toBe(1);
+    expect(headline.budgeted).toBe(0);
+    expect(headline.actual).toBe(75);
+    expect(headline.variance).toBe(75);
+    expect(headline.varianceRatio).toBeNull();
+    // Two nulls, two levels, two statements: the headline itself is NOT null here — scored
+    // categories exist and $75 really was spent — only the percentage is, because there is no
+    // baseline to be a percentage of.
+    expect(Number.isNaN(headline.varianceRatio as unknown as number)).toBe(false);
+    expect(headline.varianceRatio).not.toBe(Infinity);
+    expect(headline.varianceRatio).not.toBe(0);
+  });
+
+  it('the headline ranges over every supplied month of every scored category, so a category that drew 1,100 against 1,199.88 budgeted reads 8.3 percent under and not 10 percent over', () => {
+    // The binding case, verbatim from NITS N11: $99.99 a month, $110 in January and $90 in each
+    // of the other eleven. Measured output before this task, at P0.5-29's G4:
+    // {"findingCount":1,"breachCount":1,"defectCount":0,"budgeted":100,"actual":110,
+    //  "variance":10,"varianceRatio":0.1} — a confident +10% over for a category 8.3% under.
+    const headline = realHeadline([overThenLean({ annual_budget: 1199.88 })]);
+
+    expect(headline.scoredCategoryCount).toBe(1);
+    expect(headline.breachCount).toBe(1);
+    // 90 / 99.99 = 0.9001, well above the 0.5 chronic threshold: lean months, not a fiction.
+    expect(headline.defectCount).toBe(0);
+
+    expect(headline.budgeted).toBe(1199.88);
+    // January's budget alone — the old denominator, and the whole of the first cause of N11.
+    expect(headline.budgeted).not.toBe(99.99);
+    expect(headline.actual).toBe(1100);
+    expect(headline.actual).not.toBe(110);
+    expect(headline.variance).toBe(-99.88);
+    expect(headline.variance).not.toBe(10.01);
+
+    expect(headline.varianceRatio).toBeCloseTo(-0.08324165749908323, 10);
+    // Negative means UNDER. The sign is the direction, not decoration.
+    expect(headline.varianceRatio ?? 0).toBeLessThan(0);
+    expect(headline.varianceRatio).not.toBeCloseTo(0.1001, 3);
+    // And what a surface would print from it: 8.3% under, one decimal place.
+    expect(Math.round(Math.abs(headline.varianceRatio ?? NaN) * 1000) / 10).toBe(8.3);
+  });
+
+  it('an evenly divisible annual budget gives the same position at exactly minus one twelfth, so the corrected headline does not depend on the per-month rounding residue', () => {
+    // Fixture A with $1,200 instead of $1,199.88, so every month budgets exactly $100 and no
+    // rounding residue exists anywhere in the arithmetic. The position is the same either way,
+    // which is what makes "≈ 8.3% under" a property of the spend rather than of the division.
+    const headline = realHeadline([overThenLean()]);
+
+    expect(headline.budgeted).toBe(1200);
+    expect(headline.actual).toBe(1100);
+    expect(headline.variance).toBe(-100);
+    expect(headline.varianceRatio).toBeCloseTo(-1 / 12, 12);
+    // 0.1 exactly is what the defective implementation measured on this fixture at G4.
+    expect(headline.varianceRatio).not.toBe(0.1);
+    expect(headline.varianceRatio ?? 0).toBeLessThan(0);
+  });
+
+  it('breachCount and defectCount stay finding-scoped while budgeted, actual and variance range over the scored categories supplied months, and the headline reports how many categories it measured', () => {
+    const headline = realHeadline(twoDomainRows());
+
+    // Three counts, three different numbers, three different domains. A struct that collapsed
+    // any two of them — or kept one "how many findings" field standing in for all three — cannot
+    // produce this row.
+    expect(headline.scoredCategoryCount).toBe(2);
+    expect(headline.breachCount).toBe(3);
+    expect(headline.defectCount).toBe(1);
+
+    // Money, category-scoped: 12 × $100 + 12 × $200 budgeted, $1,230 + $600 drawn.
+    expect(headline.budgeted).toBe(3600);
+    expect(headline.actual).toBe(1830);
+    expect(headline.variance).toBe(-1770);
+    expect(headline.varianceRatio).toBeCloseTo(-0.49166666666666664, 12);
+  });
+
+  it('no aggregate adds a month-scale breach magnitude to a window-scale defect magnitude, so the denominator is the scored categories own months and never the sum of their findings budgets', () => {
+    // The second cause of N11, isolated. A BreachFinding.budgeted is ONE MONTH; a
+    // ChronicUnderspendFinding.budgeted is a WHOLE WINDOW. Summing them is a scale error that
+    // still produces a plausible dollar figure, which is exactly why it shipped.
+    const headline = realHeadline(twoDomainRows());
+
+    // 3 × $100 (three breach months) + $2,400 (one twelve-month window) — the unchanged
+    // implementation's answer.
+    expect(headline.budgeted).not.toBe(2700);
+    // Categories plus findings, double-counted — the likely partial fix, since the two causes of
+    // N11 are independent and correcting the ranging alone leaves the finding sum in place.
+    expect(headline.budgeted).not.toBe(6300);
+    expect(headline.budgeted).toBe(3600);
+
+    expect(headline.varianceRatio).not.toBeCloseTo(-0.6222222222222222, 6);
+    // A ratio is not money. Cent-rounding it would quantize a percentage into 1% steps.
+    expect(headline.varianceRatio).not.toBe(-0.49);
+  });
+
+  it('a category over budget and a category under budget produce headline variance ratios of opposite sign, so over and under are read from the sign rather than re-derived by a renderer', () => {
+    const [overRow, underRow] = twoDomainRows();
+    const over = realHeadline([overRow]);
+    const under = realHeadline([underRow]);
+
+    // $1,230 against $1,200 — over budget, so positive, both in dollars and as a ratio.
+    expect(over.variance).toBe(30);
+    expect(over.varianceRatio).toBeCloseTo(0.025, 12);
+    expect(over.varianceRatio ?? 0).toBeGreaterThan(0);
+
+    // $600 against $2,400 — under budget, so negative. `Math.abs` here, or `budgeted − actual`,
+    // or `1 − actual / budgeted`, each still yields a plausible small percentage and the only
+    // symptom is that thrift starts reading as overspending. This is the failure that shipped.
+    expect(under.variance).toBe(-1800);
+    expect(under.varianceRatio).toBeCloseTo(-0.75, 12);
+    expect(under.varianceRatio ?? 0).toBeLessThan(0);
+
+    expect(Math.sign(over.varianceRatio ?? 0)).not.toBe(Math.sign(under.varianceRatio ?? 0));
+  });
+
+  it('categories outside the scored set never move the headline, however extreme their variance', () => {
+    // `fixed` and `variable-necessary` are tracked and reported, never scored; capital,
+    // excluded and income rows are not even tracked. Each contaminant here is wildly out of
+    // line, so a headline gated on three conjuncts instead of four lands nowhere near the clean
+    // answer rather than a cent away from it.
+    const contaminants = unscoredContamination();
+    const contaminantFindings = detectAdherence(contaminants);
+    expect(contaminantFindings.length).toBeGreaterThan(0);
+    expect(contaminantFindings.every((f) => f.scored === false)).toBe(true);
+
+    const clean = realHeadline(twoDomainRows());
+    const contaminated = realHeadline([...twoDomainRows(), ...contaminants]);
+
+    // Every field, including the counts — not just the money.
+    expect(contaminated).toEqual(clean);
+  });
+
+  it('the headline never invents a month the caller did not supply, so a scored category with three supplied months of a twelve-month budget is measured over exactly those three', () => {
+    // $1,200 a year, but only January to March have been observed. The position so far is
+    // $150 against $300, not $150 against $1,200 — and nothing here asks what "today" is, so the
+    // answer is the same in December as in March.
+    const headline = realHeadline([
+      input({ months: [{ month: 0, actual: 50 }, { month: 1, actual: 50 }, { month: 2, actual: 50 }] }),
+    ]);
+
+    expect(headline.budgeted).toBe(300);
+    // The whole annual budget, i.e. twelve months assumed or read off a clock.
+    expect(headline.budgeted).not.toBe(1200);
+    expect(headline.actual).toBe(150);
+    expect(headline.variance).toBe(-150);
+    expect(headline.varianceRatio).toBe(-0.5);
+  });
+
+  it('a scored category with no supplied months yields a real headline at zero budgeted with a null variance ratio, not a null headline and not a zero percentage', () => {
+    // Observations not loaded yet. "No months" is not "nothing to score": the category is in the
+    // scored set, and collapsing this to a null headline would re-merge the two states the
+    // struct's own null exists to keep apart.
+    const headline = realHeadline([input({ months: [] })]);
+
+    expect(headline.scoredCategoryCount).toBe(1);
+    expect(headline.breachCount).toBe(0);
+    expect(headline.defectCount).toBe(0);
+    expect(headline.budgeted).toBe(0);
+    expect(headline.actual).toBe(0);
+    expect(headline.variance).toBe(0);
+    expect(headline.varianceRatio).toBeNull();
+    expect(Object.is(headline.variance, -0)).toBe(false);
+  });
+
+  it('the headline denominator is the rounded per-month schedule, so a 1,000 annual budget with no schedule totals 999.96 and the ratio is computed from the rounded totals', () => {
+    // $1,000 / 12 = $83.333…, and the month's budget is the rounded $83.33 — so twelve of them
+    // total $999.96, not $1,000.00. That four-cent divergence from the grid's own even spread
+    // (NITS N19) is INHERITED here deliberately and pinned rather than assumed: closing it would
+    // mean changing `budgetedForMonth`, which the per-month rounding test above pins.
+    const headline = realHeadline([evenSpreadDust()]);
+
+    expect(headline.budgeted).toBe(999.96);
+    expect(headline.budgeted).not.toBe(1000);
+    expect(headline.actual).toBe(240);
+    // Sums of already-rounded per-month figures, re-rounded. Rounding once at the end instead
+    // gives −760.00 exactly, four cents away.
+    expect(headline.variance).toBe(-759.96);
+    expect(headline.variance).not.toBe(-760);
+
+    // And the ratio comes from those two rounded totals: −759.96 / 999.96, not −760 / 1000.
+    expect(headline.varianceRatio).toBeCloseTo(-0.7599903996159847, 12);
+    expect(headline.varianceRatio).not.toBe(-0.76);
+  });
+
+  it('the headline counts agree with the scored findings detectAdherence returns over the same rows', () => {
+    // One array, two independent reads, and the counts must be the same counts — a headline that
+    // disagreed with the findings listed beside it would be the same divergence N11 was made of.
+    const rows = [...twoDomainRows(), ...unscoredContamination()];
+    const findings = detectAdherence(rows);
+    const headline = realHeadline(rows);
+
+    expect(headline.breachCount).toBe(
+      findings.filter((f) => f.scored && f.kind === 'breach').length
+    );
+    expect(headline.defectCount).toBe(
+      findings.filter((f) => f.scored && f.kind === 'chronic-underspend').length
+    );
+    expect(headline.breachCount).toBe(3);
+    expect(headline.defectCount).toBe(1);
+
+    // Strictly below the unfiltered counts, so an implementation that forgot to narrow to the
+    // scored set fails here rather than passing by coincidence.
+    const allBreaches = findings.filter((f) => f.kind === 'breach').length;
+    const allDefects = findings.filter((f) => f.kind === 'chronic-underspend').length;
+    expect(allBreaches).toBe(15);
+    expect(allDefects).toBe(2);
+    expect(headline.breachCount).toBeLessThan(allBreaches);
+    expect(headline.defectCount).toBeLessThan(allDefects);
+  });
+
+  it('scoredHeadline takes the same AdherenceInput array detectAdherence takes, and a finding array no longer typechecks', () => {
+    // One input, two reads: `detectAdherence(rows)` and `scoredHeadline(rows)`. Nothing lets a
+    // caller hand one a filtered or reordered version of what it handed the other, which is
+    // precisely the divergence a `(rows, findings)` signature would have left open.
+    const rows = [overThenLean()];
+    const findings = detectAdherence(rows);
+
+    expect(findings.length).toBeGreaterThan(0);
+    expect(scoredHeadline(rows)).not.toBeNull();
+
+    // The old signature took this array. It must no longer compile — and because an unused
+    // `@ts-expect-error` is itself a hard error (TS2578) under this tsconfig, `npx tsc --noEmit`
+    // fails if the finding-taking signature ever comes back.
+    // @ts-expect-error scoredHeadline takes AdherenceInput[], not AdherenceFinding[]
+    scoredHeadline(findings);
   });
 });
