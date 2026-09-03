@@ -6,7 +6,9 @@ import db from '@/lib/db';
 import { computeCurrentNetWorth } from '@/lib/netWorth';
 import NetWorthTrendChart, { type NetWorthTrendPoint } from '@/components/charts/NetWorthTrendChart';
 import NetWorthBreakdown, { type BreakdownComponent } from '@/components/NetWorthBreakdown';
-import { groupRealEstateEquity, type NetWorthComponent } from '@/lib/domain/netWorth';
+// The delta is the domain function's, bound locally as `ytdDelta` for readability at the call
+// site, and never recomputed on this page.
+import { comparableYtdDelta as ytdDelta, groupRealEstateEquity, type NetWorthComponent, type SnapshotPoint } from '@/lib/domain/netWorth';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -21,21 +23,38 @@ const COMPONENTS: { key: NetWorthComponent; label: string; href: string; hint: s
   { key: 'liabilities', label: 'Other debt', href: '/accounts', hint: 'Unsecured loans and tenant deposits held', accent: 'bg-red-500' },
 ];
 
-async function getSnapshots(): Promise<NetWorthTrendPoint[]> {
+// The recorded history, in one read, for two consumers: the trend chart's labelled points and the
+// year-to-date delta's comparability test.
+//
+// The ISO date comes from Postgres's own rendering of the DATE column. Converting the Date
+// object instead resolves in UTC, which is the PREVIOUS day in every negative-offset zone — a
+// wrong label on every point, and potentially a different baseline selected for the delta.
+async function getSnapshots(): Promise<{ points: NetWorthTrendPoint[]; history: SnapshotPoint[] }> {
   const result = await db.query<{
-    snapshot_date: Date; operational: string; capital_financial: string;
-    real_estate_equity: string; total: string;
+    snapshot_date: Date; iso_date: string; operational: string; capital_financial: string;
+    real_estate_equity: string; total: string; liabilities_security_deposits: string | null;
   }>(
-    `SELECT snapshot_date, operational, capital_financial, real_estate_equity, total
+    `SELECT snapshot_date, snapshot_date::text AS iso_date, operational, capital_financial,
+            real_estate_equity, total, liabilities_security_deposits
        FROM net_worth_snapshots ORDER BY snapshot_date`
   );
-  return result.rows.map((r) => ({
-    date: r.snapshot_date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    operational: Number(r.operational),
-    capitalFinancial: Number(r.capital_financial),
-    realEstateEquity: Number(r.real_estate_equity),
-    total: Number(r.total),
-  }));
+  return {
+    points: result.rows.map((r) => ({
+      date: r.snapshot_date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      operational: Number(r.operational),
+      capitalFinancial: Number(r.capital_financial),
+      realEstateEquity: Number(r.real_estate_equity),
+      total: Number(r.total),
+    })),
+    history: result.rows.map((r) => ({
+      date: r.iso_date,
+      total: Number(r.total),
+      // NULL means the row was written before P0-09a began subtracting tenant security deposits,
+      // and is therefore not the same measurement as today's total. Only its nullness is read.
+      liabilitiesSecurityDeposits:
+        r.liabilities_security_deposits === null ? null : Number(r.liabilities_security_deposits),
+    })),
+  };
 }
 
 async function getLabels() {
@@ -53,6 +72,12 @@ export default async function NetWorthPage() {
   const [netWorth, snapshots, labels] = await Promise.all([
     computeCurrentNetWorth(), getSnapshots(), getLabels(),
   ]);
+
+  // The year-to-date movement, measured within ONE definition of the figure it moves. NITS N2 lived
+  // on the dashboard's version of this card, which took the earliest snapshot of the year whatever
+  // era it was written in — understating growth by exactly the deposits held, with no symptom.
+  // Null, never 0: a zero would assert that net worth did not move.
+  const ytd = ytdDelta(netWorth.total, snapshots.history);
 
   const amountOf = (k: NetWorthComponent) =>
     k === 'operational' ? netWorth.operational
@@ -113,6 +138,28 @@ export default async function NetWorthPage() {
         <p className={`text-5xl font-bold mt-2 font-mono ${netWorth.total < 0 ? 'text-red-400' : 'text-white'}`}>
           {fmt(netWorth.total)}
         </p>
+        <div data-testid="ytd-delta" className="flex items-center gap-2 mt-3 text-sm">
+          {ytd !== null ? (
+            <>
+              <span className={`font-mono font-medium ${ytd.delta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {ytd.delta >= 0 ? '+' : ''}{fmt(ytd.delta)}
+              </span>
+              <span className="text-slate-500">
+                since {ytd.sinceDate}
+                {/* The window is disclosed rather than assumed: "since March" and "since January"
+                    are different claims about the same dollar figure, and the older rows were
+                    skipped for a stated reason. */}
+                {ytd.excludedPreCutoverCount > 0 && (
+                  <> · {ytd.excludedPreCutoverCount} earlier{' '}
+                    {ytd.excludedPreCutoverCount === 1 ? 'reading' : 'readings'} predate the deposit
+                    decomposition and are not comparable</>
+                )}
+              </span>
+            </>
+          ) : (
+            <span className="text-slate-500">First recorded reading — a trend appears once more are collected</span>
+          )}
+        </div>
         <p className="text-xs text-slate-500 mt-3">
           Ledger balances, recorded valuations, and real-estate equity — the four parts below sum to this exactly.
         </p>
@@ -156,7 +203,7 @@ export default async function NetWorthPage() {
       </div>
 
       <div className="mb-6">
-        <NetWorthTrendChart data={snapshots} />
+        <NetWorthTrendChart data={snapshots.points} />
       </div>
 
       <NetWorthBreakdown components={breakdownComponents} />

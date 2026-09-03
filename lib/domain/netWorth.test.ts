@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { computeNetWorthBreakdown, groupRealEstateEquity, type NetWorthAccount } from './netWorth';
+import { comparableYtdDelta, computeNetWorthBreakdown, groupRealEstateEquity, type NetWorthAccount, type SnapshotPoint } from './netWorth';
+import { roundCents } from '../budgetMath';
 import { latestTenantFundByProperty, type TenantFundRow } from './property';
 
 const acct = (
@@ -332,5 +333,101 @@ describe('tenant-held funds', () => {
       { kind: 'property', id: '9', component: 'liabilities', value: -2200, propertyId: null }
     );
     expect(r.contributions.filter((c) => c.component === 'realEstateEquity')).toEqual([]);
+  });
+});
+
+// Fabricated snapshots throughout. The shape is NITS N2's: `net_worth_snapshots.total` changed
+// meaning partway through the recorded history when P0-09a began subtracting tenant security
+// deposits, and `liabilities_security_deposits` is the column that marks which side of the change
+// a row was written on. NULL means "written under the previous definition, and therefore not
+// comparable with today's total".
+const PRE = (date: string, total: number): SnapshotPoint => ({ date, total, liabilitiesSecurityDeposits: null });
+const POST = (date: string, total: number): SnapshotPoint => ({ date, total, liabilitiesSecurityDeposits: -18400.0 });
+
+/** Two pre-cutover rows, then two comparable ones. The baseline is the third. */
+const HISTORY: SnapshotPoint[] = [
+  PRE('2026-01-02', 2900000.0),
+  PRE('2026-02-01', 2915000.0),
+  POST('2026-03-01', 2880000.33),
+  POST('2026-04-01', 2905000.0),
+];
+
+const CURRENT = 2930000.11;
+
+describe('comparableYtdDelta', () => {
+  it('the year-to-date delta is measured from the earliest snapshot that carries the deposit decomposition, never from an older row written under the previous definition', () => {
+    const r = comparableYtdDelta(CURRENT, HISTORY)!;
+
+    expect(r.delta).toBe(49999.78);
+    expect(r.sinceDate).toBe('2026-03-01');
+
+    // THIS is N2. The incumbent took the earliest snapshot of the year regardless of era, and the
+    // two answers differ by $19,999.67 on this history — the deposits held, understating growth,
+    // with no symptom at all on the rendered page.
+    expect(r.delta).not.toBe(30000.11);
+    expect(r.sinceDate).not.toBe('2026-01-02');
+
+    // The latest comparable row would report a month's movement under a year's label.
+    expect(r.delta).not.toBe(25000.11);
+    expect(r.sinceDate).not.toBe('2026-04-01');
+  });
+
+  it('a history with no post-cutover snapshot yields no delta at all rather than a delta of zero', () => {
+    // A `0` asserts "net worth did not move". Null says "there is no comparable earlier reading",
+    // and the page renders its "First recorded reading" copy instead of a $0 delta.
+    const none = comparableYtdDelta(CURRENT, [PRE('2026-01-02', 2900000.0), PRE('2026-02-01', 2915000.0)]);
+    expect(none).toBe(null);
+    expect(none).not.toBe(0);
+    expect(Object.is(none, undefined)).toBe(false);
+
+    const empty = comparableYtdDelta(CURRENT, []);
+    expect(empty).toBe(null);
+    expect(empty).not.toBe(0);
+  });
+
+  it('the delta is current minus baseline, so a net worth that grew reports a positive figure', () => {
+    const r = comparableYtdDelta(CURRENT, HISTORY)!;
+    expect(r.delta).toBeGreaterThan(0);
+    // `baseline − current` produces an equally plausible dollar figure whose only symptom is that
+    // growth reads as loss. This family has already shipped in this repo.
+    expect(r.delta).not.toBe(-49999.78);
+  });
+
+  it('the number of pre-cutover snapshots skipped is reported, so the window the comparison used can be disclosed rather than assumed', () => {
+    const r = comparableYtdDelta(CURRENT, HISTORY)!;
+    expect(r.excludedPreCutoverCount).toBe(2);
+    expect(r.comparableSnapshotCount).toBe(2);
+    // At least one by construction — a null result is the only way to have none.
+    expect(r.comparableSnapshotCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('snapshots supplied out of order resolve to the same baseline as the sorted history', () => {
+    // Baseline selection is by ISO date, not by array position, so a query that grew an ORDER BY
+    // — or lost one — cannot change the answer.
+    const shuffled = [HISTORY[3], HISTORY[0], HISTORY[2], HISTORY[1]];
+    expect(comparableYtdDelta(CURRENT, shuffled)).toEqual(comparableYtdDelta(CURRENT, HISTORY));
+    expect(comparableYtdDelta(CURRENT, shuffled)!.sinceDate).toBe('2026-03-01');
+  });
+
+  it('the delta is rounded to cents once and never carries a minus sign on a figure that did not move', () => {
+    // Rounded once, at the subtraction, because both operands are already cent-quantized: the raw
+    // IEEE-754 difference of the N-A pair is 49999.779999999795.
+    expect(comparableYtdDelta(CURRENT, HISTORY)!.delta).not.toBe(49999.779999999795);
+
+    const unmoved = comparableYtdDelta(2880000.33, HISTORY)!;
+    expect(unmoved.delta).toBe(0);
+    expect(Object.is(unmoved.delta, -0)).toBe(false);
+    expect(unmoved.sinceDate).toBe('2026-03-01');
+
+    // The residue the normalisation depends on, pinned here so it cannot silently stop gating.
+    expect(Object.is(roundCents(-0.001), -0)).toBe(true);
+
+    // …and the input that actually REACHES it through this function, which the equal-totals case
+    // above does not: two totals a fraction of a cent apart round to zero from BELOW, and
+    // `Math.round` of a small negative is `-0`. Without the normalisation this renders as "−$0"
+    // — a minus sign on the one figure whose sign is the whole point.
+    const dust = comparableYtdDelta(2880000.3299, HISTORY)!;
+    expect(dust.delta).toBe(0);
+    expect(Object.is(dust.delta, -0)).toBe(false);
   });
 });

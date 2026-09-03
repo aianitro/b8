@@ -12,7 +12,7 @@ Built as a hobby project to get hands-on with a production-grade Plaid integrati
 | | |
 |---|---|
 | ![Dashboard](docs/screenshots/dashboard.jpg) | ![Net worth](docs/screenshots/net-worth.jpg) |
-| **Dashboard** — net worth composed from its four parts, spend pacing against budget | **Net worth** — what the total is, and what it is made of |
+| **Dashboard** — will this month close inside its limits, and which categories say no | **Net worth** — what the total is, and what it is made of |
 | ![Net worth breakdown](docs/screenshots/net-worth-breakdown.jpg) | ![Property](docs/screenshots/property.jpg) |
 | **Breakdown** — every account and property behind each component; rentals collapse to one equity line | **Property** — value against mortgage over time, plus a per-property P&L |
 | ![Accounts](docs/screenshots/accounts.jpg) | ![Budget](docs/screenshots/budget.jpg) |

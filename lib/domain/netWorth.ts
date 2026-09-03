@@ -3,6 +3,11 @@
 // missing from the headline figure entirely. Pure — the I/O shell lives at the call site.
 
 import type { Landscape, ValuationMode } from '../../shared/types';
+// The cent-rounding and negative-zero idioms come from the budget domain rather than being
+// retyped here: one definition of "round to cents" and one of "not a sign", so the two folders
+// cannot disagree at the second decimal or on the sign of zero.
+import { roundCents } from '../budgetMath';
+import { withoutNegativeZero } from './adherence';
 
 export interface NetWorthAccount {
   id: string;
@@ -193,4 +198,75 @@ export function groupRealEstateEquity(contributions: NetWorthContribution[]): Re
     byProperty.set(c.propertyId, (byProperty.get(c.propertyId) ?? 0) + c.value);
   }
   return [...byProperty.entries()].map(([propertyId, value]) => ({ propertyId, value }));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Year-to-date movement (ROADMAP.md §5 step 31 / P0.5-31, fixing NITS N2), which moved here with
+// the figure it qualifies when the dashboard stopped opening on a total.
+//
+// The bug it exists to close: `net_worth_snapshots.total` changed meaning partway through the
+// history. P0-09a began subtracting tenant security deposits from `liabilities`, so a snapshot
+// written before that day and one written after are not the same measurement — and a delta taken
+// across the boundary understates growth by exactly the deposits held, renders perfectly, and has
+// no symptom. `liabilities_security_deposits` exists precisely to mark which side of the change a
+// row was written on: NULL means "written under the previous definition".
+
+/** One recorded snapshot, as the ISO date and the two fields a comparison depends on. */
+export interface SnapshotPoint {
+  /** ISO 'YYYY-MM-DD', which is why the caller selects `snapshot_date::text`. A JS date conversion
+   *  of a DATE column resolves in UTC and moves every snapshot back a day in negative-offset
+   *  zones, which can select a different baseline as well as print a wrong label. */
+  date: string;
+  total: number;
+  /** NULL = written before the definition changed, and therefore NOT comparable with today's
+   *  total. Only its nullness is ever read here, so no sign question arises: the column is stored
+   *  signed as it contributes (<= 0) and this function never touches its value. */
+  liabilitiesSecurityDeposits: number | null;
+}
+
+export interface YtdDelta {
+  /** `current − baseline.total`, cent-rounded once. POSITIVE MEANS NET WORTH GREW. Reversing the
+   *  subtraction produces an equally plausible dollar figure whose only symptom is that growth
+   *  reads as loss. */
+  delta: number;
+  /** The baseline's own ISO date, so the window can be printed rather than assumed. */
+  sinceDate: string;
+  /** How many snapshots carry the decomposition. At least 1 by construction. */
+  comparableSnapshotCount: number;
+  /** How many older rows were skipped for being written under the previous definition — disclosed
+   *  rather than silently dropped, because "since March" and "since January" are different claims
+   *  about the same number. */
+  excludedPreCutoverCount: number;
+}
+
+/**
+ * The change from the EARLIEST COMPARABLE snapshot to `current`, or null when there is none.
+ *
+ * Null, never 0. A `0` asserts "net worth did not move"; null says "there is no comparable earlier
+ * reading", and the page renders its existing "First recorded reading" copy instead of a $0 delta.
+ * This is BUILD.md §10.3's null-is-not-zero rule at the exact site the bug lives.
+ *
+ * Earliest comparable, not latest: the point of a year-to-date figure is the longest honest window,
+ * and the latest comparable row would report a month's movement under a year's label.
+ *
+ * Ordering is by ISO date rather than by array position, so a caller whose query grew an ORDER BY
+ * — or lost one — gets the same baseline. Rounded once, at the subtraction, because both operands
+ * are already cent-quantized and the residue is real: 2930000.11 − 2880000.33 is
+ * 49999.779999999795 in IEEE-754. Normalised through the same `withoutNegativeZero` the budget
+ * domain uses, because rounding a difference of two equal totals can reach negative zero, and a
+ * minus sign on a figure that did not move is a lie about direction.
+ */
+export function comparableYtdDelta(current: number, snapshots: SnapshotPoint[]): YtdDelta | null {
+  const ordered = [...snapshots].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const baselineIndex = ordered.findIndex((s) => s.liabilitiesSecurityDeposits !== null);
+  if (baselineIndex === -1) return null;
+
+  const baseline = ordered[baselineIndex];
+  return {
+    delta: withoutNegativeZero(roundCents(current - baseline.total)),
+    sinceDate: baseline.date,
+    comparableSnapshotCount: ordered.filter((s) => s.liabilitiesSecurityDeposits !== null).length,
+    // Everything strictly older than the baseline, which is exactly what was skipped.
+    excludedPreCutoverCount: baselineIndex,
+  };
 }

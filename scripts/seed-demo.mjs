@@ -164,29 +164,48 @@ const valuationSeries = Object.fromEntries(
 );
 
 // ---------------------------------------------------------------- budget categories
+// `mode` is budget_categories.control_mode, and every row carries one EXPLICITLY. Nothing below
+// falls back to a default value, on purpose: the scored set is `control_mode =
+// 'discretionary'` AND three landscape/exclusion conjuncts (lib/domain/adherence.ts), so a
+// category that falls through a default is silently unscored — and a demo dataset whose scored set
+// is empty renders the dashboard's hero as "nothing to score", which is exactly the screenshot
+// nobody wants to ship. An omitted mode is therefore a visible omission, not a quiet one.
+//
+//   fixed               — a debit somebody already committed to.
+//   variable-necessary  — moves with circumstance rather than choice.
+//   discretionary       — the categories where behaviour is the variable. Only these are scored.
+//
+// `monthly_amounts` is the twelve-entry schedule, Jan-Dec, whose total is authoritative over
+// `annual`. Travel carries one — the seeded trips land in March, June and August while the budget
+// sits on the two summer months — so the demo can produce an OFF-CYCLE month: spend in a month the
+// schedule budgeted nothing for, which is a breach in its own right and has NO percentage to
+// render. It is on a discretionary operational category deliberately, because that is the only
+// kind the outlook scores; a schedule on a `fixed` line produces no off-cycle verdict at all, and
+// the card would be permanently empty in every screenshot.
 const categories = [
-  { name: 'Salary',            annual: 186000, landscape: 'operational', income: true },
-  { name: 'Rental Income',     annual:  62400, landscape: 'operational', income: true },
-  { name: 'Groceries',         annual:  14400, landscape: 'operational' },
-  { name: 'Dining Out',        annual:   6000, landscape: 'operational' },
-  { name: 'Utilities',         annual:   5400, landscape: 'operational' },
-  { name: 'Transport',         annual:   4800, landscape: 'operational' },
-  { name: 'Insurance',         annual:   7200, landscape: 'operational' },
-  { name: 'Healthcare',        annual:   3600, landscape: 'operational' },
-  { name: 'Subscriptions',     annual:   1800, landscape: 'operational' },
-  { name: 'Home Maintenance',  annual:   6000, landscape: 'operational' },
-  { name: 'Childcare',         annual:  12000, landscape: 'operational' },
-  { name: 'Travel',            annual:   8400, landscape: 'operational' },
-  { name: 'Shopping',          annual:   7200, landscape: 'operational' },
-  { name: 'Pets',              annual:   2400, landscape: 'operational' },
-  { name: 'Property Tax',      annual:  14400, landscape: 'operational' },
-  { name: 'Property Repairs',  annual:   7200, landscape: 'operational' },
-  { name: 'Property Mgmt',     annual:   6000, landscape: 'operational' },
-  { name: 'Home Improvement',  annual:  24000, landscape: 'capital' },
-  { name: 'Investments',       annual:  48000, landscape: 'capital' },
-  { name: 'Mortgage Payment',  annual:      0, landscape: 'capital', exclude: true },
-  { name: 'Transfers',         annual:      0, landscape: 'operational', exclude: true },
+  { name: 'Salary',            annual: 186000, landscape: 'operational', income: true, mode: 'fixed' },
+  { name: 'Rental Income',     annual:  62400, landscape: 'operational', income: true, mode: 'fixed' },
+  { name: 'Groceries',         annual:  14400, landscape: 'operational', mode: 'variable-necessary' },
+  { name: 'Dining Out',        annual:   6000, landscape: 'operational', mode: 'discretionary' },
+  { name: 'Utilities',         annual:   5400, landscape: 'operational', mode: 'variable-necessary' },
+  { name: 'Transport',         annual:   4800, landscape: 'operational', mode: 'variable-necessary' },
+  { name: 'Insurance',         annual:   7200, landscape: 'operational', mode: 'fixed' },
+  { name: 'Healthcare',        annual:   3600, landscape: 'operational', mode: 'variable-necessary' },
+  { name: 'Subscriptions',     annual:   1800, landscape: 'operational', mode: 'discretionary' },
+  { name: 'Home Maintenance',  annual:   6000, landscape: 'operational', mode: 'variable-necessary' },
+  { name: 'Childcare',         annual:  12000, landscape: 'operational', mode: 'fixed' },
+  { name: 'Travel',            annual:   8400, landscape: 'operational', mode: 'discretionary', monthly_amounts: [0, 0, 0, 0, 0, 4200, 0, 4200, 0, 0, 0, 0] },
+  { name: 'Shopping',          annual:   7200, landscape: 'operational', mode: 'discretionary' },
+  { name: 'Pets',              annual:   2400, landscape: 'operational', mode: 'discretionary' },
+  { name: 'Property Tax',      annual:  14400, landscape: 'operational', mode: 'fixed' },
+  { name: 'Property Repairs',  annual:   7200, landscape: 'operational', mode: 'discretionary' },
+  { name: 'Property Mgmt',     annual:   6000, landscape: 'operational', mode: 'fixed' },
+  { name: 'Home Improvement',  annual:  24000, landscape: 'capital', mode: 'discretionary' },
+  { name: 'Investments',       annual:  48000, landscape: 'capital', mode: 'fixed' },
+  { name: 'Mortgage Payment',  annual:      0, landscape: 'capital', exclude: true, mode: 'fixed' },
+  { name: 'Transfers',         annual:      0, landscape: 'operational', exclude: true, mode: 'fixed' },
 ];
+
 
 // ---------------------------------------------------------------- transactions
 // Sign convention (Plaid's, which this app keeps): POSITIVE = money out, NEGATIVE = money in.
@@ -367,9 +386,9 @@ async function main() {
   for (let i = 0; i < categories.length; i++) {
     const c = categories[i];
     await db.query(
-      `INSERT INTO budget_categories (name, annual_budget, landscape, exclude_from_budget, is_income, sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [c.name, c.annual, c.landscape, c.exclude ?? false, c.income ?? false, i]
+      `INSERT INTO budget_categories (name, annual_budget, landscape, exclude_from_budget, is_income, sort_order, control_mode, monthly_amounts)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [c.name, c.annual, c.landscape, c.exclude ?? false, c.income ?? false, i, c.mode, c.monthly_amounts ?? null]
     );
   }
 
