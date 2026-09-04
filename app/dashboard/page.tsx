@@ -16,7 +16,7 @@ import type { AdherenceInput, BreachFinding } from '@/lib/domain/adherence';
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
 // this one replaces was already in tension with it.
-import { asOfFromDate, monthOutlook, type MonthOutlook, type OutlookCategory, type OutlookState } from '@/lib/domain/monthOutlook';
+import { asOfFromDate, categorizationCoverage, monthOutlook, type CoverageGroup, type MonthOutlook, type OutlookCategory, type OutlookState } from '@/lib/domain/monthOutlook';
 // The calendar rule, imported rather than restated: `./pacing` exports it precisely so a caller
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
 // April is. A second leap-year rule here would drift on 2100.
@@ -159,25 +159,54 @@ async function getMonthlyActuals(asOf: DashboardAsOf): Promise<Map<string, Map<n
 }
 
 /**
- * How much of this month's operational transaction volume carries a category.
+ * This month's spend to date, grouped by `mapped_category` — the raw material of the confidence
+ * bound, and nothing more.
  *
- * TWO COUNTS, not a share of spend and not a threshold — step 32 owns the confidence bound and the
- * refusal to render below it. Scoped to `a.landscape = 'operational'`, the landscape the scored set
- * lives in: caveating an operational figure with capital-side noise would make the caveat wrong in
- * the direction that reassures.
+ * ONE AGGREGATION, NO CLASSIFICATION. The three-way split — scored, known-unscored, unattributed —
+ * is `categorizationCoverage`'s, in `lib/domain/`, because re-expressing `isScoredCategory`'s four
+ * conjuncts in a `WHERE` clause here would put this query's copy of the membership rule beyond the
+ * reach of every test in this repo. The groups go out; the domain decides what each one means.
+ *
+ * THE PREDICATE SET IS `getMonthlyActuals`'S, EXACTLY, and that identity is the substance of the
+ * step. The caveat and the figures it caveats must range over one population, and previously they
+ * did not: this query filtered the ACCOUNT's landscape while the hero's figures gate the CATEGORY's
+ * — different columns, different tables, and the two sets are not nested either way, so a vacation
+ * paid from a capital savings account and mapped to `Travel` moved the hero and was absent from the
+ * caveat. There is now NO account-landscape predicate at all. Landscape enters once, downstream,
+ * through `isScoredCategory`'s first conjunct, on the category.
+ *
+ * `t.amount > 0` is the whole sign rule: positive is money out, this app keeps Plaid's convention,
+ * and income is NEGATIVE here. A denominator that admitted a $9,000 inbound payroll row would not
+ * be a share of spend — and it would fail silently, because the row makes the denominator larger
+ * and the share smaller, so the caveat would refuse authority for the wrong reason and nobody
+ * investigates a pessimistic caveat. Refunds are negative too and are excluded rather than netted,
+ * matching `getMonthlyActuals`, which nets nothing.
+ *
+ * Windowed to the AS-OF MONTH TO DATE — the same window the hero's verdict covers. Not the year and
+ * not the whole calendar month: a bound computed over days that have not happened is a bound about
+ * a month nobody has lived.
+ *
+ * `NUMERIC` arrives as text and is converted HERE, at the one boundary that knows it. The domain
+ * rejects a string outright rather than concatenating it into a plausible denominator.
  */
-async function getCoverage(asOf: DashboardAsOf): Promise<{ uncategorizedCount: number; categorizedCount: number }> {
-  const result = await db.query<{ uncategorized: string; categorized: string }>(`
-    SELECT COUNT(*) FILTER (WHERE t.mapped_category IS NULL)::text     AS uncategorized,
-           COUNT(*) FILTER (WHERE t.mapped_category IS NOT NULL)::text AS categorized
+async function getCoverageGroups(asOf: DashboardAsOf): Promise<CoverageGroup[]> {
+  const result = await db.query<{ category: string | null; spend: string; txn_count: string }>(`
+    SELECT t.mapped_category AS category,
+           SUM(t.amount)::text AS spend,
+           COUNT(*)::text      AS txn_count
       FROM transactions t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
      WHERE t.hidden = FALSE
-       AND a.landscape = 'operational'
+       AND t.amount > 0
        AND t.date >= $1::date AND t.date <= $2::date
+     GROUP BY t.mapped_category
   `, [isoDay(asOf.year, asOf.month, 1), isoDay(asOf.year, asOf.month, asOf.day)]);
-  const r = result.rows[0];
-  return { uncategorizedCount: Number(r.uncategorized), categorizedCount: Number(r.categorized) };
+
+  return result.rows.map((r) => ({
+    category: r.category,
+    spend: Number(r.spend),
+    count: Number(r.txn_count),
+  }));
 }
 
 /**
@@ -529,6 +558,27 @@ const STATE_COPY: Record<OutlookState, { title: string; tone: string; pill: stri
   },
 };
 
+/**
+ * The hero's presentation, chosen by the state AND the authority — never by the state alone.
+ *
+ * DEMOTE, NEVER SUPPRESS. §5's exit is that the headline number always ships with the share of
+ * spend it actually saw, and a suppressed hero ships nothing, so it cannot ship with its share.
+ * What a low bound withdraws is the CONFIDENCE, not the information: the state's own sentence is
+ * still a true statement about the rows that were seen, and a category already $400 over its month
+ * is over it whatever the coverage is. So the sentence survives, and everything that presents it as
+ * a settled verdict does not — the emerald, the red, the amber, and the coloured pill.
+ *
+ * This is the failure the ungated renderer makes most likely: a refusal banner rendered faithfully
+ * underneath an emerald "On track to close inside your limits", which reads as a verdict with a
+ * footnote rather than a figure that has not earned one. Colour is the part of this hero people
+ * actually read, so colour is the part the bound has to reach.
+ */
+function heroCopy(state: OutlookState, authoritative: boolean): { title: string; tone: string; pill: string } {
+  const stated = STATE_COPY[state];
+  if (authoritative) return stated;
+  return { title: stated.title, tone: 'text-slate-300', pill: 'bg-slate-800 text-slate-400' };
+}
+
 const SAYING_NO_COPY: Record<'off-cycle' | 'breach' | 'projected-breach', string> = {
   'off-cycle': 'drew outside its schedule',
   breach: 'is already over its month',
@@ -588,18 +638,25 @@ export default async function DashboardPage() {
   // Kicked off alongside the rest rather than awaited after, so the reconciliation check
   // doesn't add a serial round trip to page load.
   const driftPromise = findBalanceDrift();
-  const [stats, categories, actuals, coverage, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual] =
+  const [stats, categories, actuals, coverageGroups, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual] =
     await Promise.all([
-      getStats(asOf), getBudgetCategories(), getMonthlyActuals(asOf), getCoverage(asOf), getCashFlowSeries(asOf),
+      getStats(asOf), getBudgetCategories(), getMonthlyActuals(asOf), getCoverageGroups(asOf), getCashFlowSeries(asOf),
       getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCashFlow(asOf), getCategoryBreakdown(asOf),
       getBudgetVsActual(asOf),
     ]);
   const driftFindings = await driftPromise;
 
+  // The bound, from the same category rows the verdict is computed over. One fetch, one membership
+  // test, one population — the numerator and the denominator cannot be drawn from different sets
+  // because there is only one set here to draw them from.
+  const coverage = categorizationCoverage(coverageGroups, categories);
+
   // The whole verdict, from one pure function, over one array. Not three independent reads that
   // could be handed divergent rows.
   const outlook: MonthOutlook = monthOutlook(toAdherenceInput(categories, actuals, asOf), asOf, coverage);
-  const copy = STATE_COPY[outlook.state];
+  // Both, never the state alone: a confident colour over a figure computed on a tenth of the
+  // month's spend is the exact defect this phase exists to end.
+  const copy = heroCopy(outlook.state, outlook.authoritative);
 
   const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
   const todayVsAvgRatio = todayStats.avgSameWeekday > 0 ? todayStats.spent / todayStats.avgSameWeekday : 0;
@@ -664,21 +721,145 @@ export default async function DashboardPage() {
             {outlook.holding.length === 1 ? 'is holding' : 'are holding'}.
           </p>
         ) : (
+          // The all-clear sentence, and it is NOT unconditional ([[N40]]). "No scored category is
+          // over" is a statement about the whole scored set; when categories are withheld it is
+          // only true of the budgeted part of it, and rendering the wider claim under an emerald
+          // title while five unbudgeted discretionary categories sit in `withheld` having drawn
+          // $3,000 is a true sentence doing the work of a false one. In `no-budget-basis` the
+          // wider claim is VACUOUSLY true and was still being rendered as a finding.
           <p className="text-sm text-slate-400 mt-3">
-            No scored category is over or projecting over as of day {asOf.day} of {monthLength}.
+            {outlook.withheld.length === outlook.scoredCategoryCount && outlook.withheld.length > 0 ? (
+              // Every scored category is withheld, so there is no "none of them is over" to say at
+              // all: the set the claim would range over is empty, and "None of the 0 categories
+              // with a budget is over" is the vacuous sentence [[N40]] is about, one shape along.
+              <>
+                No scored category has a verdict this month yet — all{' '}
+                {outlook.withheld.length} are withheld, for the reasons under “No verdict” below.
+              </>
+            ) : outlook.withheld.length > 0 ? (
+              <>
+                None of the {outlook.scoredCategoryCount - outlook.withheld.length}{' '}
+                {outlook.scoredCategoryCount - outlook.withheld.length === 1 ? 'category' : 'categories'} with a
+                budget this month is over or projecting over as of day {asOf.day} of {monthLength}; the other{' '}
+                {outlook.withheld.length} {outlook.withheld.length === 1 ? 'has' : 'have'} no verdict —
+                see “No verdict” below.
+              </>
+            ) : (
+              <>
+                Every scored category has a budget this month and none of them is over or projecting
+                over, as of day {asOf.day} of {monthLength}.
+              </>
+            )}
           </p>
         )}
 
-        {/* The interim caveat, rendered unconditionally and in every state — including the
-            healthiest one, which is where a caveat is most likely to be dropped. TWO COUNTS, and
-            described as counts: this is not a share of spend, and there is no threshold below
-            which the figure above refuses to render. Step 32 owns both of those. */}
+        {/* The bound, rendered in EVERY state and in BOTH authority modes — §5's "the headline
+            number always ships with the share of spend it actually saw". Including the healthiest
+            state, which is where a caveat is most likely to be dropped, and including the refused
+            one, where it is the explanation.
+
+            A SHARE OF DOLLARS, and the counts beside it are supporting detail that is never
+            divided: one uncategorized $4,000 row against forty categorized $12 coffees is 97.6% by
+            count and 10% by dollars, and only one of those two numbers is about this hero.
+
+            The percentage is the domain's floored integer, printed verbatim. `pct()` is NOT used
+            here: it rounds, and a rounded 99.6% renders "100% of this month's spend" beside spend
+            nobody has categorized — a confidently wrong number generated by a display convention. */}
         <p data-testid="coverage-caveat" className="text-xs text-slate-500 mt-4 pt-4 border-t border-slate-800">
-          Computed over {outlook.coverage.categorizedCount} categorized transactions this month;{' '}
-          {outlook.coverage.uncategorizedCount} are still uncategorized and counted in neither
-          direction.{' '}
-          <Link href="/transactions?filter=uncategorized" className="underline text-slate-400">Review them</Link>.
+          {outlook.coveragePercent === null ? (
+            // Never 0%, never 100%. An empty population is not perfect attribution, and it is not
+            // total failure either; it is no evidence, and this app renders "—" rather than a
+            // wrong zero.
+            //
+            // But an empty POPULATION is not an empty MONTH, and conflating the two states a
+            // falsehood about the owner's money. `scoredSpend + unattributedSpend === 0` is also
+            // true of a month in which every recorded transaction is mapped to a category this
+            // hero never scores — rent, utilities, groceries — which is the ordinary shape of the
+            // first days of a month, before the first discretionary charge, on data whose
+            // unattributed count is normally zero. "No spend is recorded" is false there, with
+            // thousands of dollars posted. So the two cases are separated and each says only what
+            // is true of it; the honest statement in the second is about THIS HERO'S REACH, not
+            // about the month. `coverageGroups` is the unfiltered aggregation, so it — unlike the
+            // coverage record, which by design drops known-unscored spend from both halves — can
+            // still tell "nothing happened" from "nothing this hero scores happened".
+            coverageGroups.length === 0 ? (
+              <>No spend is recorded this month yet, so there is no share to compute one over.</>
+            ) : (
+              <>
+                None of this month&apos;s spend is in reach of this hero — every transaction
+                recorded so far is mapped to a category it never scores, and none is unattributed —
+                so there is no share to compute one over.
+              </>
+            )
+          ) : (
+            <>
+              Computed over {outlook.coveragePercent}% of this month&apos;s spend —{' '}
+              {fmtCents(outlook.coverage.scoredSpend)} the scored categories account for, against{' '}
+              {fmtCents(outlook.coverage.unattributedSpend)} across{' '}
+              {outlook.coverage.unattributedCount}{' '}
+              {outlook.coverage.unattributedCount === 1 ? 'transaction' : 'transactions'} they could
+              not.{' '}
+              {outlook.coverage.orphanedCount > 0 && (
+                <>
+                  {outlook.coverage.orphanedCount} of those{' '}
+                  {outlook.coverage.orphanedCount === 1 ? 'carries a category' : 'carry a category'}{' '}
+                  that no longer exists — most likely a rename.{' '}
+                </>
+              )}
+              Spend in categories this hero never scores is in neither figure.{' '}
+              <Link href="/transactions?filter=uncategorized" className="underline text-slate-400">Review them</Link>.
+            </>
+          )}
         </p>
+
+        {/* The refusal, and it is a DEMOTION rather than a suppression: everything above still
+            renders, because the state and the three named lists are true statements about the rows
+            that were seen. What this region withdraws is the claim that they add up to a verdict.
+
+            It renders if and only if the domain says so. The threshold is not restated here — the
+            page consults `outlook.authoritative` and never carries a second copy of the number,
+            because a constant duplicated at the point of display is a constant that gets moved in
+            one place. */}
+        {!outlook.authoritative && (
+          <div data-testid="coverage-refusal" className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-300/90">Not a verdict yet</p>
+            <p className="text-xs text-slate-400 mt-1.5">
+              {outlook.coveragePercent === null ? (
+                // The whole sentence is conditional, not just its tail. "Too much of this month's
+                // spend is unaccounted for" is itself FALSE when the population is empty —
+                // `unattributedSpend` is 0 there and nothing is unaccounted for; the reason the
+                // bound refuses is that it has nothing to range over, which is a different fact.
+                // A refusal that misstates its own cause is the same defect as a caveat that
+                // misstates the month.
+                coverageGroups.length === 0 ? (
+                  <>
+                    Nothing is recorded this month yet, so the bound has nothing to range over and
+                    the figures above are not yet a judgement on the month.
+                  </>
+                ) : (
+                  <>
+                    Nothing recorded this month falls in the scored set or outside it unattributed,
+                    so the bound has nothing to range over and the figures above are not a
+                    judgement on the month.
+                  </>
+                )
+              ) : (
+                <>
+                  Too much of this month&apos;s spend is unaccounted for to read the figures above
+                  as a judgement on the month. They are accurate about what was seen and silent
+                  about the rest, so treat them as a partial reading —{' '}
+                  {outlook.state === 'nothing-to-score'
+                    // Stacked with the "classify your categories" message above rather than
+                    // arguing with it: in this state both are true and they are different halves
+                    // of the same route out. Sending the owner to the transactions list alone
+                    // would be advice that cannot work until the categories are classified.
+                    ? 'classifying your categories is the first half of settling it, and categorizing these transactions is the second.'
+                    : 'categorizing the transactions above will settle it.'}
+                </>
+              )}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* The named list — §5's own words, as a distinct region rather than a colour on a bar. */}

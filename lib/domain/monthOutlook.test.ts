@@ -1,8 +1,17 @@
 import { describe, it, expect } from 'vitest';
+// Read-only, and for exactly one assertion (G2 cycle 1, finding M12). The coverage query's
+// positive-amount filter lives in SQL this suite never executes, so it is asserted against the
+// page's SOURCE rather than its behaviour. See the last test in this file for why that is the
+// honest shape and not a behavioural test wearing a disguise.
+import { readFileSync } from 'node:fs';
 import {
   asOfFromDate,
+  categorizationCoverage,
   monthOutlook,
+  COVERAGE_THRESHOLD,
   type CategorizationCoverage,
+  type CoverageCategory,
+  type CoverageGroup,
   type MonthOutlook,
   type OutlookCategory,
 } from './monthOutlook';
@@ -24,7 +33,33 @@ const AS_OF: AsOf = { year: 2026, month: 3, day: 8 };
 /** Day 7 of 30 is 0.2333…, below the projection floor, where day 8 is above it. */
 const AS_OF7: AsOf = { year: 2026, month: 3, day: 7 };
 
-const COVERAGE: CategorizationCoverage = { uncategorizedCount: 17, categorizedCount: 183 };
+/**
+ * The coverage the 24 pre-existing fixtures are computed over, restated in the shape step 32 gave
+ * it. The two figures those fixtures assert on — 17 and 183 — are carried across unchanged, now as
+ * the unattributed and scored TRANSACTION COUNTS they always were. The counts were never the share
+ * and never could be, which is why the two fields naming the old population were removed rather
+ * than extended: left in place beside the corrected figures, the defective caveat survives.
+ *
+ * Authoritative, so the ladder fixtures below exercise the ordinary path. C9 and C10 supply a
+ * refused coverage to the same rows and assert the state does not move.
+ *
+ * The dollar figures are `1520 / 1600 = 0.95` rather than the `1900 / 2000` the coverage fixtures
+ * below use, and deliberately: the too-early fixture asserts the serialised outlook contains no
+ * `'900'` anywhere, and `1900` would satisfy that substring for a reason that has nothing to do
+ * with what the fixture is testing. Both quotients are exact in IEEE-754 (`1520/1600 === 0.95`
+ * verified), so the boundary is a real boundary in either shape.
+ */
+const COVERAGE: CategorizationCoverage = {
+  scoredSpend: 1520,
+  scoredCount: 183,
+  unattributedSpend: 80,
+  unattributedCount: 17,
+  orphanedSpend: 0,
+  orphanedCount: 0,
+  coverageShare: 0.95,
+  coveragePercent: 95,
+  authoritative: true,
+};
 
 const cat = (over: Partial<AdherenceInput> = {}): AdherenceInput => ({
   id: 1,
@@ -163,7 +198,7 @@ describe('monthOutlook', () => {
     expect(finding.variance).toBe(170);
 
     // The caveat renders in this state too — it is not a decoration on a healthy hero.
-    expect(outlook.coverage.uncategorizedCount).toBe(17);
+    expect(outlook.coverage.unattributedCount).toBe(17);
   });
 
   it('off-cycle spend outranks every other verdict, so a scheduled category drawing outside its window says off-cycle rather than breach', () => {
@@ -600,8 +635,14 @@ describe('monthOutlook', () => {
     // The healthiest state is the one where a caveat is most likely to be dropped.
     expect(outlook.state).toBe('on-track');
     expect(outlook.coverage).toBe(COVERAGE);
-    expect(outlook.coverage.uncategorizedCount).toBe(17);
-    expect(outlook.coverage.categorizedCount).toBe(183);
+    expect(outlook.coverage.unattributedCount).toBe(17);
+    expect(outlook.coverage.scoredCount).toBe(183);
+    // The three derived fields are the coverage record's own values, surfaced rather than
+    // recomputed a second time one level up — where a re-derived share would land a fifteenth
+    // decimal away and the hero would refuse authority while the caveat under it read 95%.
+    expect(outlook.coverageShare).toBe(COVERAGE.coverageShare);
+    expect(outlook.coveragePercent).toBe(COVERAGE.coveragePercent);
+    expect(outlook.authoritative).toBe(COVERAGE.authoritative);
 
     // @ts-expect-error monthOutlook requires the coverage it was computed over; it cannot be omitted
     const withoutCoverage = () => monthOutlook(rows, AS_OF);
@@ -622,5 +663,523 @@ describe('monthOutlook', () => {
     expect(outlook.findings).toHaveLength(2);
     expect(outlook.headline!.scoredCategoryCount).toBe(1);
     expect(outlook.scoredCategoryCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------------------- P0.5-32
+//
+// The confidence bound: what share of the month's spend the hero above it was actually computed
+// over, and the threshold below which it stops being presented as a verdict.
+//
+// Fabricated figures throughout, as above. Every quotient here was verified by execution before it
+// was written down — `1900/2000 === 0.95` exactly, `1899/2000 → 94`, `9999/10000 → 99`,
+// `480/4480 → 10` — because the two that a `Math.round` implementation gets wrong are the two the
+// whole floor rule exists for, and a fixture whose own arithmetic is guessed proves nothing.
+
+const covCat = (over: Partial<CoverageCategory> = {}): CoverageCategory => ({
+  name: 'Dining Out',
+  landscape: 'operational',
+  exclude_from_budget: false,
+  is_income: false,
+  control_mode: 'discretionary',
+  ...over,
+});
+
+/**
+ * One category list spanning every branch of the three-way split, reused so the fixtures below
+ * differ only in their GROUPS. `Dining Out` is the single scored name; the other five are each
+ * known-unscored for a different one of `isScoredCategory`'s four conjuncts, so a classifier that
+ * dropped any conjunct moves a different fixture.
+ */
+const CATEGORIES: CoverageCategory[] = [
+  covCat({ name: 'Dining Out' }),
+  covCat({ name: 'Groceries', control_mode: 'variable-necessary' }),
+  covCat({ name: 'Transfers', exclude_from_budget: true }),
+  covCat({ name: 'Salary', is_income: true, control_mode: 'fixed' }),
+  covCat({ name: 'Mortgage', control_mode: 'fixed' }),
+  covCat({ name: 'Home Improvement', landscape: 'capital', control_mode: 'fixed' }),
+];
+
+const group = (category: string | null, spend: number, count: number): CoverageGroup => ({ category, spend, count });
+
+/** Exactly at the closed floor: 1900 scored against 100 unattributed, 1900/2000 === 0.95. */
+const AT_THRESHOLD: CoverageGroup[] = [
+  group('Dining Out', 1900, 20),
+  group('Groceries', 4000, 30),
+  group(null, 100, 4),
+];
+
+/** The same month with ONE DOLLAR moved from the seen spend to the unattributed spend. */
+const BELOW_THRESHOLD: CoverageGroup[] = [
+  group('Dining Out', 1899, 20),
+  group('Groceries', 4000, 30),
+  group(null, 101, 4),
+];
+
+describe('categorizationCoverage', () => {
+  it('coverage exactly at the threshold is authoritative, because the bound is a closed floor and not an open one', () => {
+    const coverage = categorizationCoverage(AT_THRESHOLD, CATEGORIES);
+
+    expect(coverage.scoredSpend).toBe(1900);
+    expect(coverage.scoredCount).toBe(20);
+    expect(coverage.unattributedSpend).toBe(100);
+    expect(coverage.unattributedCount).toBe(4);
+    expect(coverage.orphanedSpend).toBe(0);
+    expect(coverage.orphanedCount).toBe(0);
+
+    expect(coverage.coverageShare).toBe(0.95);
+    // What the OLD population reported: `getCoverage` counted every operational-account row, so the
+    // variable-necessary groceries sat in both halves and the month read 98.3% seen.
+    expect(coverage.coverageShare).not.toBe(0.9833333333333333);
+    expect(coverage.coveragePercent).toBe(95);
+
+    // The whole point of a fixture sitting ON the boundary: `>` instead of `>=` is an off-by-one-
+    // cent refusal that shows up on exactly one input, and this is it.
+    expect(coverage.authoritative).toBe(true);
+    expect(coverage.authoritative).not.toBe(false);
+    // And the comparison is against the FRACTION. `95 >= 0.95` is always true, so a threshold
+    // applied to `coveragePercent` never refuses anything and every authoritative-path test passes.
+    expect(coverage.coverageShare).toBe(COVERAGE_THRESHOLD);
+  });
+
+  it('one dollar moved from the seen spend to the unattributed spend crosses the threshold and withdraws authority', () => {
+    const coverage = categorizationCoverage(BELOW_THRESHOLD, CATEGORIES);
+
+    expect(coverage.scoredSpend).toBe(1899);
+    expect(coverage.unattributedSpend).toBe(101);
+    expect(coverage.coverageShare).toBe(0.9495);
+    expect(coverage.coveragePercent).toBe(94);
+    // 94.95 rounds to 95, which would print a figure clearing a threshold this month fails.
+    expect(coverage.coveragePercent).not.toBe(95);
+
+    expect(coverage.authoritative).toBe(false);
+    expect(coverage.authoritative).not.toBe(true);
+  });
+
+  it('the bound is a share of dollars, so one uncategorized four-thousand-dollar row against forty categorized twelve-dollar ones reports ten percent seen and not ninety-seven', () => {
+    const coverage = categorizationCoverage(
+      [group('Dining Out', 480, 40), group(null, 4000, 1)],
+      CATEGORIES,
+    );
+
+    expect(coverage.coverageShare).toBe(0.10714285714285714);
+    // The count-shaped answer — 40 of 41 transactions carry a category — which is the same month
+    // described as 97.6% seen. The counts are supporting detail and are never divided.
+    expect(coverage.coverageShare).not.toBe(0.975609756097561);
+    expect(coverage.coveragePercent).toBe(10);
+    expect(coverage.coveragePercent).not.toBe(97);
+    expect(coverage.authoritative).toBe(false);
+
+    expect(coverage.scoredCount).toBe(40);
+    expect(coverage.unattributedCount).toBe(1);
+  });
+
+  it('spend mapped to a category the headline never scores leaves both the numerator and the denominator, so a categorized grocery run neither helps nor hurts the bound', () => {
+    // The at-threshold month plus $6,000 of spend that is KNOWN not to be in the scored set: an
+    // excluded transfer, an income line, a fixed mortgage, and a capital-landscape category. Each
+    // fails a different conjunct of `isScoredCategory`.
+    const coverage = categorizationCoverage(
+      [
+        group('Dining Out', 1900, 20),
+        group(null, 100, 4),
+        group('Transfers', 3000, 2),
+        group('Salary', 0, 0),
+        group('Mortgage', 2200, 1),
+        group('Home Improvement', 800, 3),
+      ],
+      CATEGORIES,
+    );
+
+    // Identical to the fixture without any of it.
+    expect(coverage.coverageShare).toBe(0.95);
+    expect(coverage.scoredSpend).toBe(1900);
+    expect(coverage.unattributedSpend).toBe(100);
+
+    // Known-unscored spend in the DENOMINATOR — the [[N41]] population, which asserts the figures
+    // above it were computed over a set they were never computed over.
+    expect(coverage.coverageShare).not.toBe(0.2375);
+    expect(coverage.coverageShare).not.toBe(0.9833333333333333);
+  });
+
+  it("an orphaned mapped category is unattributed rather than categorized, so a rename that hides a category's spend lowers confidence instead of raising it", () => {
+    // `Dining Ou` is what a rename leaves behind: `mapped_category` is not a foreign key and
+    // `PATCH /api/categories` does not remap the rows, so the spend vanishes from the category's
+    // `actual` while still looking categorized.
+    const coverage = categorizationCoverage(
+      [group('Dining Out', 1900, 20), group('Dining Ou', 100, 3)],
+      CATEGORIES,
+    );
+
+    expect(coverage.unattributedSpend).toBe(100);
+    expect(coverage.unattributedCount).toBe(3);
+    expect(coverage.orphanedSpend).toBe(100);
+    expect(coverage.orphanedCount).toBe(3);
+    expect(coverage.coverageShare).toBe(0.95);
+
+    // Exactly what a `mapped_category IS NOT NULL` test reports: every dollar carries a category,
+    // so the month is 100% seen — confidence rising at the precise moment truth fell.
+    expect(coverage.coverageShare).not.toBe(1);
+    expect(coverage.coveragePercent).not.toBe(100);
+  });
+
+  it('the percentage is floored and never rounded, so nine thousand nine hundred ninety-nine dollars of ten thousand reports ninety-nine and not a hundred', () => {
+    const coverage = categorizationCoverage(
+      [group('Dining Out', 9999, 200), group(null, 1, 1)],
+      CATEGORIES,
+    );
+
+    expect(coverage.coverageShare).toBe(0.9999);
+    expect(coverage.coveragePercent).toBe(99);
+    // The rounded answer: "computed over 100% of spend" printed beside a dollar nobody categorized.
+    expect(coverage.coveragePercent).not.toBe(100);
+    expect(coverage.authoritative).toBe(true);
+  });
+
+  it('a hundred percent is reachable only when no spend at all is unattributed', () => {
+    const complete = categorizationCoverage([group('Dining Out', 2000, 20)], CATEGORIES);
+
+    expect(complete.unattributedSpend).toBe(0);
+    expect(complete.coverageShare).toBe(1);
+    expect(complete.coveragePercent).toBe(100);
+    expect(complete.authoritative).toBe(true);
+
+    // One unattributed cent is enough to take it back, and that is the property being asserted:
+    // `100` is a statement about complete attribution, not about a rounded quotient.
+    const almost = categorizationCoverage(
+      [group('Dining Out', 2000, 20), group(null, 0.01, 1)],
+      CATEGORIES,
+    );
+    expect(almost.coveragePercent).toBe(99);
+    expect(almost.coveragePercent).not.toBe(100);
+  });
+
+  it('a month with no spend at all reports no share rather than a hundred percent or a zero', () => {
+    const coverage = categorizationCoverage([], CATEGORIES);
+
+    expect(coverage.coverageShare).toBe(null);
+    // 100%-of-nothing is the most confident possible statement about the least possible evidence,
+    // and 0%-of-nothing is a failure that did not happen. `0/0` is NaN, which compares false
+    // against the threshold and so refuses ACCIDENTALLY — right answer, no reasoning.
+    expect(coverage.coverageShare).not.toBe(0);
+    expect(coverage.coverageShare).not.toBe(1);
+    expect(coverage.coveragePercent).toBe(null);
+    expect(coverage.coveragePercent).not.toBe(0);
+    expect(coverage.coveragePercent).not.toBe(100);
+    expect(Number.isNaN(coverage.coverageShare as number)).toBe(false);
+
+    expect(coverage.authoritative).toBe(false);
+
+    // A month whose every dollar is known-unscored is the same empty population, for the same
+    // reason: nothing here was spend the headline was supposed to see.
+    const allKnownUnscored = categorizationCoverage([group('Mortgage', 2200, 1)], CATEGORIES);
+    expect(allKnownUnscored.coverageShare).toBe(null);
+  });
+
+  it('a negative spend total is rejected, because income is negative in this ledger and a denominator that admits it is not a share of spend', () => {
+    // Positive is money out, so a $9,000 payroll deposit arrives as −9000. A query that lost its
+    // `t.amount > 0` filter produces exactly this group — and it fails SILENTLY if accepted, since
+    // the negative makes the denominator larger and the share smaller, so the caveat refuses for
+    // the wrong reason and nobody investigates a pessimistic caveat.
+    expect(() => categorizationCoverage([group('Salary', -9000, 3)], CATEGORIES)).toThrow(RangeError);
+    expect(() => categorizationCoverage([group('Salary', -9000, 3)], CATEGORIES)).toThrow(/Salary/);
+    expect(() => categorizationCoverage([group('Salary', -9000, 3)], CATEGORIES)).toThrow(/money out/);
+
+    // It throws rather than returning a smaller share — including in the shape where the negative
+    // would have been invisible, netted against a positive scored group.
+    expect(() => categorizationCoverage(
+      [group('Dining Out', 1900, 20), group(null, -500, 2)],
+      CATEGORIES,
+    )).toThrow(RangeError);
+  });
+
+  it('a spend total arriving as a string is rejected rather than concatenated into a plausible denominator', () => {
+    // `NUMERIC` arrives from `db.query<T>()` as TEXT with the type saying otherwise, and
+    // `'6000' + 500` is `'6000500'` — wrong by three orders of magnitude, with no type error
+    // anywhere ([[N20]]).
+    expect(() => categorizationCoverage(
+      [{ category: 'Dining Out', spend: outOfContract('6000'), count: 20 }],
+      CATEGORIES,
+    )).toThrow(RangeError);
+    expect(() => categorizationCoverage(
+      [{ category: 'Dining Out', spend: outOfContract('6000'), count: 20 }],
+      CATEGORIES,
+    )).toThrow(/string/);
+
+    expect(() => categorizationCoverage([group('Dining Out', NaN, 20)], CATEGORIES)).toThrow(RangeError);
+    expect(() => categorizationCoverage([group('Dining Out', Infinity, 20)], CATEGORIES)).toThrow(RangeError);
+
+    // The count arrives through the same unchecked cast and is held to the same standard — a
+    // transaction count is a non-negative integer, and `COUNT(*)::text` left unconverted is a
+    // string that would render as "'4' transactions" beside a share computed from real dollars.
+    expect(() => categorizationCoverage([group('Dining Out', 1900, outOfContract('20'))], CATEGORIES)).toThrow(RangeError);
+    expect(() => categorizationCoverage([group('Dining Out', 1900, -20)], CATEGORIES)).toThrow(RangeError);
+    expect(() => categorizationCoverage([group('Dining Out', 1900, 2.5)], CATEGORIES)).toThrow(RangeError);
+  });
+
+  it('a category name defined in both landscapes resolves as scored once and its spend is counted once', () => {
+    // `budget_categories` is UNIQUE(name, landscape), so one name legally exists twice, and
+    // `mapped_category` matches by name. Resolving through a JOIN duplicates the row into both.
+    const bothLandscapes: CoverageCategory[] = [
+      covCat({ name: 'Travel', landscape: 'operational', control_mode: 'discretionary' }),
+      covCat({ name: 'Travel', landscape: 'capital', control_mode: 'fixed' }),
+    ];
+    const coverage = categorizationCoverage([group('Travel', 500, 5)], bothLandscapes);
+
+    expect(coverage.scoredSpend).toBe(500);
+    // The double count, which also pushes the share above 1 the moment anything is unattributed.
+    expect(coverage.scoredSpend).not.toBe(1000);
+    expect(coverage.scoredCount).toBe(5);
+    expect(coverage.scoredCount).not.toBe(10);
+    expect(coverage.coverageShare).toBe(1);
+
+    // ANY matching row being scored is enough, whichever order the rows arrive in.
+    const reversed = categorizationCoverage([group('Travel', 500, 5)], [bothLandscapes[1], bothLandscapes[0]]);
+    expect(reversed.scoredSpend).toBe(500);
+    expect(reversed.unattributedSpend).toBe(0);
+  });
+});
+
+describe('monthOutlook with a bound on its coverage', () => {
+  it('unattributed spend does not change which of the seven states is true, so a breach under low coverage is still a breach', () => {
+    // Already over its month: $500 budgeted in April, $620 drawn.
+    const rows = [cat({ id: 1, name: 'Dining Out', annual_budget: 6000, months: april(620) })];
+
+    const refused = monthOutlook(rows, AS_OF, categorizationCoverage(BELOW_THRESHOLD, CATEGORIES));
+    const trusted = monthOutlook(rows, AS_OF, categorizationCoverage(AT_THRESHOLD, CATEGORIES));
+
+    expect(refused.state).toBe('breach');
+    expect(refused.authoritative).toBe(false);
+    // An eighth state would have to sit somewhere in a total order coverage is orthogonal to:
+    // above `breach` it erases a real breach, below it it never fires when it matters.
+    expect(refused.state).not.toBe('nothing-to-score');
+    expect(refused.state).not.toBe('on-track');
+
+    // The named list is untouched. A category $120 over its month is over it whatever the coverage
+    // is, and deleting that because other spend is unattributed replaces a qualified truth with
+    // nothing.
+    expect(refused.state).toBe(trusted.state);
+    expect(refused.sayingNo).toHaveLength(trusted.sayingNo.length);
+    expect(refused.sayingNo).toHaveLength(1);
+    expect(refused.sayingNo[0].category).toBe('Dining Out');
+    expect(refused.sayingNo[0].reason).toBe('breach');
+    expect(refused.scoredCategoryCount).toBe(trusted.scoredCategoryCount);
+
+    expect(trusted.authoritative).toBe(true);
+    expect(refused.coveragePercent).toBe(94);
+    expect(trusted.coveragePercent).toBe(95);
+  });
+
+  it('a month can be on track and non-authoritative at the same time, because the state and the bound are independent judgements', () => {
+    const rows = [
+      cat({ id: 1, name: 'Groceries', annual_budget: 14400, months: april(260) }),
+      cat({ id: 2, name: 'Transport', annual_budget: 12000, months: april(200) }),
+    ];
+    const outlook = monthOutlook(rows, AS_OF, categorizationCoverage(BELOW_THRESHOLD, CATEGORIES));
+
+    expect(outlook.state).toBe('on-track');
+    // A refusal that quietly downgraded the state would be an eighth rung wearing a boolean's name.
+    expect(outlook.state).not.toBe('breach');
+    expect(outlook.state).not.toBe('nothing-to-score');
+    expect(outlook.holding).toHaveLength(2);
+
+    expect(outlook.authoritative).toBe(false);
+    expect(outlook.authoritative).not.toBe(true);
+    expect(outlook.coverageShare).toBe(0.9495);
+    expect(outlook.coveragePercent).toBe(94);
+  });
+
+  it('orphaned spend larger than the unattributed total it belongs to is rejected rather than reported as a share above one', () => {
+    // Orphans are a SUBSET of the unattributed rows by construction, so this coverage record was
+    // computed over two different populations — the defect this whole step exists to end.
+    const inconsistent: CategorizationCoverage = {
+      ...COVERAGE,
+      unattributedSpend: 100,
+      unattributedCount: 4,
+      orphanedSpend: 140,
+      orphanedCount: 2,
+    };
+    const rows = [cat({ id: 1, name: 'Dining Out', annual_budget: 6000, months: april(355) })];
+
+    expect(() => monthOutlook(rows, AS_OF, inconsistent)).toThrow(RangeError);
+    expect(() => monthOutlook(rows, AS_OF, inconsistent)).toThrow(/orphanedSpend/);
+
+    expect(() => monthOutlook(rows, AS_OF, { ...COVERAGE, orphanedCount: 99 })).toThrow(RangeError);
+    // The same discipline over the six figures themselves: a negative one means income reached the
+    // population, and a string one is the [[N20]] concatenation.
+    expect(() => monthOutlook(rows, AS_OF, { ...COVERAGE, unattributedSpend: -100 })).toThrow(RangeError);
+    expect(() => monthOutlook(rows, AS_OF, { ...COVERAGE, scoredSpend: outOfContract('1520') })).toThrow(RangeError);
+  });
+});
+
+// ---------------------------------------------------------- G2 cycle 1, finding M12
+//
+// THE GUARD THIS FILE CANNOT REACH BEHAVIOURALLY, AND WHAT IS DONE ABOUT IT.
+//
+// `AND t.amount > 0` in `getCoverageGroups` is the load-bearing half of "share of SPEND". Deleting
+// it leaves `tsc` at exit 0 and this suite entirely green, because `categorizationCoverage` is
+// handed groups that are ALREADY AGGREGATED: no value of its own inputs can distinguish "the query
+// filtered on sign" from "the query did not". The predicate is genuinely out of reach of a fixture.
+//
+// So the assertion below is a STATIC one, made against the page's source text, and it is named and
+// commented as such. It is not proof that the query runs correctly; it is proof that the query still
+// SAYS what the spec decided it must say. The second half of the test then pins what the domain does
+// with the groups the predicate's absence would produce, which is the part a fixture can reach —
+// and which shows the failure is not one-directional.
+
+const PAGE_SOURCE = readFileSync(new URL('../../app/dashboard/page.tsx', import.meta.url), 'utf8');
+
+/** `getCoverageGroups`'s SQL, sliced out of the page so the assertions cannot match a sibling query. */
+function coverageQuerySql(): string {
+  const from = PAGE_SOURCE.indexOf('async function getCoverageGroups');
+  if (from === -1) throw new Error('getCoverageGroups not found in app/dashboard/page.tsx');
+  const body = PAGE_SOURCE.slice(from, PAGE_SOURCE.indexOf('\n}\n', from));
+  const open = body.indexOf('`');
+  return body.slice(open + 1, body.indexOf('`', open + 1));
+}
+
+describe('the coverage population, where it is decided', () => {
+  it('the coverage aggregation carries its own positive-amount filter, asserted against the query source because a predicate living in SQL cannot be reached from the classifier own inputs', () => {
+    const sql = coverageQuerySql();
+    const where = sql.slice(sql.indexOf('WHERE'), sql.indexOf('GROUP BY'));
+    // EVERY predicate the query applies, not just the ones after the word WHERE. [[N56]]: an
+    // account-landscape condition is equally effective bolted onto the `JOIN accounts a ON …`
+    // clause, and a slice that starts at WHERE cannot see it — the gate would report green while
+    // N42 quietly returned one clause away. The negative assertion below runs against this wider
+    // slice for exactly that reason.
+    const predicates = sql.slice(sql.indexOf('FROM'), sql.indexOf('GROUP BY'));
+
+    // The population, restated as the four things the query must say. Positive is money out in this
+    // ledger, so the sign filter is what makes this a share of SPEND rather than a share of ledger
+    // movement — income is negative and a denominator that admits it is measuring something else.
+    expect(where).toContain('t.amount > 0');
+    expect(where).toContain('t.hidden = FALSE');
+    expect(sql).toContain('a.track_transactions = TRUE');
+    expect(sql).toContain('t.date >= $1::date AND t.date <= $2::date');
+
+    // And the one predicate that must NOT be there, anywhere in the query's predicate set:
+    // landscape is gated once, on the CATEGORY, through `isScoredCategory`. An account-landscape
+    // condition here is [[N42]] returning, whether it sits in the WHERE clause or in the JOIN.
+    expect(predicates).not.toContain('a.landscape');
+    expect(predicates).not.toContain('landscape');
+
+    // ---- what the absence of that filter does to this module, which IS fixture-reachable ----
+    //
+    // Removing it does not move the share in one direction. It moves it in whichever direction the
+    // negative rows happen to land, which is why "wrong either way" is the accurate description.
+
+    // LOUD: income mapped to an income category arrives as a net-negative group and is rejected
+    // outright, rather than shipped as a plausible wrong denominator.
+    expect(() => categorizationCoverage([...AT_THRESHOLD, group('Salary', -7750, 4)], CATEGORIES))
+      .toThrow(RangeError);
+
+    // SILENT, DOWNWARD: a refund netted into a SCORED group shrinks the numerator and the
+    // denominator together, so 0.95 becomes 0.947 and the month refuses authority for a reason that
+    // has nothing to do with categorization. A pessimistic caveat is the one nobody investigates.
+    const nettedIntoScored = categorizationCoverage(
+      [group('Dining Out', 1800, 20), group('Groceries', 4000, 30), group(null, 100, 4)],
+      CATEGORIES,
+    );
+    expect(nettedIntoScored.coverageShare).toBe(0.9473684210526315);
+    expect(nettedIntoScored.coveragePercent).toBe(94);
+    expect(nettedIntoScored.authoritative).toBe(false);
+
+    // SILENT, UPWARD, and the dangerous one: a transfer-in netted into the UNATTRIBUTED group
+    // shrinks the denominator alone, so the same month reports 97% seen and keeps its authority.
+    // The bound moves up at the exact moment the population stopped being a population of spend.
+    const nettedIntoUnattributed = categorizationCoverage(
+      [group('Dining Out', 1900, 20), group('Groceries', 4000, 30), group(null, 50, 4)],
+      CATEGORIES,
+    );
+    expect(nettedIntoUnattributed.coverageShare).toBe(0.9743589743589743);
+    expect(nettedIntoUnattributed.coveragePercent).toBe(97);
+    expect(nettedIntoUnattributed.authoritative).toBe(true);
+
+    // The baseline both of those moved away from, so the two deltas are read against one number.
+    expect(categorizationCoverage(AT_THRESHOLD, CATEGORIES).coverageShare).toBe(0.95);
+  });
+});
+
+// -------------------------------------------------------- G3 cycle 2, finding N53
+//
+// The boundary is reachable by ordinary money, and the float lands on the wrong side of it.
+
+/** Six operational/discretionary names, so a realistic month spreads its scored spend over groups. */
+const SIX_SCORED: CoverageCategory[] = [
+  'Dining Out', 'Subscriptions', 'Travel', 'Shopping', 'Pets', 'Property Repairs',
+].map((name) => covCat({ name }));
+
+describe('the boundary under float drift', () => {
+  it('a month whose spend is an exact nineteen-to-one ratio reports ninety-five percent rather than the ninety-four its accumulated rounding error would print', () => {
+    // $1,052.03 scored against $55.37 unattributed. 55.37 * 19 === 1052.03 exactly, so the true
+    // share is 95.000000% — not near the threshold, ON it. Split across eight groups, as a real
+    // month is, the sums drift and the quotient lands two ULPs low.
+    const groups: CoverageGroup[] = [
+      group('Dining Out', 500, 12),
+      group('Subscriptions', 200, 3),
+      group('Travel', 150, 2),
+      group('Shopping', 100, 5),
+      group('Pets', 60, 4),
+      group('Property Repairs', 42.03, 1),
+      group(null, 27.68, 2),
+      group('Dinning Out', 27.69, 1),
+    ];
+    const coverage = categorizationCoverage(groups, SIX_SCORED);
+
+    expect(coverage.scoredSpend).toBe(1052.03);
+    expect(55.37 * 19).toBe(1052.03);
+
+    // The drift's origin, made visible rather than described: the two unattributed groups sum to
+    // 55.370000000000005, five femtocents over the $55.37 they are. The scored side accumulates
+    // exactly. That one-sided error is the whole of the defect — it inflates the denominator, and
+    // a denominator inflated in the fifteenth decimal is enough to put an exact 95% under the bar.
+    expect(coverage.unattributedSpend).toBe(55.370000000000005);
+    expect(coverage.unattributedSpend).not.toBe(55.37);
+    expect(27.68 + 27.69).not.toBe(55.37);
+
+    // The drift itself, pinned so a future change to the accumulation order is visible rather than
+    // silent. This is the value the module actually computes, not the value the money means.
+    expect(coverage.coverageShare).toBe(0.9499999999999998);
+    expect(coverage.coverageShare).not.toBe(0.95);
+
+    // THE FIX: the displayed integer is the one the money means. A bare floor of 94.99999999999998
+    // prints 94, which tells the owner the hero saw a percentage point less of their month than it
+    // did — a false statement about their money produced entirely by the last two bits of a double.
+    expect(coverage.coveragePercent).toBe(95);
+    expect(coverage.coveragePercent).not.toBe(94);
+
+    // NOT FIXED, DELIBERATELY, AND THIS ASSERTION IS THE TRIPWIRE FOR THAT DECISION.
+    //
+    // `authoritative` still compares the raw share against the raw threshold, because SPEC.md's
+    // "Accepted imprecision, stated" pre-accepted exactly this and changing it changes what
+    // COVERAGE_THRESHOLD means — a spec question, not an implementation one. So this month reports
+    // 95% and is still refused. That pairing is odd and it is TRUE; the previous pairing, 94% and
+    // refused, contained a number that was simply wrong.
+    //
+    // If the threshold comparison is ever given a tolerance of its own, this line goes red and the
+    // conversation happens on purpose instead of by accident.
+    expect(coverage.authoritative).toBe(false);
+
+    // The negative control the tolerance must not break: 100 is still reachable only on complete
+    // attribution, and a hair under one still floors down rather than up.
+    const oneCentShort = categorizationCoverage(
+      [group('Dining Out', 1000000, 9), group(null, 0.01, 1)],
+      SIX_SCORED,
+    );
+    expect(oneCentShort.coveragePercent).toBe(99);
+    expect(oneCentShort.coveragePercent).not.toBe(100);
+
+    // And the case where the tolerance alone WOULD break that rule, so the structural guard beside
+    // it is verified rather than assumed. At a billion dollars scored against a single unattributed
+    // cent the share is 0.99999999999, which the tolerance carries over 100 — the one figure this
+    // module may not print without meaning it. Household money never reaches here; the invariant
+    // "100 means every dollar is attributed" is not allowed to depend on that.
+    const tolerancePastTheLine = categorizationCoverage(
+      [group('Dining Out', 1_000_000_000, 3), group(null, 0.01, 1)],
+      SIX_SCORED,
+    );
+    expect(Math.floor((1_000_000_000 / 1_000_000_000.01) * 100 + 1e-9)).toBe(100);
+    expect(tolerancePastTheLine.coveragePercent).toBe(99);
+    expect(tolerancePastTheLine.coveragePercent).not.toBe(100);
+    expect(tolerancePastTheLine.unattributedSpend).toBe(0.01);
   });
 });
