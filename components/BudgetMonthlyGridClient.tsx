@@ -96,7 +96,17 @@ function Row({
         const hasSchedule = Boolean(row.monthly_amounts);
         const offCycle = hasSchedule && monthBudget === 0 && amount !== 0;
         const pct = monthBudget > 0 ? Math.round((Math.abs(amount) / monthBudget) * 100) : 0;
-        const pctLabel = offCycle ? 'off-cycle' : `${pct}%`;
+        // The second line of a cell is the PLAN, not the ratio. A percentage answers "how much of
+        // it went" and hides the only figure a reader can act on: what this month was actually
+        // given. "$1,729" over "$1,100" says both — the ratio is still readable, and now it is
+        // readable in dollars. The exact ratio stays in the cell's tooltip for anyone who wants
+        // the number. Bare, with no "of": twelve columns of it is twelve repetitions of a word
+        // the position in the cell already says.
+        const planLabel = offCycle
+          ? 'off-cycle'
+          : monthBudget > 0
+            ? fmt(monthBudget)
+            : 'no budget';
         const upcoming = row.months_upcoming[i];
         // Expense category projecting negative means the remaining budget is already
         // spent — no room left in the months ahead at the current pace.
@@ -133,18 +143,14 @@ function Row({
                 : prefix + fmt(prefix ? Math.abs(amount) : amount)}
             </div>
             {!isFuture && amount !== 0 && !isNetIncome && (
+              // Muted, whatever the cell is doing. The over-budget grading lives in the cell's
+              // background and in the figure above; a budget line printed in red reads as though
+              // the plan itself were the problem. `off-cycle` keeps its warning colour, because
+              // there the finding IS the absent plan.
               <div className={`text-[8px] mt-0.5 ${
-                isNetExpense
-                  ? 'text-red-500'
-                  : row.is_income
-                  ? 'text-emerald-500'
-                  : offCycle || pct > 110
-                  ? 'text-red-500'
-                  : pct > 100
-                  ? 'text-amber-500'
-                  : 'text-slate-400'
+                isNetExpense || offCycle ? 'text-red-500' : 'text-slate-400'
               }`}>
-                {isNetExpense ? 'unexpected' : pctLabel}
+                {isNetExpense ? 'unexpected' : planLabel}
               </div>
             )}
           </>
@@ -504,7 +510,10 @@ export default function BudgetMonthlyGridClient({ rows, currentMonth, beginningB
 
       {/* Legend */}
       <div className="px-4 py-1.5 border-t border-slate-100 flex items-center gap-4 text-[10px] text-slate-400 flex-wrap">
-        <span className="font-medium">Expenses % of monthly budget:</span>
+        {/* Names the shading explicitly now that no cell prints a percentage: the bands are the
+            only place the ratio is stated on screen, and a legend headed with a bare "%" beside
+            cells full of dollars reads as a stale label. */}
+        <span className="font-medium">Cell shading — expenses as % of monthly budget:</span>
         {[
           { color: 'bg-green-50',   label: '< 50%' },
           { color: 'bg-emerald-50', label: '50–100% · on budget' },
