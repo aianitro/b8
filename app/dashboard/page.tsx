@@ -433,30 +433,87 @@ const WITHHELD_COPY: Record<'too-early' | 'no-budget' | 'negative-budget', strin
 };
 
 /**
+ * The transactions behind one verdict: the named categories, in the month the verdict is about.
+ *
+ * `month` is 0-based everywhere in `lib/domain` and 1-based in the transactions page's query, and
+ * the conversion happens HERE rather than at each call site — an off-by-one in a drilldown href
+ * shows the owner a real, well-formed, wrong month, which is the failure that looks like data.
+ *
+ * `from=dashboard` so the breadcrumb over there points back to this page rather than to /budget.
+ */
+function drillHref(categories: string[], month: number): string {
+  const params = categories.map((name) => `category=${encodeURIComponent(name)}`);
+  return `/transactions?${params.join('&')}&month=${month + 1}&from=dashboard`;
+}
+
+/**
  * One category line. `elapsedDays` and `daysInMonth` travel with every projection: a projection
  * with no day attached is the roadmap's own sentence with its qualifier removed, and the pacing
  * module built those two fields to carry precisely so a renderer has no excuse.
+ *
+ * The whole line is the target, not the name alone: a verdict the owner disagrees with is only
+ * answerable by the rows underneath it, and a row's own month is the only month worth opening —
+ * `c.month` rather than the as-of month, because `offCycleElsewhere` records name an earlier one.
  */
 function CategoryLine({ c, note }: { c: OutlookCategory; note: string }) {
+  // THE FIGURE THE ROW LEADS WITH IS THE ONE THE ROW OPENS. `projected` is a forecast — Sport's
+  // $265 over eight elapsed days of thirty projects to $993.75 — and the drilldown under this row
+  // can only ever list the $265, because the other $728.75 has not been spent. Leading with the
+  // forecast made the row and its own transactions disagree by a factor of four, with nothing on
+  // screen saying they were different quantities. So `actual` leads, labelled, and the projection
+  // is demoted and named.
+  //
+  // `complete` projects to its own actual by arithmetic — its elapsed fraction is 1 — so it prints
+  // no forecast line: repeating the same dollars under the word "projected" would invent a
+  // prediction about a month that has already ended. `off-cycle`, `no-budget`, `too-early` and
+  // `future` carry no projection at all, and used to render an empty right column.
+  const forecast = c.status === 'projected' && c.projected !== null && c.projectedVariance !== null;
   return (
-    <div className="flex items-baseline justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
+    <Link
+      href={drillHref([c.category], c.month)}
+      className="group -mx-2 px-2 rounded-lg flex items-baseline justify-between gap-3 py-2 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors"
+    >
       <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-800 truncate">{c.category}</p>
+        <p className="text-sm font-medium text-slate-800 truncate group-hover:underline">{c.category}</p>
         <p className="text-xs text-slate-400">
-          {note} · {fmtCents(c.actual)} of {fmtCents(c.budgeted)} · day {c.elapsedDays} of {c.daysInMonth}
+          {note} · day {c.elapsedDays} of {c.daysInMonth}
         </p>
       </div>
       <div className="text-right shrink-0">
-        {c.projected !== null && (
-          <p className="text-sm font-mono text-slate-800">{fmtCents(c.projected)}</p>
-        )}
-        {c.projectedRatio !== null && c.projectedVariance !== null && (
-          <p className={`text-xs font-mono ${c.projectedVariance > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-            {pct(c.projectedRatio)} of budget
+        <p className="text-sm font-mono text-slate-800">
+          {fmtCents(c.actual)}
+          <span className="mx-1 font-sans text-[10px] font-medium uppercase tracking-wider text-slate-400">
+            spent of
+          </span>
+          <span className="text-slate-400">{fmtCents(c.budgeted)}</span>
+        </p>
+        {forecast ? (
+          <>
+            <p className={`text-xs font-mono ${c.projectedVariance! > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+              {fmtCents(c.projected!)}
+              <span className="ml-1 font-sans text-[10px] font-medium uppercase tracking-wider">projected</span>
+              {c.projectedRatio !== null && ` · ${pct(c.projectedRatio)}`}
+            </p>
+            {/* Said out loud wherever it moved the figure, because the projection is now two
+                claims of different kinds and the owner is entitled to know which is which. A gym
+                membership is a contract and the rest of a category is a decision; a reader who
+                cannot tell them apart cannot act on either. */}
+            {c.recurringExpected !== null && c.recurringExpected > 0 && (
+              <p className="text-[10px] text-slate-400">
+                incl. {fmtCents(c.recurringExpected)} recurring, not pro-rated
+              </p>
+            )}
+          </>
+        ) : c.spentRatio !== null ? (
+          // The share so far, and the day it is "so far" as of sits on the left of this same row —
+          // the qualifier `./pacing` built `elapsedDays`/`daysInMonth` to carry. A percentage means
+          // a different thing in each status, and this one is never printed without its day.
+          <p className={`text-xs font-mono ${c.actual > c.budgeted ? 'text-red-500' : 'text-emerald-500'}`}>
+            {pct(c.spentRatio)} of budget
           </p>
-        )}
+        ) : null}
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -494,6 +551,15 @@ export default async function DashboardPage() {
   // Both, never the state alone: a confident colour over a figure computed on a tenth of the
   // month's spend is the exact defect this phase exists to end.
   const copy = heroCopy(outlook.state, outlook.authoritative);
+
+  // The headline is a claim about specific transactions, so it opens them — but only where such a
+  // set exists. `on-track`, `too-early`, `no-budget-basis` and `nothing-to-score` name no category,
+  // and a link from those lands on an empty list, which reads as a bug rather than as a state. The
+  // three states that DO name categories are exactly the three that fill `sayingNo`, so the list
+  // itself is the test, not a second enumeration of the states.
+  const heroHref = outlook.sayingNo.length > 0
+    ? drillHref(outlook.sayingNo.map((c) => c.category), asOf.month)
+    : null;
 
   const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
   const todayVsAvgRatio = todayStats.avgSameWeekday > 0 ? todayStats.spent / todayStats.avgSameWeekday : 0;
@@ -539,7 +605,25 @@ export default async function DashboardPage() {
             {outlook.scoredCategoryCount} scored {outlook.scoredCategoryCount === 1 ? 'category' : 'categories'}
           </span>
         </div>
-        <p className={`text-4xl font-bold mt-3 ${copy.tone}`}>{copy.title}</p>
+        {heroHref ? (
+          <Link
+            href={heroHref}
+            aria-label={`${copy.title} — see this month's transactions in ${outlook.sayingNo.map((c) => c.category).join(', ')}`}
+            className={`group inline-flex flex-wrap items-center gap-x-2.5 gap-y-2 text-4xl font-bold mt-3 ${copy.tone}`}
+          >
+            <span className="group-hover:underline decoration-2 underline-offset-4">{copy.title}</span>
+            {/* The affordance. Not a decoration: on a dark hero the underline only appears on
+                hover, so without a resting-state marker the headline looks like every other
+                heading and nobody discovers it opens anything. The pill stays short and the
+                scope — which categories, which month — rides in the accessible name, because a
+                label long enough to state it would compete with the headline it sits beside. */}
+            <span className="text-xs font-medium text-slate-400 shrink-0 rounded-full border border-slate-700 px-2.5 py-1 group-hover:border-slate-500 group-hover:text-slate-300 transition-colors">
+              See transactions
+            </span>
+          </Link>
+        ) : (
+          <p className={`text-4xl font-bold mt-3 ${copy.tone}`}>{copy.title}</p>
+        )}
 
         {outlook.state === 'nothing-to-score' ? (
           // A named cause and a route out. Never a zero, never a dash beside a green tick, and
@@ -741,12 +825,29 @@ export default async function DashboardPage() {
           {unscoredBreaches.length > 0 && (
             <Panel title="Tracked, not scored">
               {unscoredBreaches.map((f, i) => (
-                <div key={i} className="flex items-baseline justify-between gap-3 py-2 border-b border-slate-100 last:border-0">
+                <Link
+                  key={i}
+                  href={drillHref([f.category], f.month)}
+                  className="group -mx-2 px-2 rounded-lg flex items-baseline justify-between gap-3 py-2 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors"
+                >
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-800 truncate">{f.category}</p>
-                    <p className="text-xs text-slate-400">{MONTHS[f.month]} · over by {fmtCents(f.variance)}</p>
+                    <p className="text-sm font-medium text-slate-800 truncate group-hover:underline">{f.category}</p>
+                    <p className="text-xs text-slate-400">{MONTHS[f.month]}</p>
                   </div>
-                </div>
+                  {/* Same rule as `CategoryLine`: the row leads with the figure its own drilldown
+                      sums to. "over by $150" beside a page listing $1,350 of transactions is not a
+                      contradiction, but it is not the number the reader was shown either. */}
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-mono text-slate-800">
+                      {fmtCents(f.actual)}
+                      <span className="mx-1 font-sans text-[10px] font-medium uppercase tracking-wider text-slate-400">
+                        spent of
+                      </span>
+                      <span className="text-slate-400">{fmtCents(f.budgeted)}</span>
+                    </p>
+                    <p className="text-xs font-mono text-red-500">over by {fmtCents(f.variance)}</p>
+                  </div>
+                </Link>
               ))}
             </Panel>
           )}

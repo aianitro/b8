@@ -41,6 +41,10 @@ const DINING: OutlookCategory = {
   projected: 1065,
   projectedVariance: 665,
   projectedRatio: 2.6625,
+  // No recurring charge in either fixture: the alert's copy is about variance and does not read
+  // these, and a non-null value here would assert a split this suite never exercises.
+  recurringExpected: null,
+  recurringPosted: null,
   reason: 'projected-breach',
   withheldReason: null,
 };
@@ -59,6 +63,8 @@ const TRAVEL: OutlookCategory = {
   projected: 975,
   projectedVariance: 775,
   projectedRatio: 4.875,
+  recurringExpected: null,
+  recurringPosted: null,
   reason: 'breach',
   withheldReason: null,
 };
