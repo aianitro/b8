@@ -251,6 +251,42 @@ CREATE TABLE IF NOT EXISTS sync_log (
 
 CREATE INDEX IF NOT EXISTS idx_sync_log_ran_at ON sync_log(ran_at);
 
+-- One row per *attempt* to hand an alert to the mail provider — the app's only outbound surface
+-- (ROADMAP.md §5 Phase 0.5 step 33). It exists to answer one question for the sending shell,
+-- "has a message with this fingerprint already been DELIVERED?", and to separate two failures that
+-- otherwise look identical: nothing here for three weeks means the job never ran, whereas three
+-- rows with delivered = FALSE means it ran and could not reach the provider.
+--
+-- Holds no figure of any kind, no name of anything the owner spends on, no payee and no account
+-- identifier — by construction, not by convention. A send log is the row that gets pasted into an
+-- EVIDENCE.md or read out of psql while someone debugs a delivery, and BUILD.md §5.4 says real
+-- financial data never leaves into logs. The fingerprint's CHECK is what makes that structural: a
+-- caller cannot key on the names because the regexp will not store them.
+--
+-- Append-only, like account_valuations and property_valuations. There is deliberately NO unique
+-- constraint on fingerprint — without one there is no ON CONFLICT target, so the mutable
+-- "last sent" row this design rejects cannot be written against this table at all. Duplicate
+-- fingerprints are the history: a failed attempt and the next day's success are two rows on
+-- purpose. Suppression keys on `delivered`, never on the mere existence of a row, or the first
+-- network blip silences the guardrail permanently.
+CREATE TABLE IF NOT EXISTS alert_sends (
+  id             SERIAL PRIMARY KEY,
+  attempted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  kind           TEXT NOT NULL CHECK (kind IN ('projected-breach', 'coverage')),  -- the *message* kind, not the transport; a second destination re-triggers the BUILD.md §5.1 escalation
+  fingerprint    TEXT NOT NULL CHECK (fingerprint ~ '^[0-9a-f]{16,}$'),           -- opaque digest computed in lib/; the CHECK is what makes "opaque" enforceable
+  delivered      BOOLEAN NOT NULL,                                                -- no DEFAULT: the shell knows the outcome, and either default would assert one it did not observe
+  failure_reason TEXT CHECK (failure_reason IN ('config', 'transport', 'rejected')),  -- classified, never transcribed: a provider's rejection quotes the message back, subject line included
+  -- NULL reads off `delivered`: on a delivered row there was no failure; on a failed row the cause
+  -- was none of the three and lib/logger.ts has the detail. One-directional, like the debt-service
+  -- coupling above — a failed row is never forced to carry a classification the caller lacks,
+  -- because a placeholder reads as a diagnosis and is not one.
+  CONSTRAINT alert_sends_delivered_failure_reason_check CHECK (NOT delivered OR failure_reason IS NULL)
+);
+
+-- Serves `WHERE fingerprint = $1 AND delivered`. Not partial on delivered, so the diagnostic read
+-- is served too. No attempted_at index unlike sync_log: this table grows by about one row a day.
+CREATE INDEX IF NOT EXISTS idx_alert_sends_fingerprint ON alert_sends(fingerprint);
+
 -- Editable beginning balance for a whole landscape's budget in a given year — distinct from
 -- account_balances (per-account) and category_balances (per-category); this is the top-level
 -- number the annual budget page nets everything else against. See app/api/budget/settings/route.ts,

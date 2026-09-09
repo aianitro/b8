@@ -1020,19 +1020,37 @@ describe('monthOutlook with a bound on its coverage', () => {
 // handed groups that are ALREADY AGGREGATED: no value of its own inputs can distinguish "the query
 // filtered on sign" from "the query did not". The predicate is genuinely out of reach of a fixture.
 //
-// So the assertion below is a STATIC one, made against the page's source text, and it is named and
+// So the assertion below is a STATIC one, made against the query's source text, and it is named and
 // commented as such. It is not proof that the query runs correctly; it is proof that the query still
 // SAYS what the spec decided it must say. The second half of the test then pins what the domain does
 // with the groups the predicate's absence would produce, which is the part a fixture can reach —
 // and which shows the failure is not one-directional.
+//
+// ---------------------------------------------------------- P0.5-33, relocated with its subject
+//
+// This read pointed at `app/dashboard/page.tsx` until P0.5-33 moved `getCoverageGroups` — verbatim,
+// under G0 adjudication A1 — into `lib/monthOutlookRead.ts`, so that the dashboard and the daily
+// job's breach alert compute one month outlook rather than two that agree until they do not.
+//
+// The pointer follows the query. NOTHING ELSE ABOUT THIS TEST CHANGED, and that is the whole of the
+// modification: same slice, same six assertions, same both-directions bite. It is not a weakening —
+// the intent was always "the coverage query filters on sign, and gates no account landscape", and
+// after the move the page is an empty room. A gate that reads a file its subject has left passes
+// for the wrong reason, which is worse than failing.
+//
+// RECORDED AS A SECOND PATCH ON A GATE THAT WANTS RESTRUCTURING, not as a fix. Step 32 noted this
+// assertion was brittle to reformatting; brittleness to RELOCATION is the same defect and it has now
+// bitten. The durable answer, deferred and still outstanding, is for the reader to return rows and
+// let the domain aggregate, which would make the sign rule the classifier's own contract —
+// behaviourally testable, and indifferent to which file the SQL lives in.
 
-const PAGE_SOURCE = readFileSync(new URL('../../app/dashboard/page.tsx', import.meta.url), 'utf8');
+const READER_SOURCE = readFileSync(new URL('../monthOutlookRead.ts', import.meta.url), 'utf8');
 
-/** `getCoverageGroups`'s SQL, sliced out of the page so the assertions cannot match a sibling query. */
+/** `getCoverageGroups`'s SQL, sliced out of the reader so the assertions cannot match a sibling query. */
 function coverageQuerySql(): string {
-  const from = PAGE_SOURCE.indexOf('async function getCoverageGroups');
-  if (from === -1) throw new Error('getCoverageGroups not found in app/dashboard/page.tsx');
-  const body = PAGE_SOURCE.slice(from, PAGE_SOURCE.indexOf('\n}\n', from));
+  const from = READER_SOURCE.indexOf('async function getCoverageGroups');
+  if (from === -1) throw new Error('getCoverageGroups not found in lib/monthOutlookRead.ts');
+  const body = READER_SOURCE.slice(from, READER_SOURCE.indexOf('\n}\n', from));
   const open = body.indexOf('`');
   return body.slice(open + 1, body.indexOf('`', open + 1));
 }
