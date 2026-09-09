@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
           success: false,
           error: {
             code: 'UNSAFE_RECONCILE',
-            message: `${unsafe.map((f) => f.name).join(', ')} already had a beginning balance. Drift there means a transaction is missing or duplicated — adjusting the opening figure would hide it rather than fix it.`,
+            message: `${unsafe.map((f) => f.name).join(', ')} already has a starting balance, so the gap means a transaction is missing or duplicated. Open the account and check its transactions — changing the starting figure would hide the problem.`,
           },
         } satisfies ApiResponse<never>,
         { status: 409 }
