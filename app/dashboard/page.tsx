@@ -11,6 +11,7 @@ import LandscapeBalanceChart from '@/components/charts/LandscapeBalanceChart';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
+import UnscoredBreaches from '@/components/UnscoredBreaches';
 import type { BreachFinding } from '@/lib/domain/adherence';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
@@ -24,12 +25,12 @@ import { asOfFromDate, type MonthOutlook, type OutlookCategory, type OutlookStat
 // of the same figures one directory apart. Nothing a reader sees changed — the queries moved
 // verbatim, and the page is touched here only by a deletion and this import.
 import { loadMonthOutlook } from '@/lib/monthOutlookRead';
+import { MONTHS, drillHref } from '@/lib/drilldown';
 // The calendar rule, imported rather than restated: `./pacing` exports it precisely so a caller
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
 // April is. A second leap-year rule here would drift on 2100.
 import { daysInMonth } from '@/lib/domain/pacing';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function blankMonths<T extends object>(fill: T): Array<{ month: string } & T> {
   return MONTHS.map((month) => ({ month, ...fill }));
@@ -441,10 +442,7 @@ const WITHHELD_COPY: Record<'too-early' | 'no-budget' | 'negative-budget', strin
  *
  * `from=dashboard` so the breadcrumb over there points back to this page rather than to /budget.
  */
-function drillHref(categories: string[], month: number): string {
-  const params = categories.map((name) => `category=${encodeURIComponent(name)}`);
-  return `/transactions?${params.join('&')}&month=${month + 1}&from=dashboard`;
-}
+
 
 /**
  * One category line. `elapsedDays` and `daysInMonth` travel with every projection: a projection
@@ -517,6 +515,9 @@ function CategoryLine({ c, note }: { c: OutlookCategory; note: string }) {
   );
 }
 
+/** Static strings, because Tailwind reads this file rather than the value of an expression. */
+const PANEL_GRID = ['', 'grid-cols-1', 'grid-cols-2', 'grid-cols-3'];
+
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
@@ -578,6 +579,9 @@ export default async function DashboardPage() {
   // Breaches on categories nobody scores — a fixed mortgage line drawing over its budget is a true
   // fact whether or not behaviour is the variable. §5's "tracked and reported, never scored".
   const unscoredBreaches = outlook.findings.filter((f): f is BreachFinding => f.kind === 'breach' && !f.scored);
+
+  const sidePanels = [outlook.withheld.length, outlook.offCycleElsewhere.length, unscoredBreaches.length]
+    .filter((n) => n > 0).length;
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -806,8 +810,12 @@ export default async function DashboardPage() {
         </Panel>
       </div>
 
-      {(outlook.withheld.length > 0 || outlook.offCycleElsewhere.length > 0 || unscoredBreaches.length > 0) && (
-        <div className="grid grid-cols-3 gap-4 mb-6">
+      {sidePanels > 0 && (
+        // Sized to what is actually there. Fixed at three columns, a lone panel — routinely the
+        // unscored list, since withheld and off-cycle are both empty in a healthy month — rendered
+        // as a narrow column beside two thirds of white space, which is what made a long list in it
+        // look even longer.
+        <div className={`grid ${PANEL_GRID[sidePanels]} gap-4 mb-6`}>
           {outlook.withheld.length > 0 && (
             <Panel title="No verdict">
               {outlook.withheld.map((c) => (
@@ -824,31 +832,7 @@ export default async function DashboardPage() {
           )}
           {unscoredBreaches.length > 0 && (
             <Panel title="Tracked, not scored">
-              {unscoredBreaches.map((f, i) => (
-                <Link
-                  key={i}
-                  href={drillHref([f.category], f.month)}
-                  className="group -mx-2 px-2 rounded-lg flex items-baseline justify-between gap-3 py-2 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-800 truncate group-hover:underline">{f.category}</p>
-                    <p className="text-xs text-slate-400">{MONTHS[f.month]}</p>
-                  </div>
-                  {/* Same rule as `CategoryLine`: the row leads with the figure its own drilldown
-                      sums to. "over by $150" beside a page listing $1,350 of transactions is not a
-                      contradiction, but it is not the number the reader was shown either. */}
-                  <div className="text-right shrink-0">
-                    <p className="text-sm font-mono text-slate-800">
-                      {fmtCents(f.actual)}
-                      <span className="mx-1 font-sans text-[10px] font-medium uppercase tracking-wider text-slate-400">
-                        spent of
-                      </span>
-                      <span className="text-slate-400">{fmtCents(f.budgeted)}</span>
-                    </p>
-                    <p className="text-xs font-mono text-red-500">over by {fmtCents(f.variance)}</p>
-                  </div>
-                </Link>
-              ))}
+              <UnscoredBreaches findings={unscoredBreaches} monthsElapsed={asOf.month + 1} />
             </Panel>
           )}
         </div>
