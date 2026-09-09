@@ -11,12 +11,19 @@ import LandscapeBalanceChart from '@/components/charts/LandscapeBalanceChart';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
-import type { AdherenceInput, BreachFinding } from '@/lib/domain/adherence';
+import type { BreachFinding } from '@/lib/domain/adherence';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
 // this one replaces was already in tension with it.
-import { asOfFromDate, categorizationCoverage, monthOutlook, type CoverageGroup, type MonthOutlook, type OutlookCategory, type OutlookState } from '@/lib/domain/monthOutlook';
+import { asOfFromDate, type MonthOutlook, type OutlookCategory, type OutlookState } from '@/lib/domain/monthOutlook';
+// The SQL behind that verdict now lives in `lib/`, shared with the daily job's breach alert, so the
+// page and the email can never drift on what this month's outlook is. It moved for the same reason
+// `lib/` already holds a shared reader for the scheduler's other daily computation: a scheduler
+// cannot import a page's private function, and copying the queries would have put two definitions
+// of the same figures one directory apart. Nothing a reader sees changed — the queries moved
+// verbatim, and the page is touched here only by a deletion and this import.
+import { loadMonthOutlook } from '@/lib/monthOutlookRead';
 // The calendar rule, imported rather than restated: `./pacing` exports it precisely so a caller
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
 // April is. A second leap-year rule here would drift on 2100.
@@ -36,18 +43,6 @@ const fmtCents = (n: number) =>
 
 /** A fraction of budget as a percentage. `2.6625` reads "266%" — of budget, not over it. */
 const pct = (fraction: number) => `${Math.round(fraction * 100)}%`;
-
-/**
- * The as-of point as an ISO calendar day, for the date-bounded queries below.
- *
- * Built from the three integers the single clock read produced, never from a second conversion:
- * the SQL and the domain module must agree about which day it is, and a query bounded by its own
- * clock is a second calendar that disagrees with the first for the hours around midnight.
- * Postgres and ISO count months from 1 where the domain counts from 0, and this is the one place
- * that difference is expressed.
- */
-const isoDay = (year: number, month: number, day: number) =>
-  `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
 interface DashboardAsOf {
   year: number;
@@ -85,160 +80,6 @@ async function getStats(asOf: DashboardAsOf) {
     budget, spent, remaining: budget - spent, uncategorized, totalTxns,
     uncategorizedPct: totalTxns > 0 ? Math.round((uncategorized / totalTxns) * 100) : 0,
   };
-}
-
-// ------------------------------------------------------------------ the month's verdict, in SQL
-//
-// Two queries feed one pure function. Neither computes anything: the first reads the category rows
-// the domain's membership tests need — INCLUDING control_mode, without which every category reads
-// `fixed`, `isScoredCategory` admits none, and the hero silently returns to "nothing to score" on
-// real data that has categories classified (NITS N1's shape, one page over) — and the second
-// aggregates spend per category per month.
-
-interface CategoryRow {
-  id: number;
-  name: string;
-  landscape: 'operational' | 'capital';
-  exclude_from_budget: boolean;
-  is_income: boolean;
-  control_mode: 'fixed' | 'discretionary' | 'variable-necessary';
-  annual_budget: string;
-  monthly_amounts: string[] | null;
-}
-
-async function getBudgetCategories(): Promise<CategoryRow[]> {
-  const result = await db.query<CategoryRow>(`
-    SELECT bc.id, bc.name, bc.landscape, bc.exclude_from_budget, bc.is_income, bc.control_mode,
-           bc.annual_budget::text, bc.monthly_amounts
-      FROM budget_categories bc
-     ORDER BY bc.sort_order, bc.name
-  `);
-  return result.rows;
-}
-
-/**
- * Spend per category name per ELAPSED month of the as-of year, as a non-negative magnitude.
- *
- * `SUM(t.amount) FILTER (WHERE t.amount > 0)` — positive rows only, Plaid's convention (positive is
- * money out) which this app keeps. `MonthSpend.actual` is contractually a magnitude, and a refund
- * netted in makes it negative, which projects DOWNWARD because the multiplier is at least one.
- * Recorded honestly as a divergence: `components/BudgetMonthlyGrid.tsx` nets refunds into the same
- * concept, so the two disagree for any month containing a return. This form is taken knowingly.
- *
- * The month index is normalised to 0-based HERE, at the boundary, and nowhere else. Handed the
- * 1-based value `EXTRACT(MONTH …)` returns, `detectAdherence` silently prices a December-only
- * category as an 1150% breach while `categoryPacing` throws — and the difference between those two
- * answers is what a caller with a try/catch ships alone.
- *
- * Bounded at the as-of day rather than at the end of the year: a month that has not happened yet is
- * rejected by the domain module outright, because twelve months of budget under four months of
- * spend turns a 24% underspend into a 75% one.
- *
- * Matched on category NAME, not through a JOIN on it. `mapped_category` is not a foreign key and
- * `budget_categories` is UNIQUE(name, landscape), so a name defined in both landscapes matches
- * twice and a JOIN duplicates the transaction row into both.
- */
-async function getMonthlyActuals(asOf: DashboardAsOf): Promise<Map<string, Map<number, number>>> {
-  const result = await db.query<{ category: string; month: number; actual: string }>(`
-    SELECT t.mapped_category AS category, EXTRACT(MONTH FROM t.date)::int - 1 AS month,
-           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS actual
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-     WHERE t.hidden = FALSE
-       AND t.mapped_category IS NOT NULL
-       AND t.date >= $1::date AND t.date <= $2::date
-     GROUP BY 1, 2
-  `, [isoDay(asOf.year, 0, 1), isoDay(asOf.year, asOf.month, asOf.day)]);
-
-  const byCategory = new Map<string, Map<number, number>>();
-  for (const r of result.rows) {
-    if (!byCategory.has(r.category)) byCategory.set(r.category, new Map());
-    byCategory.get(r.category)!.set(r.month, Number(r.actual));
-  }
-  return byCategory;
-}
-
-/**
- * This month's spend to date, grouped by `mapped_category` — the raw material of the confidence
- * bound, and nothing more.
- *
- * ONE AGGREGATION, NO CLASSIFICATION. The three-way split — scored, known-unscored, unattributed —
- * is `categorizationCoverage`'s, in `lib/domain/`, because re-expressing `isScoredCategory`'s four
- * conjuncts in a `WHERE` clause here would put this query's copy of the membership rule beyond the
- * reach of every test in this repo. The groups go out; the domain decides what each one means.
- *
- * THE PREDICATE SET IS `getMonthlyActuals`'S, EXACTLY, and that identity is the substance of the
- * step. The caveat and the figures it caveats must range over one population, and previously they
- * did not: this query filtered the ACCOUNT's landscape while the hero's figures gate the CATEGORY's
- * — different columns, different tables, and the two sets are not nested either way, so a vacation
- * paid from a capital savings account and mapped to `Travel` moved the hero and was absent from the
- * caveat. There is now NO account-landscape predicate at all. Landscape enters once, downstream,
- * through `isScoredCategory`'s first conjunct, on the category.
- *
- * `t.amount > 0` is the whole sign rule: positive is money out, this app keeps Plaid's convention,
- * and income is NEGATIVE here. A denominator that admitted a $9,000 inbound payroll row would not
- * be a share of spend — and it would fail silently, because the row makes the denominator larger
- * and the share smaller, so the caveat would refuse authority for the wrong reason and nobody
- * investigates a pessimistic caveat. Refunds are negative too and are excluded rather than netted,
- * matching `getMonthlyActuals`, which nets nothing.
- *
- * Windowed to the AS-OF MONTH TO DATE — the same window the hero's verdict covers. Not the year and
- * not the whole calendar month: a bound computed over days that have not happened is a bound about
- * a month nobody has lived.
- *
- * `NUMERIC` arrives as text and is converted HERE, at the one boundary that knows it. The domain
- * rejects a string outright rather than concatenating it into a plausible denominator.
- */
-async function getCoverageGroups(asOf: DashboardAsOf): Promise<CoverageGroup[]> {
-  const result = await db.query<{ category: string | null; spend: string; txn_count: string }>(`
-    SELECT t.mapped_category AS category,
-           SUM(t.amount)::text AS spend,
-           COUNT(*)::text      AS txn_count
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-     WHERE t.hidden = FALSE
-       AND t.amount > 0
-       AND t.date >= $1::date AND t.date <= $2::date
-     GROUP BY t.mapped_category
-  `, [isoDay(asOf.year, asOf.month, 1), isoDay(asOf.year, asOf.month, asOf.day)]);
-
-  return result.rows.map((r) => ({
-    category: r.category,
-    spend: Number(r.spend),
-    count: Number(r.txn_count),
-  }));
-}
-
-/**
- * The category rows and their months, assembled into the domain's input shape.
- *
- * Every elapsed month is supplied for every category, filled with 0 where no transaction landed —
- * a category with a budget and no spend in January genuinely spent nothing in January, and the
- * absence of a row is not the absence of a month. It also means every scored category carries an
- * entry for the as-of month, which the domain module requires rather than assumes: a scored
- * category missing from all three lists reads as holding, which is the quietest way to be wrong.
- *
- * `NUMERIC` columns are converted here, at the one boundary that knows they arrived as text. The
- * domain module rejects a string outright rather than concatenating it into a plausible figure.
- */
-function toAdherenceInput(categories: CategoryRow[], actuals: Map<string, Map<number, number>>, asOf: DashboardAsOf): AdherenceInput[] {
-  const elapsedMonths: number[] = [];
-  for (let month = 0; month <= asOf.month; month++) elapsedMonths.push(month);
-
-  return categories.map((c) => {
-    const byMonth = actuals.get(c.name);
-    return {
-      id: c.id,
-      name: c.name,
-      landscape: c.landscape,
-      exclude_from_budget: c.exclude_from_budget,
-      is_income: c.is_income,
-      control_mode: c.control_mode,
-      annual_budget: Number(c.annual_budget),
-      monthly_amounts: c.monthly_amounts === null ? null : c.monthly_amounts.map(Number),
-      months: elapsedMonths.map((month) => ({ month, actual: byMonth?.get(month) ?? 0 })),
-    };
-  });
 }
 
 // The flow-derived month-by-month series — beginning balance plus transactions, per landscape.
@@ -638,22 +479,18 @@ export default async function DashboardPage() {
   // Kicked off alongside the rest rather than awaited after, so the reconciliation check
   // doesn't add a serial round trip to page load.
   const driftPromise = findBalanceDrift();
-  const [stats, categories, actuals, coverageGroups, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual] =
+  const [stats, monthRead, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual] =
     await Promise.all([
-      getStats(asOf), getBudgetCategories(), getMonthlyActuals(asOf), getCoverageGroups(asOf), getCashFlowSeries(asOf),
+      getStats(asOf), loadMonthOutlook(asOf), getCashFlowSeries(asOf),
       getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCashFlow(asOf), getCategoryBreakdown(asOf),
       getBudgetVsActual(asOf),
     ]);
   const driftFindings = await driftPromise;
 
-  // The bound, from the same category rows the verdict is computed over. One fetch, one membership
-  // test, one population — the numerator and the denominator cannot be drawn from different sets
-  // because there is only one set here to draw them from.
-  const coverage = categorizationCoverage(coverageGroups, categories);
-
-  // The whole verdict, from one pure function, over one array. Not three independent reads that
-  // could be handed divergent rows.
-  const outlook: MonthOutlook = monthOutlook(toAdherenceInput(categories, actuals, asOf), asOf, coverage);
+  // The whole verdict, from one reader shared with the daily job. Its three queries still run
+  // concurrently with everything else above — `loadMonthOutlook` issues them together and is itself
+  // one entry in this `Promise.all`, so nothing became serial in the move.
+  const outlook: MonthOutlook = monthRead.outlook;
   // Both, never the state alone: a confident colour over a figure computed on a tenth of the
   // month's spend is the exact defect this phase exists to end.
   const copy = heroCopy(outlook.state, outlook.authoritative);
@@ -779,10 +616,10 @@ export default async function DashboardPage() {
             // unattributed count is normally zero. "No spend is recorded" is false there, with
             // thousands of dollars posted. So the two cases are separated and each says only what
             // is true of it; the honest statement in the second is about THIS HERO'S REACH, not
-            // about the month. `coverageGroups` is the unfiltered aggregation, so it — unlike the
-            // coverage record, which by design drops known-unscored spend from both halves — can
-            // still tell "nothing happened" from "nothing this hero scores happened".
-            coverageGroups.length === 0 ? (
+            // about the month. `coverageGroupCount` counts the unfiltered aggregation, so it —
+            // unlike the coverage record, which by design drops known-unscored spend from both
+            // halves — can still tell "nothing happened" from "nothing this hero scores happened".
+            monthRead.coverageGroupCount === 0 ? (
               <>No spend is recorded this month yet, so there is no share to compute one over.</>
             ) : (
               <>
@@ -831,7 +668,7 @@ export default async function DashboardPage() {
                 // bound refuses is that it has nothing to range over, which is a different fact.
                 // A refusal that misstates its own cause is the same defect as a caveat that
                 // misstates the month.
-                coverageGroups.length === 0 ? (
+                monthRead.coverageGroupCount === 0 ? (
                   <>
                     Nothing is recorded this month yet, so the bound has nothing to range over and
                     the figures above are not yet a judgement on the month.
