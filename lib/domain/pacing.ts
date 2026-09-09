@@ -26,6 +26,10 @@
 import { MONTHS_PER_YEAR, roundCents } from '../budgetMath';
 import type { AdherenceInput, MonthSpend } from './adherence';
 import { budgetedForMonth, isScoredCategory, isTrackedCategory, withoutNegativeZero } from './adherence';
+// Imported for its TYPE only, and the direction of that dependency is deliberate: `./recurrence`
+// imports `AsOf` from here and nothing else, so the cycle is a type-level one that erases at
+// compile time. The cadence policy lives there, entirely, and this module consults its answer.
+import type { CategoryRecurrence } from './recurrence';
 
 /**
  * The as-of point: a calendar day, stated as three plain integers, with no instant and therefore
@@ -154,6 +158,16 @@ export interface CategoryPace {
    * reciprocal.
    */
   projectedRatio: number | null;
+  /**
+   * The recurring dollars this month owes, held OUT of the run rate — `CategoryRecurrence.expected`
+   * for this category, or `null` where no series was supplied or the month does not project.
+   *
+   * Non-null is the signal that this record's projection is a split one rather than a bare
+   * division, and a renderer that wants to say so reads this rather than re-deriving it.
+   */
+  recurringExpected: number | null;
+  /** The part of `actual` those series have already posted. Never greater than `actual`. */
+  recurringPosted: number | null;
   status: PaceStatus;
 }
 
@@ -219,7 +233,13 @@ function assertRealAsOf(asOf: AsOf): void {
  * projections, so a finished month's projection can never disagree with its own arithmetic: it is
  * `actual / 1` because its fraction IS one, not because a special case says so.
  */
-function paceForMonth(row: AdherenceInput, spend: MonthSpend, asOf: AsOf, scored: boolean): CategoryPace {
+function paceForMonth(
+  row: AdherenceInput,
+  spend: MonthSpend,
+  asOf: AsOf,
+  scored: boolean,
+  recurrence: CategoryRecurrence | undefined,
+): CategoryPace {
   const month = spend.month;
   // Deliberately louder than the sibling module, which for the same input silently substitutes the
   // even spread — a December-only category handed a 1-indexed month reads there as a $1,050 breach
@@ -269,7 +289,30 @@ function paceForMonth(row: AdherenceInput, spend: MonthSpend, asOf: AsOf, scored
   // elapsed fraction zero": nonzero spend over a zero fraction is non-finite and zero spend over it
   // is NaN, and neither value is ever constructed.
   const projects = status === 'complete' || status === 'projected';
-  const projected = projects ? roundCents(actual / elapsedFraction) : null;
+
+  // THE RUN RATE APPLIES TO ELECTIVE SPEND ONLY. Dividing by the elapsed fraction asserts that
+  // whatever has been spent so far will keep arriving at that rate, and a monthly subscription
+  // contradicts that outright: `Sport`'s $265 gym charge on 3 September was the category's whole
+  // month by day 8 of 30, and the bare division projected $993.75 for a month heading for $265. So
+  // the recurring dollars are held out of the division and added back at face value:
+  //
+  //     projected = recurring expected + (actual − recurring posted) / elapsed fraction
+  //
+  // Only the AS-OF MONTH splits. A `complete` month's elapsed fraction is 1, so its projection is
+  // its actual whichever form the arithmetic takes, and applying an expectation to a month that has
+  // already ended would add a charge to it that never posted. `recurrence` is therefore consulted
+  // for `projected` alone, which is also why a caller that supplies no recurrence at all gets the
+  // identical figure this function returned before the split existed.
+  const splits = status === 'projected' && recurrence !== undefined;
+  const recurringExpected = splits ? recurrence!.expected : null;
+  // Clamped at `actual`, and the clamp is a guard rather than an expectation: both figures are
+  // summed over the same positive-amount rows of the same month, so `posted` cannot exceed the
+  // month's spend unless the caller drew them from different populations. Unclamped, that mistake
+  // would produce a NEGATIVE elective remainder, which the multiplier then turns into a category
+  // projecting to close below what it has already spent.
+  const recurringPosted = splits ? Math.min(recurrence!.posted, actual) : null;
+  const elective = actual - (recurringPosted ?? 0);
+  const projected = projects ? roundCents((recurringExpected ?? 0) + elective / elapsedFraction) : null;
 
   return {
     categoryId: row.id,
@@ -294,6 +337,8 @@ function paceForMonth(row: AdherenceInput, spend: MonthSpend, asOf: AsOf, scored
     // spread would produce. That fifth decimal is the difference between importing the definition
     // and re-typing it.
     projectedRatio: projected !== null && budgeted > 0 ? withoutNegativeZero(projected / budgeted) : null,
+    recurringExpected,
+    recurringPosted: recurringPosted === null ? null : withoutNegativeZero(roundCents(recurringPosted)),
     status,
   };
 }
@@ -319,7 +364,11 @@ function paceForMonth(row: AdherenceInput, spend: MonthSpend, asOf: AsOf, scored
  * — in calendar order within a category, categories in input order, so two callers passing the same
  * months in different array orders get byte-identical output.
  */
-export function categoryPacing(rows: AdherenceInput[], asOf: AsOf): CategoryPace[] {
+export function categoryPacing(
+  rows: AdherenceInput[],
+  asOf: AsOf,
+  recurrence?: Map<string, CategoryRecurrence>,
+): CategoryPace[] {
   assertRealAsOf(asOf);
 
   const paces: CategoryPace[] = [];
@@ -333,8 +382,12 @@ export function categoryPacing(rows: AdherenceInput[], asOf: AsOf): CategoryPace
 
     const scored = isScoredCategory(row);
 
+    // Keyed by NAME, because `mapped_category` is the only thing a transaction carries and it is
+    // not a foreign key — the same join `getMonthlyActuals` makes, for the same reason.
+    const rowRecurrence = recurrence?.get(row.name);
+
     for (const spend of [...row.months].sort((a, b) => a.month - b.month)) {
-      paces.push(paceForMonth(row, spend, asOf, scored));
+      paces.push(paceForMonth(row, spend, asOf, scored, rowRecurrence));
     }
   }
 

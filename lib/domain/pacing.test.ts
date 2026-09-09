@@ -11,6 +11,7 @@ import {
 // the same row to prove the two resolve one definition. `pacing.ts` imports from it too — that is
 // the point — but nothing here reaches back the other way.
 import { detectAdherence, type AdherenceInput, type MonthSpend } from './adherence';
+import type { CategoryRecurrence } from './recurrence';
 import { roundCents } from '../budgetMath';
 
 // Fabricated figures throughout — this repo keeps real amounts out of committed diffs, and a
@@ -570,5 +571,131 @@ describe('daysInMonth', () => {
     expect(() => daysInMonth(2026, -1)).toThrow(RangeError);
     expect(() => daysInMonth(2026, 3.5)).toThrow(RangeError);
     expect(() => daysInMonth(Number.NaN, 3)).toThrow(RangeError);
+  });
+});
+
+// ------------------------------------------------------------------ the recurring/elective split
+//
+// A monthly subscription violates the run rate's one assumption completely: it cannot recur again
+// this month, so dividing it by the elapsed fraction claims a charge that is contractually
+// impossible. `Sport` drew one $265 gym membership on 3 September and the bare division projected
+// $993.75 for a month heading for $265.
+//
+// The base fixture stays April 8 of a 30-day April. The recurrence records are HAND-WRITTEN here
+// rather than produced by `./recurrence`: this module's contract is what it does with an answer,
+// and a test that computed the answer first would pass on a broken split whenever detection was
+// broken in the matching direction.
+
+const recurrence = (over: Partial<CategoryRecurrence> = {}): Map<string, CategoryRecurrence> =>
+  new Map([[
+    'Fabricated elective spend',
+    {
+      category: 'Fabricated elective spend',
+      series: [],
+      posted: 0,
+      expected: 0,
+      ...over,
+    },
+  ]]);
+
+describe('categoryPacing — recurring charges are not pro-rated', () => {
+  it('carries a posted subscription at face value and pro-rates nothing else, so a month whose only spend is one monthly debit projects to that debit', () => {
+    // The reported defect, exactly: $265 on day 8 of 30, all of it one monthly charge.
+    const months: MonthSpend[] = [{ month: 3, actual: 265 }];
+    const pace = only(categoryPacing(
+      [input({ months })], AS_OF, recurrence({ posted: 265, expected: 265 }),
+    ));
+
+    expect(pace.projected).toBe(265);
+    // The figure the bare run rate produced, and the reason this test exists.
+    expect(pace.projected).not.toBe(993.75);
+    expect(pace.recurringExpected).toBe(265);
+    expect(pace.recurringPosted).toBe(265);
+  });
+
+  it('pro-rates the elective remainder and only the remainder', () => {
+    // $265 subscription plus $80 of elective spend by day 8. The $80 projects to $300 over the
+    // month; the $265 does not move.
+    const months: MonthSpend[] = [{ month: 3, actual: 345 }];
+    const pace = only(categoryPacing(
+      [input({ months })], AS_OF, recurrence({ posted: 265, expected: 265 }),
+    ));
+
+    expect(pace.projected).toBe(565);
+    expect(pace.projected).toBe(roundCents(265 + 80 / (8 / 30)));
+  });
+
+  it('counts a subscription that has not been billed yet, so the projection does not lurch on the day it posts', () => {
+    // Day 8, the gym bills on the 20th, $80 of elective spend so far. Nothing recurring is in
+    // `actual`, so the whole $80 pro-rates and the $265 is added on top.
+    const months: MonthSpend[] = [{ month: 3, actual: 80 }];
+    const pace = only(categoryPacing(
+      [input({ months })], AS_OF, recurrence({ posted: 0, expected: 265 }),
+    ));
+
+    expect(pace.projected).toBe(565);
+    expect(pace.recurringPosted).toBe(0);
+    expect(pace.recurringExpected).toBe(265);
+  });
+
+  it('leaves every figure untouched when the caller supplies no recurrence at all', () => {
+    const bare = only(categoryPacing([input({ months: DINING })], AS_OF));
+    const empty = only(categoryPacing([input({ months: DINING })], AS_OF, new Map()));
+
+    expect(bare.projected).toBe(1331.25);
+    expect(empty.projected).toBe(bare.projected);
+    expect(bare.recurringExpected).toBeNull();
+    expect(bare.recurringPosted).toBeNull();
+  });
+
+  it('does not apply an expectation to a month that has already ended', () => {
+    // A `complete` month is fully elapsed, so its projection is its actual whichever form the
+    // arithmetic takes. Adding an expected charge to it would invent a payment that never posted.
+    const months: MonthSpend[] = [{ month: 2, actual: 400 }];
+    const pace = only(categoryPacing(
+      [input({ months })], AS_OF, recurrence({ posted: 0, expected: 265 }),
+    ));
+
+    expect(pace.status).toBe('complete');
+    expect(pace.projected).toBe(400);
+    expect(pace.recurringExpected).toBeNull();
+  });
+
+  it('withholds the projection early in the month whatever the recurrence says', () => {
+    // The elapsed-fraction threshold is a separate guard and the split does not reopen it: a
+    // recurring charge on day 2 is still a month nobody has lived enough of to project.
+    const early: AsOf = { year: 2026, month: 3, day: 2 };
+    const pace = only(categoryPacing(
+      [input({ months: [{ month: 3, actual: 265 }] })], early, recurrence({ posted: 265, expected: 265 }),
+    ));
+
+    expect(pace.status).toBe('too-early');
+    expect(pace.projected).toBeNull();
+    expect(pace.recurringExpected).toBeNull();
+  });
+
+  it('never projects a category to close below what it has already spent, even if the two figures were drawn from different rows', () => {
+    // `posted` above `actual` is a caller mistake, not an expected input. Unclamped it makes the
+    // elective remainder negative and the multiplier turns that into a category projecting to
+    // un-spend money.
+    const months: MonthSpend[] = [{ month: 3, actual: 100 }];
+    const pace = only(categoryPacing(
+      [input({ months })], AS_OF, recurrence({ posted: 400, expected: 400 }),
+    ));
+
+    expect(pace.recurringPosted).toBe(100);
+    expect(pace.projected).toBe(400);
+    expect(pace.projected).toBeGreaterThanOrEqual(pace.actual);
+  });
+
+  it('matches recurrence to a row by name, and ignores an entry for a different category', () => {
+    const pace = only(categoryPacing(
+      [input({ months: DINING })],
+      AS_OF,
+      new Map([['Some other category', { category: 'Some other category', series: [], posted: 300, expected: 300 }]]),
+    ));
+
+    expect(pace.projected).toBe(1331.25);
+    expect(pace.recurringExpected).toBeNull();
   });
 });

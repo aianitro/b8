@@ -2,6 +2,7 @@ import db from './db';
 import type { AdherenceInput } from './domain/adherence';
 import { categorizationCoverage, monthOutlook, type CoverageGroup, type MonthOutlook } from './domain/monthOutlook';
 import type { AsOf } from './domain/pacing';
+import { detectRecurring, RECURRENCE_LOOKBACK_MONTHS, type RecurrenceTxn } from './domain/recurrence';
 
 /**
  * The month outlook's I/O shell: the SQL that feeds `lib/domain/monthOutlook.ts`, in one place.
@@ -170,6 +171,60 @@ async function getCoverageGroups(asOf: AsOf): Promise<CoverageGroup[]> {
 }
 
 /**
+ * The charges a cadence can be read off, over the evidence window — raw rows, deliberately.
+ *
+ * NO AGGREGATION AND NO CLASSIFICATION. Whether three charges from one merchant are a subscription
+ * is `detectRecurring`'s judgement, and every part of that judgement — the consecutive-months test,
+ * the amount tolerance, the still-running test, the choice of one representative charge per month —
+ * is policy. Expressed in a `GROUP BY` it would be policy no test in this repo can reach, which is
+ * the drifting-definitions hazard (BUILD.md §1) landing on the figure that decides whether a
+ * category reads as 106% of its month or 398%.
+ *
+ * THE PREDICATE SET IS `getMonthlyActuals`'S, EXACTLY, minus its date bound. Same tracked-account
+ * join, same `hidden = FALSE`, same `mapped_category IS NOT NULL`, and the same `t.amount > 0` sign
+ * rule. The recurring total is SUBTRACTED from the month's actual before the run rate divides the
+ * remainder, so the two figures must be summed over one population: a charge counted as recurring
+ * but absent from `actual` is a negative elective remainder, and a category then projects to close
+ * below what it has already spent.
+ *
+ * The window is `RECURRENCE_LOOKBACK_MONTHS` completed months plus the as-of month to date. It
+ * crosses the year boundary for any as-of point before July, which is why the lower bound is
+ * computed as a date and not as `EXTRACT(YEAR …) = asOf.year` — a January outlook whose evidence
+ * stopped at 1 January would have no history at all and would pro-rate every subscription the owner
+ * has.
+ *
+ * `t.name` is the grouping label, with `merchant_name` behind it. The raw bank descriptor is the
+ * more stable of the two: this ledger holds one gym billing monthly under `merchant_name` values
+ * `CLUB SPORT @ THE PLEX` and `Club Sport` in the same year, while its `name` never moved. Plaid's
+ * cleaned merchant name improves over time, and a series that re-keys itself is a series that
+ * dissolves. Normalisation of the label is the domain module's, not this query's.
+ */
+async function getRecurrenceWindow(asOf: AsOf): Promise<RecurrenceTxn[]> {
+  const result = await db.query<{ category: string; label: string; month: number; day: number; amount: string }>(`
+    SELECT t.mapped_category                     AS category,
+           COALESCE(NULLIF(TRIM(t.name), ''), t.merchant_name, '') AS label,
+           EXTRACT(MONTH FROM t.date)::int - 1   AS month,
+           EXTRACT(DAY   FROM t.date)::int       AS day,
+           t.amount::text                        AS amount
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+     WHERE t.hidden = FALSE
+       AND t.amount > 0
+       AND t.mapped_category IS NOT NULL
+       AND t.date >= ($2::date - make_interval(months => $1::int))
+       AND t.date <= $2::date
+  `, [RECURRENCE_LOOKBACK_MONTHS, isoDay(asOf.year, asOf.month, asOf.day)]);
+
+  return result.rows.map((r) => ({
+    category: r.category,
+    label: r.label,
+    month: r.month,
+    day: r.day,
+    amount: Number(r.amount),
+  }));
+}
+
+/**
  * The category rows and their months, assembled into the domain's input shape.
  *
  * Every elapsed month is supplied for every category, filled with 0 where no transaction landed —
@@ -225,8 +280,8 @@ export interface MonthOutlookRead {
 }
 
 export async function loadMonthOutlook(asOf: AsOf): Promise<MonthOutlookRead> {
-  const [categories, actuals, coverageGroups] = await Promise.all([
-    getBudgetCategories(), getMonthlyActuals(asOf), getCoverageGroups(asOf),
+  const [categories, actuals, coverageGroups, recurrenceWindow] = await Promise.all([
+    getBudgetCategories(), getMonthlyActuals(asOf), getCoverageGroups(asOf), getRecurrenceWindow(asOf),
   ]);
 
   // The bound, from the same category rows the verdict is computed over. One fetch, one membership
@@ -236,7 +291,14 @@ export async function loadMonthOutlook(asOf: AsOf): Promise<MonthOutlookRead> {
 
   // The whole verdict, from one pure function, over one array. Not three independent reads that
   // could be handed divergent rows.
-  const outlook: MonthOutlook = monthOutlook(toAdherenceInput(categories, actuals, asOf), asOf, coverage);
+  // Which charges are a subscription rather than a decision, so the run rate is applied to the
+  // elective remainder alone. One reader, so the dashboard and the daily alert cannot disagree
+  // about whether `Sport` is heading for $265 or $993.75.
+  const recurrence = detectRecurring(recurrenceWindow, asOf);
+
+  const outlook: MonthOutlook = monthOutlook(
+    toAdherenceInput(categories, actuals, asOf), asOf, coverage, recurrence,
+  );
 
   return { outlook, coverageGroupCount: coverageGroups.length };
 }

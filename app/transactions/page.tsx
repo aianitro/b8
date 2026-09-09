@@ -27,7 +27,7 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 async function getData(
   uncategorizedOnly: boolean,
   accountId: string | null,
-  category: string | null,
+  categories: string[],
   month: number | null,
   search: string | null,
   dateFrom: string | null,
@@ -37,16 +37,18 @@ async function getData(
   transferGroup: number | null,
 ) {
   const conds: string[] = [];
-  const args: (string | number)[] = [];
+  const args: (string | number | string[])[] = [];
 
   if (accountId) {
     args.push(accountId);
     conds.push(`t.account_id = $${args.length}`);
   }
   if (uncategorizedOnly) conds.push('t.mapped_category IS NULL AND t.hidden = FALSE');
-  if (category) {
-    args.push(category);
-    conds.push(`t.mapped_category = $${args.length}`);
+  // One branch for one category and for many: `= ANY($n)` over a text[] is the same plan as `=`
+  // for a single element, and a second branch would be a second place for the predicate to drift.
+  if (categories.length > 0) {
+    args.push(categories);
+    conds.push(`t.mapped_category = ANY($${args.length})`);
   }
   if (month) {
     args.push(month);
@@ -145,18 +147,25 @@ const fmt = (n: number) =>
 export default async function TransactionsPage({
   searchParams,
 }: {
+  // `category` is REPEATABLE — `?category=A&category=B` — rather than a comma-joined string,
+  // because category names are user-typed and may contain a comma. A separator that can appear
+  // inside a value is a parser that silently splits one category into two.
   searchParams: Promise<{
-    filter?: string; account?: string; category?: string; month?: string; search?: string;
+    filter?: string; account?: string; category?: string | string[]; month?: string; search?: string;
     dateFrom?: string; dateTo?: string; amountMin?: string; amountMax?: string; transferGroup?: string;
+    from?: string;
   }>;
 }) {
   const {
     filter, account, category, month, search, dateFrom, dateTo, amountMin, amountMax, transferGroup,
+    from,
   } = await searchParams;
 
   const uncategorizedOnly = filter === 'uncategorized';
   const accountId = account ?? null;
-  const drillCategory = category ?? null;
+  const drillCategories = (Array.isArray(category) ? category : category ? [category] : [])
+    .map((c) => c.trim())
+    .filter(Boolean);
   const drillMonth = month ? parseInt(month, 10) : null;
   const searchQuery = search?.trim() || null;
   const dateFromValue = dateFrom || null;
@@ -166,26 +175,37 @@ export default async function TransactionsPage({
   const transferGroupValue = transferGroup ? parseInt(transferGroup, 10) : null;
 
   const { transactions, categories, total, uncategorized, sum, accounts, properties } = await getData(
-    uncategorizedOnly, accountId, drillCategory, drillMonth, searchQuery,
+    uncategorizedOnly, accountId, drillCategories, drillMonth, searchQuery,
     dateFromValue, dateToValue,
     amountMinValue !== null && !isNaN(amountMinValue) ? amountMinValue : null,
     amountMaxValue !== null && !isNaN(amountMaxValue) ? amountMaxValue : null,
     transferGroupValue !== null && !isNaN(transferGroupValue) ? transferGroupValue : null,
   );
 
-  const isDrilldown = Boolean(drillCategory && drillMonth);
+  const isDrilldown = drillCategories.length > 0 && Boolean(drillMonth);
+  // Names, not a count, while they still fit a heading. "3 categories · September 2026" tells the
+  // owner nothing about which three, and the whole reason they clicked was to see which.
+  const drillCategoryLabel = drillCategories.length <= 3
+    ? drillCategories.join(', ')
+    : `${drillCategories.slice(0, 2).join(', ')} +${drillCategories.length - 2} more`;
   const drillLabel = isDrilldown
-    ? `${drillCategory} · ${MONTH_NAMES[(drillMonth ?? 1) - 1]} ${new Date().getFullYear()}`
+    ? `${drillCategoryLabel} · ${MONTH_NAMES[(drillMonth ?? 1) - 1]} ${new Date().getFullYear()}`
     : null;
   const isTransferGroup = Boolean(transferGroupValue !== null && !isNaN(transferGroupValue));
+  // Where the breadcrumb goes back to. A drilldown opened from the dashboard that offers "← Budget"
+  // is a back link that lies about where the owner came from, so the origin travels in the URL
+  // rather than being assumed. Budget stays the default: every link that predates `from` is one.
+  const origin = from === 'dashboard'
+    ? { href: '/dashboard', label: 'Dashboard' }
+    : { href: '/budget?view=monthly', label: 'Budget' };
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
       {isDrilldown && (
         <div className="flex items-center gap-2 mb-4 text-sm">
-          <a href="/budget?view=monthly" className="text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">
+          <a href={origin.href} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
-            Budget
+            {origin.label}
           </a>
           <span className="text-slate-300">/</span>
           <span className="text-slate-600 font-medium">{drillLabel}</span>

@@ -43,6 +43,7 @@ import type { BudgetCategory, ControlMode } from '../../shared/types';
 // same module reads as a second relationship.
 import { detectAdherence, isScoredCategory, scoredHeadline, type AdherenceFinding, type AdherenceInput, type ScorableCategory, type ScoredHeadline } from './adherence';
 import { categoryPacing, type AsOf, type CategoryPace, type PaceStatus } from './pacing';
+import type { CategoryRecurrence } from './recurrence';
 
 /**
  * The share of spend below which this month's figures stop being presented as a verdict.
@@ -244,6 +245,16 @@ export interface OutlookCategory {
   projected: number | null;
   projectedVariance: number | null;
   projectedRatio: number | null;
+  /**
+   * The recurring dollars this month owes and the part of them already posted, copied by reference
+   * off the pace record. Non-null only where the projection was split — see `CategoryPace`.
+   *
+   * Carried for the same reason `status` is: a renderer holding a projection and no way to say what
+   * share of it is a subscription must present a $265 gym charge and a $265 run rate as the same
+   * kind of claim, and they are not.
+   */
+  recurringExpected: number | null;
+  recurringPosted: number | null;
   /** Non-null if and only if this record is in `sayingNo`. */
   reason: SayingNoReason | null;
   /** Non-null if and only if this record is in `withheld`. */
@@ -717,6 +728,8 @@ function toOutlookCategory(
     projected: pace.projected,
     projectedVariance: pace.projectedVariance,
     projectedRatio: pace.projectedRatio,
+    recurringExpected: pace.recurringExpected,
+    recurringPosted: pace.recurringPosted,
     reason,
     withheldReason,
   };
@@ -752,13 +765,20 @@ function byProjectedVarianceDesc(a: OutlookCategory, b: OutlookCategory): number
  * preserving rather than flattening: a `fixed` mortgage over its budget is a true fact that no
  * adherence figure should average over.
  */
-export function monthOutlook(rows: AdherenceInput[], asOf: AsOf, coverage: CategorizationCoverage): MonthOutlook {
+export function monthOutlook(
+  rows: AdherenceInput[],
+  asOf: AsOf,
+  coverage: CategorizationCoverage,
+  recurrence?: Map<string, CategoryRecurrence>,
+): MonthOutlook {
   assertCoverage(coverage);
   assertCallerContract(rows, asOf);
 
   const findings = detectAdherence(rows);
   const headline = scoredHeadline(rows);
-  const paces = categoryPacing(rows, asOf);
+  // Passed straight through, unexamined. The cadence policy is `./recurrence`'s and the split
+  // arithmetic is `./pacing`'s; this module's only relationship with either is that it calls them.
+  const paces = categoryPacing(rows, asOf, recurrence);
 
   const controlModeById = new Map<number, ControlMode>(rows.map((row) => [row.id, row.control_mode]));
   // `!` rather than a default: every pace record came from a row in `rows`, so a miss here is
