@@ -185,7 +185,12 @@ function Row({
           <td
             key={i}
             title={isFuture ? futureTitle : `${MONTHS[i]}: ${prefix}${fmtFull(Math.abs(amount))} (${tooltipBudget})`}
-            className={`p-0 text-right text-xs min-w-[56px] border-r border-slate-50 transition-colors ${bg} ${text} ${i === currentMonth ? 'ring-1 ring-inset ring-blue-200' : ''} ${!isFuture ? 'hover:brightness-95' : ''}`}
+            // The separator has to outrank the cell it is separating. `border-slate-50` is the same
+            // colour as a future cell's own `bg-slate-50`, so from October on the column rules
+            // vanished and the quarter read as one merged cell — most visibly on a row that is
+            // mostly empty, where a lone November figure floated in a wide blank block with no
+            // column to belong to.
+            className={`p-0 text-right text-xs min-w-[56px] border-r ${isFuture ? 'border-slate-200' : 'border-slate-50'} transition-colors ${bg} ${text} ${i === currentMonth ? 'ring-1 ring-inset ring-blue-200' : ''} ${!isFuture ? 'hover:brightness-95' : ''}`}
           >
             {drillHref ? (
               <a href={drillHref} className="block px-2 py-1.5 w-full h-full">{inner}</a>
