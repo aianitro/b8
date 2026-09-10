@@ -206,7 +206,6 @@ export default async function BudgetPage({ searchParams }: PageProps) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Budget {new Date().getFullYear()}</h1>
-          <p className="text-sm text-slate-500 mt-1">Annual allocations · month {monthsElapsed} of 12</p>
         </div>
         <div className="flex items-center gap-3">
           <BudgetViewToggle current={view} landscape={landscape} />
