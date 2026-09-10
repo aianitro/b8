@@ -107,6 +107,15 @@ function Row({
           : monthBudget > 0
             ? fmt(monthBudget)
             : 'no budget';
+        // The month in progress is the one month whose plan can still be acted on, and it is also
+        // the month most likely to have nothing against a category yet — early September, with the
+        // grocery run still ahead of it. Gating the plan line on `amount !== 0` hid the figure in
+        // exactly that window: the cell read "—" and named no budget, so the one row that wants a
+        // target showed none. A budgeted current month now always prints its plan. With no budget
+        // there is still nothing to say, so it stays bare rather than printing "no budget" under
+        // every unbudgeted category for a month that has barely started.
+        const showPlan =
+          !isFuture && !isNetIncome && (amount !== 0 || (i === currentMonth && monthBudget > 0));
         const upcoming = row.months_upcoming[i];
         // Expense category projecting negative means the remaining budget is already
         // spent — no room left in the months ahead at the current pace.
@@ -142,7 +151,7 @@ function Row({
                 ? (upcoming !== 0 ? fmt(Math.abs(upcoming)) : '')
                 : prefix + fmt(prefix ? Math.abs(amount) : amount)}
             </div>
-            {!isFuture && amount !== 0 && !isNetIncome && (
+            {showPlan && (
               // Muted, whatever the cell is doing. The over-budget grading lives in the cell's
               // background and in the figure above; a budget line printed in red reads as though
               // the plan itself were the problem. `off-cycle` keeps its warning colour, because
