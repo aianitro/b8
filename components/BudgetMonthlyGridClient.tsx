@@ -249,9 +249,15 @@ function TotalsRow({
         const isFuture = i > currentMonth;
         // Total income going negative for a month is always unexpected — flag it, don't hide it.
         const negative = isIncome && total < 0;
+        // The month in progress is a forecast like the ones after it, so it says so on hover rather
+        // than by going grey — it keeps the emphasis its column has earned.
+        const title = i === currentMonth
+          ? `${MONTHS[i]}: projected close — the month's plan, or what it has already reached`
+          : isFuture ? `${MONTHS[i]}: projected` : MONTHS[i];
         return (
           <td
             key={i}
+            title={title}
             className={`px-2 py-1.5 text-right font-mono border-r border-slate-100 ${
               isFuture ? 'text-[10px] font-normal text-slate-400' : `text-xs font-semibold ${negative ? 'text-red-600' : 'text-slate-700'}`
             } ${negative && !isFuture ? 'bg-red-50' : i === currentMonth ? 'bg-blue-50/30' : ''}`}
@@ -279,6 +285,9 @@ function NetRow({ netMonthTotals, netYtd, currentMonth }: { netMonthTotals: numb
         return (
           <td
             key={i}
+            title={i === currentMonth
+              ? `${MONTHS[i]}: projected close — both sides drawn to month end`
+              : isFuture ? `${MONTHS[i]}: projected` : MONTHS[i]}
             className={`px-2 py-1.5 text-right font-mono border-r border-slate-700 bg-slate-900 ${color} ${i === currentMonth ? 'bg-slate-800' : ''}`}
           >
             {isFuture ? (net !== 0 ? fmtSigned(net) : '') : fmtSigned(net)}
@@ -383,9 +392,30 @@ export default function BudgetMonthlyGridClient({ rows, currentMonth, beginningB
 
   const dragRef = useRef<{ section: Section; id: number } | null>(null);
 
-  // Actual through the current month, projected (annual - YTD spread across remaining months,
-  // or the explicit schedule) for months after it — see months_upcoming in BudgetMonthlyGrid.tsx.
-  const combined = (r: GridRow) => r.months.map((amt, i) => (i > currentMonth ? r.months_upcoming[i] : amt));
+  // What each month is expected to CLOSE at — closed months are settled, the rest are forecast.
+  // Only the totals, Net and running-balance rows read this; the category cells above keep showing
+  // actual over plan, which is what a month in progress is actually asking about.
+  //
+  // The month in progress used to be lumped in with the closed ones and counted at its actual, and
+  // that quietly broke the forecast beneath it. Spending accrues daily, pay does not: on the 10th
+  // of a month whose salary lands on the 15th, income to date is genuinely zero, so September
+  // totalled no income at all, showed a $1,345 loss, and carried that error into every closing
+  // balance after it. The month was not a loss; it was ten days old.
+  //
+  // Projecting one side alone would only move the error: a full month's pay against ten days of
+  // spending reads optimistic exactly as far as the old version read pessimistic. So both sides
+  // project, and Net compares two figures drawn to the same horizon.
+  //
+  // Plan, or actual where actual has already passed it — a month cannot un-spend what it has spent,
+  // and a category already over its line will not close back under it. This is the grid's own
+  // schedule, deliberately NOT the recurring-aware pacing in lib/domain/pacing.ts: that projection
+  // is defined only over scored spending categories (`is_income = FALSE`, see lib/domain/adherence.ts)
+  // and so has nothing to say about the income half, which is the half that was blank.
+  const combined = (r: GridRow) => r.months.map((amt, i) => {
+    if (i > currentMonth) return r.months_upcoming[i];
+    if (i < currentMonth) return amt;
+    return Math.max(amt, r.months_budget[i]);
+  });
 
   const incomeMonthTotals  = Array.from({ length: 12 }, (_, i) => incomeOrder.reduce((s, r) => s + combined(r)[i], 0) + uncategorizedIncome[i]);
   const expenseMonthTotals = Array.from({ length: 12 }, (_, i) => expenseOrder.reduce((s, r) => s + combined(r)[i], 0) + uncategorizedExpense[i]);
