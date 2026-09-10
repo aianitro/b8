@@ -146,12 +146,21 @@ function Row({
 
         const inner = (
           <>
-            <div className={`font-mono ${isFuture ? 'text-[10px]' : ''}`}>
-              {isFuture
-                ? (upcoming !== 0 ? fmt(Math.abs(upcoming)) : '')
-                : prefix + fmt(prefix ? Math.abs(amount) : amount)}
+            {/* Top line is what actually happened. In a future month nothing has, so there it is a
+                spacer rather than an omission: it holds the line open, and the projection below
+                lands on the same baseline as the plan figures in the months either side of it. A
+                cell left with one short line instead floats it mid-height, which is what a table
+                cell does with content shorter than its row. Reading across a row now, actuals sit
+                on one line and expectations on the line beneath, whichever side of today a month
+                falls on — and a projection is simply that month's plan, not yet spent against. */}
+            <div className="font-mono" aria-hidden={isFuture || undefined}>
+              {isFuture ? '\u00A0' : prefix + fmt(prefix ? Math.abs(amount) : amount)}
             </div>
-            {showPlan && (
+            {isFuture ? (
+              <div className="font-mono text-[10px] mt-0.5">
+                {upcoming !== 0 ? fmt(Math.abs(upcoming)) : ''}
+              </div>
+            ) : showPlan && (
               // Muted, whatever the cell is doing. The over-budget grading lives in the cell's
               // background and in the figure above; a budget line printed in red reads as though
               // the plan itself were the problem. `off-cycle` keeps its warning colour, because
