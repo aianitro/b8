@@ -114,8 +114,16 @@ function Row({
         // target showed none. A budgeted current month now always prints its plan. With no budget
         // there is still nothing to say, so it stays bare rather than printing "no budget" under
         // every unbudgeted category for a month that has barely started.
+        //
+        // A refund month is not exempt. An expense category that nets negative — September's
+        // Clothes/Beauty at +$404, where returns outran purchases — used to be excluded here
+        // along with the income rows, and so printed a figure with nothing to read it against.
+        // The plan does not stop existing because the money went the other way: $550 is still
+        // what the month was given, and mid-month that is the number being asked for. Only the
+        // inverse case still overrides the plan line — an income category netting an expense,
+        // which is reported as `unexpected` below, because there the finding is not the amount.
         const showPlan =
-          !isFuture && !isNetIncome && (amount !== 0 || (i === currentMonth && monthBudget > 0));
+          !isFuture && (amount !== 0 || (i === currentMonth && monthBudget > 0));
         const upcoming = row.months_upcoming[i];
         // Expense category projecting negative means the remaining budget is already
         // spent — no room left in the months ahead at the current pace.
