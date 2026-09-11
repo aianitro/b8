@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import db from '@/lib/db';
 import { daysInMonth } from '@/lib/domain/pacing';
+import { loadYearEnd } from '@/lib/yearEndRead';
 import type { BudgetSummary, Landscape } from '@/shared/types';
 import BudgetMonthlyGrid from '@/components/BudgetMonthlyGrid';
 import BudgetViewToggle from '@/components/BudgetViewToggle';
@@ -198,13 +199,14 @@ export default async function BudgetPage({ searchParams }: PageProps) {
 
   const year = new Date().getFullYear();
 
-  const [summary, uncategorized, settingsRow] = await Promise.all([
+  const [summary, uncategorized, settingsRow, yearEnd] = await Promise.all([
     getBudgetSummary(),
     getUncategorized(landscape),
     db.query<{ beginning_balance: string }>(
       'SELECT beginning_balance FROM budget_settings WHERE year = $1 AND landscape = $2',
       [year, landscape]
     ),
+    loadYearEnd(landscape, { year, month: new Date().getMonth() }),
   ]);
 
   const beginningBalance = Number(settingsRow.rows[0]?.beginning_balance ?? 0);
@@ -243,40 +245,9 @@ export default async function BudgetPage({ searchParams }: PageProps) {
 
   // Profit and loss for the year. Income rows carry the ledger's sign, where money in is negative,
   // so they are flipped once here and read as "received" everywhere below.
-  const incomeRows   = summary.filter((r) => r.landscape === landscape && r.is_income);
-  const incomeActual = -incomeRows.reduce((s, r) => s + Number(r.ytd_spent), 0);
-  //
-  // Where the year lands if the rest of it goes to plan. Deliberately not incomeBudget minus
-  // totalBudget, which is the plan talking to itself and would not move however the year went;
-  // and not the year-to-date net either, which mid-year is a partial month of pay against a full
-  // one of spending. Closed months are fact, the current month is plan-or-actual whichever is
-  // larger, and the rest is plan -- the same rule the monthly grid's own forecast rows use, so
-  // the card and the December column beneath it cannot disagree.
-  // `sign` flips income's ledger convention so both sides read as positive magnitudes.
-  const projectedFor = (rows: SummaryRow[], sign: 1 | -1) => rows.reduce((sum, r) => {
-    const m = schedule(r);
-    const closed  = sign * Number(r.closed_months);
-    const current = sign * Number(r.current_month);
-    return sum + closed + Math.max(current, m[monthIdx])
-               + m.slice(monthIdx + 1).reduce((s, n) => s + n, 0);
-  }, 0);
-  // Uncategorized money counts. It has no schedule and nothing to project, so it enters as the
-  // actual it already is — but leaving it out entirely made this card disagree with the monthly
-  // grid directly beneath it by the full amount: a single uncategorized $2,175.32 payment put the
-  // December closing balance $2,175 above the P/L plus the opening balance, with nothing on screen
-  // explaining the difference. The grid has always counted it (see `uncategorizedIncome` in
-  // BudgetMonthlyGridClient.tsx); the card simply never asked.
-  //
-  // It stays in the figure rather than being suppressed until someone files it. Money that arrived
-  // is money that arrived, and a P/L that waits for the categorisation to catch up is wrong in the
-  // meantime — quietly, and in whichever direction the unfiled rows happen to point.
-  const uncatIn  = Number(uncategorized?.total_in ?? 0);
-  const uncatOut = Number(uncategorized?.total_out ?? 0);
-
-  const projectedIncome  = projectedFor(incomeRows, -1) + uncatIn;
-  const projectedExpense = projectedFor(expenseRows, 1) + uncatOut;
-  const projectedPL      = projectedIncome - projectedExpense;
-  const netToDate        = incomeActual + uncatIn - (totalSpent + uncatOut);
+  // Where the year lands, from the one reader the dashboard also uses — see lib/yearEndRead.ts for
+  // why this is not computed here any more.
+  const { profitLoss: projectedPL, netToDate } = yearEnd;
 
   return (
     <div className={view === 'monthly' ? 'p-8' : 'p-8 max-w-4xl mx-auto'}>

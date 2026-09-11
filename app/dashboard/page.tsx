@@ -27,6 +27,7 @@ import { asOfFromDate, type MonthOutlook, type OutlookCategory, type OutlookStat
 // of the same figures one directory apart. Nothing a reader sees changed — the queries moved
 // verbatim, and the page is touched here only by a deletion and this import.
 import { loadMonthOutlook } from '@/lib/monthOutlookRead';
+import { loadYearEnd } from '@/lib/yearEndRead';
 import { MONTHS, drillHref } from '@/lib/drilldown';
 // The calendar rule, imported rather than restated: `./pacing` exports it precisely so a caller
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
@@ -568,11 +569,15 @@ export default async function DashboardPage() {
   const driftPromise = findBalanceDrift();
   const feedPromise = loadFeedHealth();
   const [stats, monthRead, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual,
-         recentArrivals] =
+         recentArrivals, yearEnd] =
     await Promise.all([
       getStats(asOf), loadMonthOutlook(asOf), getCashFlowSeries(asOf),
       getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCashFlow(asOf), getCategoryBreakdown(asOf),
       getBudgetVsActual(asOf), getRecentArrivals(),
+      // Operational, matching /budget's default tab, so the two pages show the same figure. The
+      // capital year is lumpy by construction — a remodel draws $40,000 in May — and averaging it
+      // in would give a P/L nobody is steering by.
+      loadYearEnd('operational', asOf),
     ]);
   const [driftFindings, feedFindings] = await Promise.all([driftPromise, feedPromise]);
 
@@ -903,7 +908,17 @@ export default async function DashboardPage() {
           to sit here counted the current month as fully elapsed — 33% of the year on 1 April
           against a true 25% — which inflated expected spend and flattered the pace. It is deleted
           rather than repaired: the per-category month above is the figure the page exists for. */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {/* The same figure /budget's header carries, from the same reader — where the operational
+            year closes if the plan holds. It leads the row because it is the only one of these
+            four that is a target rather than a count. */}
+        <KpiCard
+          label="Projected P/L"
+          value={`${yearEnd.profitLoss < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.profitLoss))}`}
+          sub={`${yearEnd.netToDate < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.netToDate))} so far`}
+          highlight={yearEnd.profitLoss < 0 ? 'red' : 'green'}
+          href="/budget"
+        />
         <KpiCard label="Annual Budget" value={fmt(stats.budget)} />
         <KpiCard
           label="Remaining"
