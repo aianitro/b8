@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import db from '@/lib/db';
 import { daysInMonth } from '@/lib/domain/pacing';
+import { projectYearEnd, type YearEndRow } from '@/lib/domain/yearEnd';
 import type { BudgetSummary, Landscape } from '@/shared/types';
 import BudgetMonthlyGrid from '@/components/BudgetMonthlyGrid';
 import BudgetViewToggle from '@/components/BudgetViewToggle';
@@ -252,17 +253,15 @@ export default async function BudgetPage({ searchParams }: PageProps) {
   // one of spending. Closed months are fact, the current month is plan-or-actual whichever is
   // larger, and the rest is plan -- the same rule the monthly grid's own forecast rows use, so
   // the card and the December column beneath it cannot disagree.
-  // `sign` flips income's ledger convention so both sides read as positive magnitudes.
-  const projectedFor = (rows: SummaryRow[], sign: 1 | -1) => rows.reduce((sum, r) => {
-    const m = schedule(r);
-    const closed  = sign * Number(r.closed_months);
-    const current = sign * Number(r.current_month);
-    return sum + closed + Math.max(current, m[monthIdx])
-               + m.slice(monthIdx + 1).reduce((s, n) => s + n, 0);
-  }, 0);
-  const projectedIncome  = projectedFor(incomeRows, -1);
-  const projectedExpense = projectedFor(expenseRows, 1);
-  const projectedPL      = projectedIncome - projectedExpense;
+  const toYearEndRow = (r: SummaryRow): YearEndRow => ({
+    annualBudget: Number(r.annual_budget),
+    monthlyAmounts: r.monthly_amounts?.length === 12 ? r.monthly_amounts.map(Number) : null,
+    closedMonths: Number(r.closed_months),
+    currentMonth: Number(r.current_month),
+  });
+  const { profitLoss: projectedPL } = projectYearEnd(
+    incomeRows.map(toYearEndRow), expenseRows.map(toYearEndRow), monthIdx
+  );
   const netToDate        = incomeActual - totalSpent;
 
   return (
