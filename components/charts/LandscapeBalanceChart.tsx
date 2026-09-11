@@ -22,6 +22,11 @@ const fmt = (v: number | undefined) =>
 // hero reading several times larger and invited the reader to assume one explained the other.
 // The dashboard already renamed its data `cashFlowSeries`; this is the title catching up.
 export default function LandscapeBalanceChart({ data }: { data: LandscapeBalancePoint[] }) {
+  // With no capital series, `total` is `operational` — two lines drawn over each other, one of
+  // them in a colour whose legend entry points at data that is not there. Both are dropped rather
+  // than drawn flat at zero, which would read as a book that holds nothing rather than a book that
+  // is not on this chart.
+  const hasCapital = data.some((d) => d.capital !== 0);
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Account Balances Over Time</p>
@@ -38,8 +43,12 @@ export default function LandscapeBalanceChart({ data }: { data: LandscapeBalance
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: '#64748b' }} />
           <ReferenceLine y={0} stroke="#e2e8f0" />
           <Line dataKey="operational" name="Operational" type="monotone" stroke={LANDSCAPE_HEX.operational} strokeWidth={1.5} dot={{ r: 2.5 }} />
-          <Line dataKey="capital" name="Capital" type="monotone" stroke={LANDSCAPE_HEX.capital} strokeWidth={1.5} dot={{ r: 2.5 }} />
-          <Line dataKey="total" name="Total" type="monotone" stroke="#1e293b" strokeWidth={2.5} dot={{ r: 3, fill: '#1e293b' }} />
+          {hasCapital && (
+            <Line dataKey="capital" name="Capital" type="monotone" stroke={LANDSCAPE_HEX.capital} strokeWidth={1.5} dot={{ r: 2.5 }} />
+          )}
+          {hasCapital && (
+            <Line dataKey="total" name="Total" type="monotone" stroke="#1e293b" strokeWidth={2.5} dot={{ r: 3, fill: '#1e293b' }} />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </div>
