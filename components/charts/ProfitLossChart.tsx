@@ -17,6 +17,9 @@ export interface ProfitLossPoint {
   plProjected: number | null;
 }
 
+/** Pixels. Paired with an equal and opposite `barGap` so the two series share one column. */
+const BAR_WIDTH = 40;
+
 const fmt = (v: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v);
 
@@ -47,16 +50,21 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
         Bars: money in above the line, money out below · Line: cumulative income less spending, dashed once forecast
       </p>
       <ResponsiveContainer width="100%" height={260}>
-        {/* `barGap="-100%"` puts the two bars in ONE column instead of side by side, which is what
-            makes money in sit directly above the money out it has to cover.
-            
+        {/* One column for the pair, so money in sits exactly above the money out it has to cover.
+            `barSize` and `barGap` are both EXPLICIT PIXELS and they are the same number: Recharts
+            lays the second bar at `first.x + barSize + barGap`, so equal magnitudes cancel to zero
+            and the two share an origin. Expressed as `barGap="-100%"` it was a percentage of a
+            width Recharts derives from the category, and the rounding left the bars a pixel or two
+            apart — close enough to look like a glitch and far enough to be one.
+
             Not a shared `stackId`: Recharts stacks by accumulation, so [+7,631, −3,312] becomes a
             running total — the negative eats into the positive and both rects come out sharing a
-            top edge, drawing money out as a slice of money in. And not `stackOffset="sign"`, which
-            is the documented fix for that and hangs the renderer outright on this chart, mixing
-            bars and a null-gapped line. Full overlap needs neither: the two series have opposite
-            signs, so they can never collide vertically. */}
-        <ComposedChart data={data} barGap="-100%" margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+            top edge, drawing money out as a slice of money in. And not `stackOffset="sign"`, the
+            documented fix for that, which hangs the renderer outright on this chart, mixing bars
+            and a null-gapped line. Overlap needs neither: the two series have opposite signs, so
+            they can never collide vertically. */}
+        <ComposedChart data={data} barSize={BAR_WIDTH} barGap={-BAR_WIDTH}
+                       margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
           <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} />
