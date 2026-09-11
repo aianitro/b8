@@ -3,13 +3,14 @@ export const dynamic = 'force-dynamic';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import db from '@/lib/db';
+import { daysInMonth } from '@/lib/domain/pacing';
 import type { BudgetSummary, Landscape } from '@/shared/types';
 import BudgetMonthlyGrid from '@/components/BudgetMonthlyGrid';
 import BudgetViewToggle from '@/components/BudgetViewToggle';
 import BudgetTabsToggle from '@/components/BudgetTabsToggle';
 import BeginningBalanceEdit from '@/components/BeginningBalanceEdit';
 
-type SummaryRow = BudgetSummary & { landscape: Landscape; is_income: boolean };
+type SummaryRow = BudgetSummary & { landscape: Landscape; is_income: boolean; monthly_amounts: string[] | null };
 interface UncategorizedRow { landscape: Landscape; count: string; total_out: string; total_in: string; }
 
 const fmt = (n: number) =>
@@ -19,7 +20,7 @@ const pct = (spent: number, budget: number) =>
 
 async function getBudgetSummary(): Promise<SummaryRow[]> {
   const result = await db.query<SummaryRow>(`
-    SELECT bc.name AS category, bc.landscape, bc.is_income, bc.annual_budget,
+    SELECT bc.name AS category, bc.landscape, bc.is_income, bc.annual_budget, bc.monthly_amounts,
            COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)                    AS ytd_spent,
            bc.annual_budget - COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0) AS remaining,
            ROUND(bc.annual_budget / 12, 2)                                            AS monthly_reference
@@ -30,7 +31,7 @@ async function getBudgetSummary(): Promise<SummaryRow[]> {
     LEFT JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
     WHERE bc.exclude_from_budget = FALSE
       AND (t.id IS NULL OR a.id IS NOT NULL)
-    GROUP BY bc.name, bc.landscape, bc.is_income, bc.annual_budget ORDER BY bc.name
+    GROUP BY bc.name, bc.landscape, bc.is_income, bc.annual_budget, bc.monthly_amounts ORDER BY bc.name
   `);
   return result.rows;
 }
@@ -196,8 +197,32 @@ export default async function BudgetPage({ searchParams }: PageProps) {
   const totalBudget = expenseRows.reduce((s, r) => s + Number(r.annual_budget), 0);
   const totalSpent  = expenseRows.reduce((s, r) => s + Number(r.ytd_spent), 0);
   const totalRemaining = totalBudget - totalSpent;
-  const monthsElapsed = new Date().getMonth() + 1;
-  const expectedSpend = (totalBudget / 12) * monthsElapsed;
+  // What the plan says should have been spent by today — the figure the on-track pill is decided
+  // on, and the one printed under YTD Spent.
+  //
+  // It used to be `annual / 12 * monthsElapsed`, which is wrong twice over. It spread every budget
+  // evenly no matter what schedule the category actually carries: property tax is two bills, April
+  // and November, so by the end of September the plan expects one of them — $7,680 — while a flat
+  // twelfth expected $11,535, a November bill part-paid since January. The errors ran both ways
+  // across categories (`One time` was understated by $6,350 by the same rule) and largely
+  // cancelled, which made the total look defensible and was luck rather than correctness.
+  //
+  // And it counted the current month as fully elapsed, so on the 10th it already expected all of
+  // September. lib/domain/pacing.ts names that convention and rejects it for flattering the pace;
+  // this now uses the same one it does — the day counts as elapsed, so the fraction runs from
+  // 1/31 to 1 and is never zero.
+  const now = new Date();
+  const monthIdx = now.getMonth();
+  const elapsedFraction = now.getDate() / daysInMonth(now.getFullYear(), monthIdx);
+  const schedule = (r: SummaryRow): number[] =>
+    r.monthly_amounts?.length === 12
+      ? r.monthly_amounts.map(Number)
+      : new Array(12).fill(Number(r.annual_budget) / 12);
+  const expectedSpend = expenseRows.reduce((sum, r) => {
+    const m = schedule(r);
+    const closedMonths = m.slice(0, monthIdx).reduce((s, n) => s + n, 0);
+    return sum + closedMonths + m[monthIdx] * elapsedFraction;
+  }, 0);
   const onTrack = totalSpent <= expectedSpend;
 
   return (
