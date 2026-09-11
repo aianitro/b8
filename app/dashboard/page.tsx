@@ -94,7 +94,10 @@ async function getCashFlowSeries(asOf: DashboardAsOf): Promise<{
 }> {
   const [accountsRes, netRes, balancesRes] = await Promise.all([
     db.query<{ id: string; landscape: string }>(
-      'SELECT id, landscape FROM accounts WHERE track_transactions = TRUE'
+      // The balance series is built by walking accounts, so it is the one query on this page
+      // scoped by the ACCOUNT's landscape rather than the category's — there is no category to
+      // ask, and an account's own book is what its balance belongs to.
+      "SELECT id, landscape FROM accounts WHERE track_transactions = TRUE AND landscape = 'operational'" 
     ),
     db.query<{ account_id: string; month: number; net: string }>(`
       SELECT t.account_id,
@@ -190,7 +193,7 @@ async function getTodayStats(): Promise<TodayStats> {
       LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
       WHERE t.date = CURRENT_DATE
         AND t.hidden = FALSE
-        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
     `),
     // Average of the same weekday's total spend over the trailing 30 days (excluding today) —
     // "is today unusual" without building full anomaly detection.
@@ -205,7 +208,7 @@ async function getTodayStats(): Promise<TodayStats> {
           AND t.date < CURRENT_DATE
           AND EXTRACT(DOW FROM t.date) = EXTRACT(DOW FROM CURRENT_DATE)
           AND t.hidden = FALSE
-          AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+          AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
         GROUP BY t.date
       ) daily
     `),
@@ -246,7 +249,7 @@ async function getWeekStats(): Promise<WeekStats> {
       LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
       WHERE t.date >= date_trunc('week', CURRENT_DATE)
         AND t.hidden = FALSE
-        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
     `),
     // Same portion of the week, shifted back exactly 7 days — a fair week-over-week comparison
     // regardless of which day of the week "today" is.
@@ -258,7 +261,7 @@ async function getWeekStats(): Promise<WeekStats> {
       WHERE t.date >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 days'
         AND t.date <= CURRENT_DATE - INTERVAL '7 days'
         AND t.hidden = FALSE
-        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
     `),
     db.query<{ weekly_budget: string }>(`
       SELECT COALESCE(SUM(annual_budget) / 52, 0)::text AS weekly_budget
@@ -275,19 +278,34 @@ async function getWeekStats(): Promise<WeekStats> {
 
 async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpendingData[]> {
   const [spending, budgets] = await Promise.all([
-    db.query<{ month_num: number; landscape: string; total: number }>(`
-      SELECT EXTRACT(MONTH FROM t.date)::int AS month_num, a.landscape,
+    // No landscape in the grouping any more. The WHERE clause already admits operational
+    // categories only, so everything this returns IS operational spend — but it used to be
+    // bucketed by the ACCOUNT's landscape, and 14 transactions this year carry an operational
+    // category on a capital account. Those $10 were filed as capital, which was enough to keep a
+    // Capital bar and a capital budget line in the legend of a chart with no capital data in it.
+    //
+    // Landscape belongs to the category, not to the card that happened to pay. That is already
+    // this repo's rule everywhere a verdict is computed; this query was splitting one book in two
+    // on the strength of which account a charge landed on.
+    db.query<{ month_num: number; total: number }>(`
+      SELECT EXTRACT(MONTH FROM t.date)::int AS month_num,
              COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0) AS total
       FROM transactions t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
       LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
       WHERE EXTRACT(YEAR FROM t.date) = $1
-        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
         AND t.hidden = FALSE
-      GROUP BY month_num, a.landscape
+      GROUP BY month_num
     `, [asOf.year]),
     db.query<{ landscape: string; monthly_budget: number }>(
-      'SELECT landscape, SUM(annual_budget)/12 AS monthly_budget FROM budget_categories WHERE exclude_from_budget = FALSE GROUP BY landscape'
+      // Operational only, and expenses only. The income side carries an `annual_budget` too, and
+      // summing it into a SPEND reference line put the whole salary above the bars it was meant to
+      // be measured against.
+      `SELECT landscape, SUM(annual_budget)/12 AS monthly_budget
+         FROM budget_categories
+        WHERE exclude_from_budget = FALSE AND is_income = FALSE AND landscape = 'operational'
+        GROUP BY landscape`
     ),
   ]);
   const monthlyBudget: Record<string, number> = {};
@@ -298,9 +316,7 @@ async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpendingD
     budget_capital: monthlyBudget['capital'] ?? 0,
   });
   for (const r of spending.rows) {
-    const row = rows[r.month_num - 1];
-    if (r.landscape === 'operational') row.operational = Number(r.total);
-    if (r.landscape === 'capital') row.capital = Number(r.total);
+    rows[r.month_num - 1].operational = Number(r.total);
   }
   return rows;
 }
@@ -314,7 +330,7 @@ async function getCashFlow(asOf: DashboardAsOf): Promise<CashFlowData[]> {
     JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
     LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
     WHERE EXTRACT(YEAR FROM t.date) = $1
-      AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+      AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
       AND t.hidden = FALSE
     GROUP BY month_num ORDER BY month_num
   `, [asOf.year]);
@@ -332,7 +348,7 @@ async function getCategoryBreakdown(asOf: DashboardAsOf): Promise<CategorySlice[
            SUM(t.amount) FILTER (WHERE t.amount > 0) AS value
     FROM transactions t
     JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-    JOIN budget_categories bc ON bc.name = t.mapped_category
+    JOIN budget_categories bc ON bc.name = t.mapped_category AND bc.landscape = 'operational'
     WHERE t.mapped_category IS NOT NULL
       AND bc.exclude_from_budget = FALSE
       AND t.hidden = FALSE
@@ -354,6 +370,8 @@ async function getBudgetVsActual(asOf: DashboardAsOf): Promise<BudgetVsActualRow
       AND t.hidden = FALSE
     LEFT JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
     WHERE bc.exclude_from_budget = FALSE
+      AND bc.landscape = 'operational'
+      AND bc.is_income = FALSE
       AND (t.id IS NULL OR a.id IS NOT NULL)
     GROUP BY bc.name, bc.landscape, bc.annual_budget
     ORDER BY bc.landscape, spent DESC

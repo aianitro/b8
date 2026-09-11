@@ -18,6 +18,9 @@ const fmt = (v: number | undefined) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v ?? 0);
 
 export default function MonthlySpendingChart({ data }: { data: MonthlySpendingData[] }) {
+  // A stacked bar with an empty second series is a stack of one, and its legend entry and dashed
+  // budget line both advertise a book this chart is no longer showing.
+  const hasCapital = data.some((d) => d.capital !== 0 || d.budget_capital !== 0);
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-5">Monthly Spending</p>
@@ -32,9 +35,13 @@ export default function MonthlySpendingChart({ data }: { data: MonthlySpendingDa
           />
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: '#64748b' }} />
           <Bar dataKey="operational" name="Operational" stackId="a" fill={LANDSCAPE_HEX.operational} />
-          <Bar dataKey="capital" name="Capital" stackId="a" fill={LANDSCAPE_HEX.capital} radius={[3, 3, 0, 0]} />
+          {hasCapital && (
+            <Bar dataKey="capital" name="Capital" stackId="a" fill={LANDSCAPE_HEX.capital} radius={[3, 3, 0, 0]} />
+          )}
           <Line dataKey="budget_operational" name="Op. budget/mo" type="monotone" stroke={LANDSCAPE_HEX_LIGHT.operational} strokeDasharray="4 2" dot={false} strokeWidth={1.5} />
-          <Line dataKey="budget_capital" name="Cap. budget/mo" type="monotone" stroke={LANDSCAPE_HEX_LIGHT.capital} strokeDasharray="4 2" dot={false} strokeWidth={1.5} />
+          {hasCapital && (
+            <Line dataKey="budget_capital" name="Cap. budget/mo" type="monotone" stroke={LANDSCAPE_HEX_LIGHT.capital} strokeDasharray="4 2" dot={false} strokeWidth={1.5} />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
     </div>
