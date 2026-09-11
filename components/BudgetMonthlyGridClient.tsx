@@ -128,9 +128,12 @@ function Row({
         // Expense category projecting negative means the remaining budget is already
         // spent — no room left in the months ahead at the current pace.
         const upcomingOver = isFuture && !row.is_income && upcoming < 0;
+        // A month that has happened has transactions to look at; one that has not has only its
+        // plan, so the cell leads to where that plan is changed instead. Both directions answer
+        // the question the cell provokes — "what made this figure", or "what should it be".
         const drillHref = !isFuture
           ? `/transactions?category=${encodeURIComponent(row.category)}&month=${i + 1}`
-          : undefined;
+          : `/categories/${encodeURIComponent(row.category)}`;
 
         let bg: string, text: string;
         if (isNetIncome) {
@@ -186,8 +189,10 @@ function Row({
           ? 'no budget expected this month'
           : `${pct}% of ${fmtFull(monthBudget)}`;
         const futureTitle = upcoming !== 0
-          ? `${MONTHS[i]}: ${fmtFull(Math.abs(upcoming))} projected (${hasSchedule ? 'scheduled' : 'remaining budget ÷ months left'})`
-          : MONTHS[i];
+          ? `${MONTHS[i]}: ${fmtFull(Math.abs(upcoming))} projected (${hasSchedule ? 'scheduled' : 'remaining budget ÷ months left'}) — click to adjust`
+          // An empty future cell is the one most worth clicking and the one that looks least
+          // clickable, so the tooltip has to say what is there to do.
+          : `${MONTHS[i]}: nothing budgeted — click to set an amount`;
 
         return (
           <td
@@ -198,13 +203,9 @@ function Row({
             // vanished and the quarter read as one merged cell — most visibly on a row that is
             // mostly empty, where a lone November figure floated in a wide blank block with no
             // column to belong to.
-            className={`p-0 text-right text-xs min-w-[56px] border-r ${isFuture ? 'border-slate-200' : 'border-slate-50'} transition-colors ${bg} ${text} ${i === currentMonth ? 'ring-1 ring-inset ring-blue-200' : ''} ${!isFuture ? 'hover:brightness-95' : ''}`}
+            className={`p-0 text-right text-xs min-w-[56px] border-r ${isFuture ? 'border-slate-200' : 'border-slate-50'} transition-colors ${bg} ${text} ${i === currentMonth ? 'ring-1 ring-inset ring-blue-200' : ''} hover:brightness-95`}
           >
-            {drillHref ? (
-              <a href={drillHref} className="block px-2 py-1.5 w-full h-full">{inner}</a>
-            ) : (
-              <div className="px-2 py-1.5">{inner}</div>
-            )}
+            <a href={drillHref} className="block px-2 py-1.5 w-full h-full">{inner}</a>
           </td>
         );
       })}
