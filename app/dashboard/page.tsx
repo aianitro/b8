@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import db from '@/lib/db';
-import MonthlySpendingChart, { type MonthlySpendingData } from '@/components/charts/MonthlySpendingChart';
 import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
 import CategoryDonutChart, { type CategorySlice } from '@/components/charts/CategoryDonutChart';
 import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts/BudgetVsActualChart';
@@ -86,6 +85,8 @@ async function getStats(asOf: DashboardAsOf) {
   };
 }
 
+
+interface MonthlySpend { month: string; operational: number }
 
 interface TodayStats {
   spent: number;
@@ -226,49 +227,26 @@ async function getWeekStats(): Promise<WeekStats> {
   };
 }
 
-async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpendingData[]> {
-  const [spending, budgets] = await Promise.all([
-    // No landscape in the grouping any more. The WHERE clause already admits operational
-    // categories only, so everything this returns IS operational spend — but it used to be
-    // bucketed by the ACCOUNT's landscape, and 14 transactions this year carry an operational
-    // category on a capital account. Those $10 were filed as capital, which was enough to keep a
-    // Capital bar and a capital budget line in the legend of a chart with no capital data in it.
-    //
-    // Landscape belongs to the category, not to the card that happened to pay. That is already
-    // this repo's rule everywhere a verdict is computed; this query was splitting one book in two
-    // on the strength of which account a charge landed on.
-    db.query<{ month_num: number; total: number }>(`
-      SELECT EXTRACT(MONTH FROM t.date)::int AS month_num,
-             COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0) AS total
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-      LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
-      WHERE EXTRACT(YEAR FROM t.date) = $1
-        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
-        AND t.hidden = FALSE
-      GROUP BY month_num
-    `, [asOf.year]),
-    db.query<{ landscape: string; monthly_budget: number }>(
-      // Operational only, and expenses only. The income side carries an `annual_budget` too, and
-      // summing it into a SPEND reference line put the whole salary above the bars it was meant to
-      // be measured against.
-      `SELECT landscape, SUM(annual_budget)/12 AS monthly_budget
-         FROM budget_categories
-        WHERE exclude_from_budget = FALSE AND is_income = FALSE AND landscape = 'operational'
-        GROUP BY landscape`
-    ),
-  ]);
-  const monthlyBudget: Record<string, number> = {};
-  for (const r of budgets.rows) monthlyBudget[r.landscape] = Number(r.monthly_budget);
-  const rows = blankMonths<Omit<MonthlySpendingData, 'month'>>({
-    operational: 0, capital: 0,
-    budget_operational: monthlyBudget['operational'] ?? 0,
-    budget_capital: monthlyBudget['capital'] ?? 0,
-  });
-  for (const r of spending.rows) {
-    rows[r.month_num - 1].operational = Number(r.total);
-  }
-  return rows;
+/** Operational spending per elapsed month, for the bars behind the P/L line. */
+async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpend[]> {
+  // The budget-per-month reference this used to fetch alongside is gone with the line it drew.
+  // It summed every category including income, so it put the whole salary above the bars it was
+  // meant to measure — and the P/L line now answers "are we ahead" better than a flat average did.
+  const { rows } = await db.query<{ month_num: number; total: string }>(`
+    SELECT EXTRACT(MONTH FROM t.date)::int AS month_num,
+           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS total
+    FROM transactions t
+    JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+    LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
+    WHERE EXTRACT(YEAR FROM t.date) = $1
+      AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
+      AND t.hidden = FALSE
+    GROUP BY month_num
+  `, [asOf.year]);
+
+  const out: MonthlySpend[] = MONTHS.map((month) => ({ month, operational: 0 }));
+  for (const r of rows) out[r.month_num - 1].operational = Number(r.total);
+  return out;
 }
 
 async function getCashFlow(asOf: DashboardAsOf): Promise<CashFlowData[]> {
@@ -579,6 +557,9 @@ export default async function DashboardPage() {
   const lastSettled = asOf.month - 1;
   const plSeries = MONTHS.map((month, i) => ({
     month,
+    // Bars stop where the data does. A future month drawn at $0 reads as a month that cost
+    // nothing, which is a claim; absent reads as not yet, which is the truth.
+    spent: i <= asOf.month ? (monthly[i]?.operational ?? 0) : null,
     pl: i <= lastSettled ? yearEnd.monthly[i].cumulative : null,
     plProjected: i >= lastSettled ? yearEnd.monthly[i].cumulative : null,
   }));
@@ -908,7 +889,6 @@ export default async function DashboardPage() {
       {/* Charts */}
       <div className="space-y-6">
         <ProfitLossChart data={plSeries} />
-        <MonthlySpendingChart data={monthly} />
         <div className="grid grid-cols-2 gap-6">
           <CategoryDonutChart data={breakdown} />
           <CashFlowChart data={cashflow} />

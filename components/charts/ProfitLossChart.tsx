@@ -1,12 +1,14 @@
 'use client';
 
 import {
-  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { STATUS_HEX } from '@/lib/chartColors';
+import { LANDSCAPE_HEX, STATUS_HEX } from '@/lib/chartColors';
 
 export interface ProfitLossPoint {
   month: string;
+  /** Operational spending in this month alone. Null for months that have not happened. */
+  spent: number | null;
   /** Cumulative P/L for settled months; null once the year turns to forecast. */
   pl: number | null;
   /** The same series from the last settled month onward, drawn dashed. */
@@ -17,7 +19,16 @@ const fmt = (v: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v);
 
 /**
- * Income less spending, accumulated from January and carried to December.
+ * The year in one frame: what each month cost, and where that leaves the running total.
+ *
+ * Bars and line share ONE axis rather than being split across a left and a right. A second scale
+ * would let the two be slid against each other until they told whatever story the axis ranges
+ * happened to imply — the standard way a combo chart lies — and both series are dollars, so there
+ * is no reason to. The cost is that the bars occupy the upper band and the line swings below; the
+ * benefit is that a $30,000 bar and a $30,000 drop are the same height.
+ *
+ * Merged from two separate widgets. Read apart, "this month cost $26,000" and "the year is
+ * $32,000 down" are two facts; read together they are one sentence, and June is where you see it.
  *
  * This chart used to also plot the operational account BALANCE, and the two were routinely read as
  * one thing. They are not: a balance starts at whatever cash was in the accounts and moves on every
@@ -31,7 +42,7 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Profit &amp; Loss</p>
       <p className="text-[11px] text-slate-400 mb-4">
-        Operational income less spending, cumulative from January · dashed once forecast
+        Bars: operational spending each month · Line: cumulative income less spending, dashed once forecast
       </p>
       <ResponsiveContainer width="100%" height={260}>
         <ComposedChart data={data} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
@@ -46,12 +57,15 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
           {/* Break-even. On a P/L the zero line is the whole verdict — above it the year is up,
               below it the year is down — so it is drawn darker than the grid behind it. */}
           <ReferenceLine y={0} stroke="#cbd5e1" strokeWidth={1} />
+          {/* Behind the line, and muted: the bars are the context, the running total is the point. */}
+          <Bar dataKey="spent" name="Spent that month" fill={LANDSCAPE_HEX.operational}
+               fillOpacity={0.25} radius={[3, 3, 0, 0]} />
           {/* Two series, because Recharts cannot change a line's dash mid-path. They share the last
               settled month so the join is continuous rather than leaving a gap at exactly the
               boundary between what happened and what is expected. */}
-          <Line dataKey="pl" name="Actual" type="monotone" stroke={STATUS_HEX.good}
+          <Line dataKey="pl" name="P/L to date" type="monotone" stroke={STATUS_HEX.good}
                 strokeWidth={2.5} dot={{ r: 3 }} connectNulls={false} />
-          <Line dataKey="plProjected" name="Projected" type="monotone" stroke={STATUS_HEX.good}
+          <Line dataKey="plProjected" name="P/L projected" type="monotone" stroke={STATUS_HEX.good}
                 strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2.5 }} connectNulls={false} />
         </ComposedChart>
       </ResponsiveContainer>
