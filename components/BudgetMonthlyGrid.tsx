@@ -63,7 +63,7 @@ function monthsUpcoming(
   // sign on screen contradicting the sign in the sum, three months running. A category with
   // nothing planned projects nothing.
   const perMonth = (annual - ytd) / remainingMonths;
-  const projected = isIncome ? Math.max(0, perMonth) : perMonth;
+  const projected = isIncome && perMonth < 0 ? 0 : perMonth;
   for (let i = currentMonth + 1; i < 12; i++) upcoming[i] = projected;
   return upcoming;
 }

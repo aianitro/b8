@@ -260,10 +260,23 @@ export default async function BudgetPage({ searchParams }: PageProps) {
     return sum + closed + Math.max(current, m[monthIdx])
                + m.slice(monthIdx + 1).reduce((s, n) => s + n, 0);
   }, 0);
-  const projectedIncome  = projectedFor(incomeRows, -1);
-  const projectedExpense = projectedFor(expenseRows, 1);
+  // Uncategorized money counts. It has no schedule and nothing to project, so it enters as the
+  // actual it already is — but leaving it out entirely made this card disagree with the monthly
+  // grid directly beneath it by the full amount: a single uncategorized $2,175.32 payment put the
+  // December closing balance $2,175 above the P/L plus the opening balance, with nothing on screen
+  // explaining the difference. The grid has always counted it (see `uncategorizedIncome` in
+  // BudgetMonthlyGridClient.tsx); the card simply never asked.
+  //
+  // It stays in the figure rather than being suppressed until someone files it. Money that arrived
+  // is money that arrived, and a P/L that waits for the categorisation to catch up is wrong in the
+  // meantime — quietly, and in whichever direction the unfiled rows happen to point.
+  const uncatIn  = Number(uncategorized?.total_in ?? 0);
+  const uncatOut = Number(uncategorized?.total_out ?? 0);
+
+  const projectedIncome  = projectedFor(incomeRows, -1) + uncatIn;
+  const projectedExpense = projectedFor(expenseRows, 1) + uncatOut;
   const projectedPL      = projectedIncome - projectedExpense;
-  const netToDate        = incomeActual - totalSpent;
+  const netToDate        = incomeActual + uncatIn - (totalSpent + uncatOut);
 
   return (
     <div className={view === 'monthly' ? 'p-8' : 'p-8 max-w-4xl mx-auto'}>
