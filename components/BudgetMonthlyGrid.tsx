@@ -45,7 +45,8 @@ function monthsUpcoming(
   monthlyAmounts: number[] | null,
   monthsBudgetArr: number[],
   ytd: number,
-  currentMonth: number
+  currentMonth: number,
+  isIncome: boolean
 ): number[] {
   const upcoming = new Array(12).fill(0);
   if (monthlyAmounts) {
@@ -54,8 +55,16 @@ function monthsUpcoming(
   }
   const remainingMonths = 12 - currentMonth;
   if (remainingMonths <= 0) return upcoming;
+  // Negative is meaningful on an expense — the budget is spent, no room is left, and the cell
+  // grades itself red on it. On INCOME it is nonsense: `Other income (O)` carries no budget and no
+  // schedule, so a year's $862 of receipts projected (0 − 862) / 4 = −$215.50 into each remaining
+  // month, money flowing backwards out of a category that has only ever taken it in. The cell then
+  // printed `fmt(Math.abs(upcoming))`, showing $215 while the totals row subtracted $215.50 — the
+  // sign on screen contradicting the sign in the sum, three months running. A category with
+  // nothing planned projects nothing.
   const perMonth = (annual - ytd) / remainingMonths;
-  for (let i = currentMonth + 1; i < 12; i++) upcoming[i] = perMonth;
+  const projected = isIncome ? Math.max(0, perMonth) : perMonth;
+  for (let i = currentMonth + 1; i < 12; i++) upcoming[i] = projected;
   return upcoming;
 }
 
@@ -115,7 +124,8 @@ async function getGridData(landscape: Landscape, currentMonth: number): Promise<
       entry.monthly_amounts,
       entry.months_budget,
       entry.ytd,
-      currentMonth
+      currentMonth,
+      entry.is_income
     );
   }
 
