@@ -12,6 +12,7 @@ import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
+import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbles';
 import { loadFeedHealth } from '@/lib/feedHealthRead';
 import UnscoredBreaches from '@/components/UnscoredBreaches';
 import type { BreachFinding } from '@/lib/domain/adherence';
@@ -583,6 +584,21 @@ export default async function DashboardPage() {
   // fact whether or not behaviour is the variable. §5's "tracked and reported, never scored".
   const unscoredBreaches = outlook.findings.filter((f): f is BreachFinding => f.kind === 'breach' && !f.scored);
 
+  // Every category the hero scored, as one circle each: what it was given, and where it is going.
+  // Drawn from the same three partitions the list below renders, so the two cannot disagree about
+  // which categories are in play. `withheld` is included and deliberately left uncoloured — a
+  // category whose verdict was refused still has a budget, and omitting it would make the picture
+  // claim the month is smaller than it is.
+  const bubbleCategories: BubbleCategory[] = [...outlook.sayingNo, ...outlook.holding, ...outlook.withheld]
+    .filter((c) => c.budgeted > 0)
+    .map((c) => ({
+      category: c.category,
+      budgeted: c.budgeted,
+      actual: c.actual,
+      projectedRatio: c.projectedRatio,
+      tooEarly: c.status === 'too-early' || c.withheldReason !== null,
+    }));
+
   const sidePanels = [outlook.withheld.length, outlook.offCycleElsewhere.length, unscoredBreaches.length]
     .filter((n) => n > 0).length;
 
@@ -794,6 +810,10 @@ export default async function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Directly under the month's verdict: the same set of categories the hero summarised into
+          one sentence, spread out so the reader can see which of them carry the money. */}
+      <CategoryBubbles categories={bubbleCategories} />
 
       {/* The named list — §5's own words, as a distinct region rather than a colour on a bar. */}
       <div className="grid grid-cols-2 gap-4 mb-6">
