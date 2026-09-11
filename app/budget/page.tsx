@@ -244,7 +244,6 @@ export default async function BudgetPage({ searchParams }: PageProps) {
   // Profit and loss for the year. Income rows carry the ledger's sign, where money in is negative,
   // so they are flipped once here and read as "received" everywhere below.
   const incomeRows   = summary.filter((r) => r.landscape === landscape && r.is_income);
-  const incomeBudget = incomeRows.reduce((s, r) => s + Number(r.annual_budget), 0);
   const incomeActual = -incomeRows.reduce((s, r) => s + Number(r.ytd_spent), 0);
   //
   // Where the year lands if the rest of it goes to plan. Deliberately not incomeBudget minus
