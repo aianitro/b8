@@ -623,11 +623,20 @@ export default async function DashboardPage() {
   const expectedWeekSpend = weekStats.weeklyBudgetReference * (weekStats.isoDow / 7);
   const weekPaceRatio = expectedWeekSpend > 0 ? weekStats.spent / expectedWeekSpend : 0;
 
-  const cashFlowSeries = flow.monthlySeries.map((total, i) => ({
-    month: MONTHS[i],
-    operational: flow.monthlyOperational[i],
-    capital: flow.monthlyCapital[i],
-    total,
+  // Twelve months, not just the elapsed ones: the balance lines still stop where the data stops,
+  // but the P/L runs on to December so the projection has somewhere to be drawn.
+  //
+  // `pl` and `plProjected` overlap on the last settled month. Without that shared point the dashed
+  // line would start a month adrift of where the solid one ended, leaving a visible gap exactly at
+  // the boundary the chart exists to show.
+  const lastSettled = asOf.month - 1;
+  const cashFlowSeries = MONTHS.map((month, i) => ({
+    month,
+    operational: i < flow.monthlySeries.length ? flow.monthlyOperational[i] : null,
+    capital: i < flow.monthlySeries.length ? flow.monthlyCapital[i] : null,
+    total: i < flow.monthlySeries.length ? flow.monthlySeries[i] : null,
+    pl: i <= lastSettled ? yearEnd.monthly[i].cumulative : null,
+    plProjected: i >= lastSettled ? yearEnd.monthly[i].cumulative : null,
   }));
 
   // EVERY operational spending category, not the scored subset.

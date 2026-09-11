@@ -71,3 +71,87 @@ export function projectYearEnd(
   const expense = projectSide(expenseRows, monthIdx, 1);
   return { income, expense, profitLoss: income - expense };
 }
+
+/**
+ * The same projection, month by month, for drawing rather than for a single figure.
+ *
+ * Shares `plannedForMonth` and the closed/current/future rule with `projectSide` above, so a chart
+ * built on this and a card built on that cannot disagree — the last value of `cumulative` is
+ * `projectYearEnd(...).profitLoss` by construction, and a test pins that.
+ *
+ * `monthlyActuals` is indexed Jan–Dec in the LEDGER's sign; `sign` flips income once, as elsewhere.
+ */
+export interface YearEndMonthlyRow extends YearEndRow {
+  /** Per-month actual, Jan–Dec, in the ledger's sign. Absent months are zero, not missing. */
+  monthlyActuals: number[];
+}
+
+/**
+ * Builds a monthly row with `closedMonths` and `currentMonth` DERIVED from the same array the
+ * monthly projection reads, so the aggregate and the series cannot be given different actuals.
+ *
+ * They are the same numbers summed two ways, and letting a caller supply both independently is an
+ * invitation to supply one and forget the other — which is exactly what happened the first time
+ * this was written, and it showed up as a chart ending $8,400 away from the card above it.
+ */
+export function monthlyRow(
+  annualBudget: number,
+  monthlyAmounts: number[] | null,
+  monthlyActuals: number[],
+  monthIdx: number
+): YearEndMonthlyRow {
+  let closed = 0;
+  for (let m = 0; m < monthIdx; m++) closed += monthlyActuals[m] ?? 0;
+  return {
+    annualBudget,
+    monthlyAmounts,
+    monthlyActuals,
+    closedMonths: closed,
+    currentMonth: monthlyActuals[monthIdx] ?? 0,
+  };
+}
+
+export interface MonthPoint {
+  /** Net for this month alone: income less expense. */
+  net: number;
+  /** Running total from January. The December value is the year's P/L. */
+  cumulative: number;
+  /** True once the month is wholly or partly forecast rather than settled. */
+  projected: boolean;
+}
+
+/** One side's per-month total, on the same rule `projectSide` uses for its aggregate. */
+function sideByMonth(rows: YearEndMonthlyRow[], monthIdx: number, sign: 1 | -1): number[] {
+  const out = new Array(MONTHS_PER_YEAR).fill(0);
+  for (const row of rows) {
+    for (let m = 0; m < MONTHS_PER_YEAR; m++) {
+      const actual = sign * (row.monthlyActuals[m] ?? 0);
+      const planned = plannedForMonth(row, m);
+      out[m] += m < monthIdx ? actual : m === monthIdx ? Math.max(actual, planned) : planned;
+    }
+  }
+  return out;
+}
+
+export function projectYearEndByMonth(
+  incomeRows: YearEndMonthlyRow[],
+  expenseRows: YearEndMonthlyRow[],
+  monthIdx: number
+): MonthPoint[] {
+  if (!Number.isInteger(monthIdx) || monthIdx < 0 || monthIdx >= MONTHS_PER_YEAR) {
+    throw new RangeError(`projectYearEndByMonth: monthIdx must be an integer 0-11, got ${monthIdx}`);
+  }
+  const income = sideByMonth(incomeRows, monthIdx, -1);
+  const expense = sideByMonth(expenseRows, monthIdx, 1);
+
+  const out: MonthPoint[] = [];
+  let running = 0;
+  for (let m = 0; m < MONTHS_PER_YEAR; m++) {
+    const net = income[m] - expense[m];
+    running += net;
+    // The AS-OF month counts as projected: part of it has not happened, and a solid line drawn to
+    // its end would claim a settled figure for a month still running.
+    out.push({ net, cumulative: running, projected: m >= monthIdx });
+  }
+  return out;
+}
