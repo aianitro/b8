@@ -13,6 +13,8 @@ import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
 import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbles';
+import MonthShapes, { type ShapeRow } from '@/components/MonthShapes';
+import RecentArrivals from '@/components/RecentArrivals';
 import { loadFeedHealth } from '@/lib/feedHealthRead';
 import UnscoredBreaches from '@/components/UnscoredBreaches';
 import type { BreachFinding } from '@/lib/domain/adherence';
@@ -139,6 +141,79 @@ interface TodayStats {
   avgSameWeekday: number;
   transactions: { label: string; amount: number }[];
   totalCount: number;
+}
+
+export interface RecentArrival {
+  id: number;
+  date: string;
+  amount: number;
+  label: string;
+  category: string | null;
+}
+
+/** The as-of day as an ISO date, so the daily query cannot read past the page's own clock. */
+const isoDay = (a: DashboardAsOf) =>
+  `${a.year}-${String(a.month + 1).padStart(2, '0')}-${String(a.day).padStart(2, '0')}`;
+
+// Spend per category per day of the as-of month, for the shapes below the bubbles.
+//
+// Days with no spend are absent from the result and are filled as zero by the caller — a gap in a
+// cumulative series is a flat step, not a missing point, and leaving holes in the array would draw
+// the line as though the category had not existed that day.
+async function getMonthDaily(asOf: DashboardAsOf): Promise<Map<string, number[]>> {
+  const { rows } = await db.query<{ category: string; day: number; amount: string }>(`
+    SELECT t.mapped_category AS category,
+           EXTRACT(DAY FROM t.date)::int AS day,
+           COALESCE(SUM(t.amount), 0)::text AS amount
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+      JOIN budget_categories bc ON bc.name = t.mapped_category
+           AND bc.exclude_from_budget = FALSE AND bc.is_income = FALSE
+           AND bc.landscape = 'operational'
+     WHERE EXTRACT(YEAR FROM t.date) = $1
+       AND EXTRACT(MONTH FROM t.date) = $2
+       AND t.date <= $3::date
+       AND t.hidden = FALSE
+     GROUP BY 1, 2
+  `, [asOf.year, asOf.month + 1, isoDay(asOf)]);
+
+  const byCategory = new Map<string, number[]>();
+  for (const r of rows) {
+    if (!byCategory.has(r.category)) byCategory.set(r.category, new Array(asOf.day).fill(0));
+    byCategory.get(r.category)![r.day - 1] = Number(r.amount);
+  }
+  return byCategory;
+}
+
+/**
+ * What arrived since the previous day's sync.
+ *
+ * Keyed on `created_at`, not on the transaction DATE: the question is what is new to the reader,
+ * and a charge dated the 9th that landed this morning is news while one dated today that arrived
+ * two syncs ago is not. Those differ by a day or more on every card feed.
+ *
+ * 36 hours rather than 24 so a sync running an hour later than yesterday's does not silently drop
+ * a day's arrivals out of the window.
+ */
+async function getRecentArrivals(): Promise<RecentArrival[]> {
+  const { rows } = await db.query<{
+    id: number; date: string; amount: string; label: string;
+    category: string | null; created_at: string;
+  }>(`
+    SELECT t.id, t.date::text, t.amount::text,
+           COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
+           t.mapped_category AS category, t.created_at::text
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+     WHERE t.created_at > NOW() - INTERVAL '36 hours'
+       AND t.hidden = FALSE
+     ORDER BY t.amount DESC, t.id
+     LIMIT 12
+  `);
+  return rows.map((r) => ({
+    id: r.id, date: r.date, amount: Number(r.amount),
+    label: r.label, category: r.category,
+  }));
 }
 
 async function getTodayStats(): Promise<TodayStats> {
@@ -541,11 +616,12 @@ export default async function DashboardPage() {
   // doesn't add a serial round trip to page load.
   const driftPromise = findBalanceDrift();
   const feedPromise = loadFeedHealth();
-  const [stats, monthRead, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual] =
+  const [stats, monthRead, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual,
+         monthDaily, recentArrivals] =
     await Promise.all([
       getStats(asOf), loadMonthOutlook(asOf), getCashFlowSeries(asOf),
       getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCashFlow(asOf), getCategoryBreakdown(asOf),
-      getBudgetVsActual(asOf),
+      getBudgetVsActual(asOf), getMonthDaily(asOf), getRecentArrivals(),
     ]);
   const [driftFindings, feedFindings] = await Promise.all([driftPromise, feedPromise]);
 
@@ -598,6 +674,16 @@ export default async function DashboardPage() {
       projectedRatio: c.projectedRatio,
       tooEarly: c.status === 'too-early' || c.withheldReason !== null,
     }));
+
+  // The same categories the bubbles plot, each with its daily series — so a reader comparing the
+  // two views is comparing the same set, not two overlapping ones.
+  const shapeRows: ShapeRow[] = bubbleCategories.map((c) => ({
+    category: c.category,
+    budgeted: c.budgeted,
+    daily: monthDaily.get(c.category) ?? new Array(asOf.day).fill(0),
+    projectedRatio: c.projectedRatio,
+    tooEarly: c.tooEarly,
+  }));
 
   const sidePanels = [outlook.withheld.length, outlook.offCycleElsewhere.length, unscoredBreaches.length]
     .filter((n) => n > 0).length;
@@ -814,6 +900,14 @@ export default async function DashboardPage() {
       {/* Directly under the month's verdict: the same set of categories the hero summarised into
           one sentence, spread out so the reader can see which of them carry the money. */}
       <CategoryBubbles categories={bubbleCategories} />
+
+      {/* Under the bubbles, and in this order on purpose: the bubbles say which categories carry
+          the money, the shapes say when within the month that happened, and the arrivals say what
+          is new since the reader last looked. Size, then timing, then news. */}
+      <MonthShapes rows={shapeRows} daysInMonth={monthLength} month={asOf.month + 1}
+                   staleFeed={feedFindings.length > 0} />
+
+      <RecentArrivals arrivals={recentArrivals} staleFeed={feedFindings.length > 0} />
 
       {/* The named list — §5's own words, as a distinct region rather than a colour on a bar. */}
       <div className="grid grid-cols-2 gap-4 mb-6">
