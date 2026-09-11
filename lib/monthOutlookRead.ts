@@ -102,7 +102,22 @@ async function getBudgetCategories(): Promise<CategoryRow[]> {
 async function getMonthlyActuals(asOf: AsOf): Promise<Map<string, Map<number, number>>> {
   const result = await db.query<{ category: string; month: number; actual: string }>(`
     SELECT t.mapped_category AS category, EXTRACT(MONTH FROM t.date)::int - 1 AS month,
-           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS actual
+           -- Net of refunds, then clamped at zero. The positive-amount filter this replaces
+           -- counted a meal and ignored the refund for it, so September's Restoraunts reported
+           -- $217.49 against $67.49 actually spent and was named in "say no" on the strength of
+           -- $150 that came back. A refund is not spending.
+           --
+           -- GREATEST, not the bare sum, because actual is contracted to arrive as a non-negative
+           -- magnitude (see CategoryPace.actual and MonthSpend in lib/domain) and the pacing
+           -- math divides it by the elapsed fraction -- a negative would project
+           -- further negative, below its own spend-to-date, and invert every "projection is at
+           -- least actual" reading downstream. A month whose refunds outran its spending has
+           -- spent nothing, which is what zero says.
+           --
+           -- This is a deliberate departure from SPEC.md P0.5-33 #57a, which asserted this string
+           -- byte-identical. That gate proved a RELOCATION was faithful; it never claimed the
+           -- predicate was correct, and re-running it now should fail.
+           GREATEST(COALESCE(SUM(t.amount), 0), 0)::text AS actual
       FROM transactions t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
      WHERE t.hidden = FALSE
