@@ -581,24 +581,28 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex items-baseline justify-between mb-8">
+      {/* Header, with the warnings docked to its right rather than stacked across the page.
+          
+          Both of these can legitimately sit here for days — a degraded bank feed clears on Plaid's
+          schedule, and a drift needs a missing transaction found — so as full-width amber bars they
+          cost the top of the first screen every day to repeat something already known. In the
+          corner they stay visible and stop being the first thing the page says.
+          
+          `items-start`, not `items-baseline`: the stack is taller than the heading and baseline
+          alignment would hang it off the title's text line. Feed health leads, because a stale feed
+          is the thing that explains the drift beneath it. */}
+      <div className="flex items-start justify-between gap-6 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
           <p className="text-sm text-slate-500 mt-1">
             {MONTHS[asOf.month]} {asOf.year} · day {asOf.day} of {monthLength}
           </p>
         </div>
+        <div className="w-full max-w-sm shrink-0 space-y-2">
+          <FeedHealthCard findings={feedFindings} />
+          <DriftAlertCard findings={driftFindings} />
+        </div>
       </div>
-
-      {/* Rendered above the hero deliberately: if a balance doesn't reconcile, that's context
-          you want before reading the headline figure, not after. */}
-      {/* Above the drift strip, and above the hero, because it qualifies both: a balance that
-          does not reconcile and a month that looks quiet are each explained by a feed that stopped
-          arriving. Reading either without knowing that is how a stale figure gets acted on. */}
-      <FeedHealthCard findings={feedFindings} />
-
-      <DriftAlertCard findings={driftFindings} />
 
       {/* The hero, and it answers a budget question: will this month close inside its limits, and
           which categories say no. A state from a closed set of seven and a named list — never a

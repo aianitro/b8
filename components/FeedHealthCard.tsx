@@ -24,23 +24,28 @@ export default function FeedHealthCard({ findings }: { findings: FeedFinding[] }
   // States the reader's situation, not Plaid's internals: the point is that the numbers below may
   // be short of recent days, and roughly how short.
   const headline = worst.state === 'failing'
-    ? `${worst.institution} is not updating — last successful refresh ${fmtWhen(worst.lastSuccessfulUpdate)}`
+    ? `${worst.institution} is not updating`
     : `${worst.institution} has not updated in ${worst.hoursStale} hours`;
 
-  const affected = `${worst.accountCount} ${worst.accountCount === 1 ? 'account' : 'accounts'} affected`;
+  const affected = `${worst.accountCount} ${worst.accountCount === 1 ? 'account' : 'accounts'}`;
   const alsoOthers = others > 0
     ? `, and ${others} other ${others === 1 ? 'institution' : 'institutions'}`
     : '';
-  const detail = `· ${affected}${alsoOthers}. Figures below may be missing recent days.`
-    + ' No action needed — this usually clears on its own.';
+  // Narrow card, so the sentence is the short one: what is stale, since when, and that there is
+  // nothing to press. The full reasoning is one scroll away in the figures it qualifies.
+  const detail = worst.state === 'failing'
+    ? `Last refresh ${fmtWhen(worst.lastSuccessfulUpdate)} · ${affected}${alsoOthers}. Usually clears on its own.`
+    : `${affected}${alsoOthers}. Figures may be missing recent days.`;
 
   return (
-    <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-amber-50 border border-amber-100 text-xs">
-      <CloudOff size={14} className="shrink-0 text-amber-500" />
-      <span className="text-amber-800 font-medium">{headline}</span>
-      {/* One expression, not three siblings: JSX turns the newline between adjacent expressions
-          into a space, which put one in front of the full stop. */}
-      <span className="text-amber-600">{detail}</span>
+    <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs">
+      <CloudOff size={14} className="shrink-0 mt-0.5 text-amber-500" />
+      <div className="min-w-0">
+        <p className="text-amber-800 font-medium">{headline}</p>
+        {/* One expression, not siblings: JSX turns the newline between adjacent expressions into a
+            space, which put one in front of the full stop. */}
+        <p className="text-amber-600 mt-0.5">{detail}</p>
+      </div>
     </div>
   );
 }
