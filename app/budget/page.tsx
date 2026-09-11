@@ -10,7 +10,7 @@ import BudgetViewToggle from '@/components/BudgetViewToggle';
 import BudgetTabsToggle from '@/components/BudgetTabsToggle';
 import BeginningBalanceEdit from '@/components/BeginningBalanceEdit';
 
-type SummaryRow = BudgetSummary & { landscape: Landscape; is_income: boolean; monthly_amounts: string[] | null };
+type SummaryRow = BudgetSummary & { landscape: Landscape; is_income: boolean; monthly_amounts: string[] | null; closed_months: string; current_month: string };
 interface UncategorizedRow { landscape: Landscape; count: string; total_out: string; total_in: string; }
 
 const fmt = (n: number) =>
@@ -30,6 +30,15 @@ async function getBudgetSummary(): Promise<SummaryRow[]> {
            -- reach this figure on screen (see Section), so the convention stays a spending one.
            COALESCE(SUM(t.amount), 0)                    AS ytd_spent,
            bc.annual_budget - COALESCE(SUM(t.amount), 0) AS remaining,
+           -- Split either side of the month in progress, so a year-end projection can settle the
+           -- closed months on fact and the current one on whichever of fact and plan is larger --
+           -- the same rule the monthly grid projects with. Without the split the projection can
+           -- only pro-rate the current month, which is the right convention for pace and the
+           -- wrong one for a year end, since September finishes whatever today's date is.
+           COALESCE(SUM(t.amount) FILTER (
+             WHERE EXTRACT(MONTH FROM t.date) < EXTRACT(MONTH FROM CURRENT_DATE)), 0) AS closed_months,
+           COALESCE(SUM(t.amount) FILTER (
+             WHERE EXTRACT(MONTH FROM t.date) = EXTRACT(MONTH FROM CURRENT_DATE)), 0) AS current_month,
            ROUND(bc.annual_budget / 12, 2)                                            AS monthly_reference
     FROM budget_categories bc
     LEFT JOIN transactions t ON t.mapped_category = bc.name
@@ -225,12 +234,37 @@ export default async function BudgetPage({ searchParams }: PageProps) {
     r.monthly_amounts?.length === 12
       ? r.monthly_amounts.map(Number)
       : new Array(12).fill(Number(r.annual_budget) / 12);
-  const expectedSpend = expenseRows.reduce((sum, r) => {
+  const plannedToDate = (rows: SummaryRow[]) => rows.reduce((sum, r) => {
     const m = schedule(r);
-    const closedMonths = m.slice(0, monthIdx).reduce((s, n) => s + n, 0);
-    return sum + closedMonths + m[monthIdx] * elapsedFraction;
+    return sum + m.slice(0, monthIdx).reduce((s, n) => s + n, 0) + m[monthIdx] * elapsedFraction;
   }, 0);
+  const expectedSpend = plannedToDate(expenseRows);
   const onTrack = totalSpent <= expectedSpend;
+
+  // Profit and loss for the year. Income rows carry the ledger's sign, where money in is negative,
+  // so they are flipped once here and read as "received" everywhere below.
+  const incomeRows   = summary.filter((r) => r.landscape === landscape && r.is_income);
+  const incomeBudget = incomeRows.reduce((s, r) => s + Number(r.annual_budget), 0);
+  const incomeActual = -incomeRows.reduce((s, r) => s + Number(r.ytd_spent), 0);
+  //
+  // Where the year lands if the rest of it goes to plan. Deliberately not incomeBudget minus
+  // totalBudget, which is the plan talking to itself and would not move however the year went;
+  // and not the year-to-date net either, which mid-year is a partial month of pay against a full
+  // one of spending. Closed months are fact, the current month is plan-or-actual whichever is
+  // larger, and the rest is plan -- the same rule the monthly grid's own forecast rows use, so
+  // the card and the December column beneath it cannot disagree.
+  // `sign` flips income's ledger convention so both sides read as positive magnitudes.
+  const projectedFor = (rows: SummaryRow[], sign: 1 | -1) => rows.reduce((sum, r) => {
+    const m = schedule(r);
+    const closed  = sign * Number(r.closed_months);
+    const current = sign * Number(r.current_month);
+    return sum + closed + Math.max(current, m[monthIdx])
+               + m.slice(monthIdx + 1).reduce((s, n) => s + n, 0);
+  }, 0);
+  const projectedIncome  = projectedFor(incomeRows, -1);
+  const projectedExpense = projectedFor(expenseRows, 1);
+  const projectedPL      = projectedIncome - projectedExpense;
+  const netToDate        = incomeActual - totalSpent;
 
   return (
     <div className={view === 'monthly' ? 'p-8' : 'p-8 max-w-4xl mx-auto'}>
@@ -257,7 +291,7 @@ export default async function BudgetPage({ searchParams }: PageProps) {
       ) : (
         <>
           {/* KPIs */}
-          <div className={`grid gap-4 mb-8 ${view === 'monthly' ? 'grid-cols-3 max-w-2xl' : 'grid-cols-3'}`}>
+          <div className={`grid gap-4 mb-8 ${view === 'monthly' ? 'grid-cols-2 lg:grid-cols-4 max-w-4xl' : 'grid-cols-2 lg:grid-cols-4'}`}>
             {[
               { label: 'Annual Budget', value: fmt(totalBudget) },
               {
@@ -275,6 +309,12 @@ export default async function BudgetPage({ searchParams }: PageProps) {
                 label: 'Remaining',
                 value: (totalRemaining < 0 ? '-' : '') + fmt(Math.abs(totalRemaining)),
                 highlight: totalRemaining < 0 ? 'text-red-500' : onTrack ? 'text-emerald-600' : 'text-amber-500',
+              },
+              {
+                label: 'Projected P/L',
+                value: (projectedPL < 0 ? '−' : '+') + fmt(Math.abs(projectedPL)),
+                sub: `${netToDate < 0 ? '−' : '+'}${fmt(Math.abs(netToDate))} so far`,
+                highlight: projectedPL < 0 ? 'text-red-500' : 'text-emerald-600',
               },
             ].map(({ label, value, sub, highlight }) => (
               <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
