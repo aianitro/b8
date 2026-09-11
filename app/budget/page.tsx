@@ -21,8 +21,15 @@ const pct = (spent: number, budget: number) =>
 async function getBudgetSummary(): Promise<SummaryRow[]> {
   const result = await db.query<SummaryRow>(`
     SELECT bc.name AS category, bc.landscape, bc.is_income, bc.annual_budget, bc.monthly_amounts,
-           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)                    AS ytd_spent,
-           bc.annual_budget - COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0) AS remaining,
+           -- Net of refunds, NOT gross outflow. Filtering to amount > 0 counted money leaving
+           -- and ignored money coming back, so Travel read 23,373 here against the monthly
+           -- grid's 19,274 for the same year -- one page calling a cancelled booking spending
+           -- and the other not. Across 2026 that was 11,169 of refunds, enough to decide the
+           -- on-track pill by itself. Net is the side the budget is already on: annual_budget is
+           -- what a category should COST, and a returned purchase cost nothing. Only expense rows
+           -- reach this figure on screen (see Section), so the convention stays a spending one.
+           COALESCE(SUM(t.amount), 0)                    AS ytd_spent,
+           bc.annual_budget - COALESCE(SUM(t.amount), 0) AS remaining,
            ROUND(bc.annual_budget / 12, 2)                                            AS monthly_reference
     FROM budget_categories bc
     LEFT JOIN transactions t ON t.mapped_category = bc.name
