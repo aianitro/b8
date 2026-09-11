@@ -69,3 +69,50 @@ describe('projectYearEnd', () => {
     expect(projectYearEnd([], [], 0)).toEqual({ income: 0, expense: 0, profitLoss: 0 });
   });
 });
+
+import { projectYearEndByMonth, monthlyRow } from './yearEnd';
+
+const mrow = (annualBudget = 1200, actuals = new Array(12).fill(0), monthIdx = 0) =>
+  monthlyRow(annualBudget, null, actuals, monthIdx);
+
+describe('projectYearEndByMonth', () => {
+  it('ends on the same figure the aggregate reports', () => {
+    // The property that matters: a chart drawn from this and a card drawn from projectYearEnd
+    // cannot disagree about where the year lands.
+    const income  = [mrow(12000, [-1100,-1100,-1100,-1100,-1100,-1100,0,0,0,0,0,0], 6)];
+    const expense = [mrow(24000, [2500,2500,2500,2500,2500,2500,0,0,0,0,0,0], 6)];
+    const series = projectYearEndByMonth(income, expense, 6);
+    const total = projectYearEnd(income, expense, 6);
+    expect(series[11].cumulative).toBeCloseTo(total.profitLoss, 6);
+  });
+
+  it('settles closed months on fact and forecasts the rest', () => {
+    const expense = [mrow(1200, [500, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 3)];
+    const s = projectYearEndByMonth([], expense, 3);
+    expect(s[0].net).toBe(-500);   // January actual, not its $100 plan
+    expect(s[4].net).toBe(-100);   // May on plan
+  });
+
+  it('marks the month in progress as projected, not settled', () => {
+    const s = projectYearEndByMonth([], [mrow(1200, new Array(12).fill(0), 5)], 5);
+    expect(s.map((p) => p.projected)).toEqual(
+      [false, false, false, false, false, true, true, true, true, true, true, true]);
+  });
+
+  it('accumulates from January', () => {
+    // As-of January, so every month is forecast and each contributes its $100 plan.
+    const s = projectYearEndByMonth([], [mrow(1200)], 0);
+    expect(s[0].cumulative).toBeCloseTo(-100, 6);
+    expect(s[11].cumulative).toBeCloseTo(-1200, 6);
+  });
+
+  it('derives the aggregate fields from the same actuals the series reads', () => {
+    const r = monthlyRow(1200, null, [10, 20, 30, 40, 0, 0, 0, 0, 0, 0, 0, 0], 3);
+    expect(r.closedMonths).toBe(60);  // Jan-Mar
+    expect(r.currentMonth).toBe(40);  // Apr
+  });
+
+  it('rejects a month index that is not a real month', () => {
+    expect(() => projectYearEndByMonth([], [], 12)).toThrow(RangeError);
+  });
+});
