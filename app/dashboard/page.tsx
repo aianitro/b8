@@ -465,12 +465,6 @@ function heroCopy(state: OutlookState, authoritative: boolean): { title: string;
   return { title: stated.title, tone: 'text-slate-300', pill: 'bg-slate-800 text-slate-400' };
 }
 
-const SAYING_NO_COPY: Record<'off-cycle' | 'breach' | 'projected-breach', string> = {
-  'off-cycle': 'drew outside its schedule',
-  breach: 'is already over its month',
-  'projected-breach': 'projects to close over',
-};
-
 const WITHHELD_COPY: Record<'too-early' | 'no-budget' | 'negative-budget', string> = {
   'too-early': 'too early in the month to project',
   'no-budget': 'nothing budgeted this month',
@@ -869,29 +863,6 @@ export default async function DashboardPage() {
       {/* Under the bubbles: they say which categories carry the money, this says what is new
           since the reader last looked. */}
       <RecentArrivals arrivals={recentArrivals} staleFeed={feedFindings.length > 0} />
-
-      {/* The named list — §5's own words, as a distinct region rather than a colour on a bar. */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        {/* Written out rather than routed through `Panel`, because the region itself has to carry
-            the test id — a component filling the inside cannot be what a reviewer greps for. */}
-        <div data-testid="categories-saying-no" className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Saying no</p>
-          {outlook.sayingNo.length === 0 ? (
-            <p className="text-xs text-slate-400">No scored category is saying no this month.</p>
-          ) : (
-            outlook.sayingNo.map((c) => (
-              <CategoryLine key={c.categoryId} c={c} note={SAYING_NO_COPY[c.reason!]} />
-            ))
-          )}
-        </div>
-        <Panel title="Holding">
-          {outlook.holding.length === 0 ? (
-            <p className="text-xs text-slate-400">No scored category is holding under its projection.</p>
-          ) : (
-            outlook.holding.map((c) => <CategoryLine key={c.categoryId} c={c} note="on plan" />)
-          )}
-        </Panel>
-      </div>
 
       {sidePanels > 0 && (
         // Sized to what is actually there. Fixed at three columns, a lone panel — routinely the
