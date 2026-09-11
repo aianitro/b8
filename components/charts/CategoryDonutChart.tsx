@@ -88,9 +88,15 @@ export default function CategoryDonutChart({ data }: { data: CategorySlice[] }) 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-4">Category Breakdown</p>
+      {/* A side with no rows is omitted rather than drawn empty. The chart is used on two pages
+          now, each scoped to one book, and a permanent "Operational: no data" panel beside the
+          capital donut reads as a broken query rather than as a deliberate scope. */}
       <div className="flex gap-4">
-        <Donut data={operational} title="Operational" colors={OP_COLORS} />
-        <Donut data={capital} title="Capital" colors={CAP_COLORS} />
+        {operational.length > 0 && <Donut data={operational} title="Operational" colors={OP_COLORS} />}
+        {capital.length > 0 && <Donut data={capital} title="Capital" colors={CAP_COLORS} />}
+        {operational.length === 0 && capital.length === 0 && (
+          <p className="text-sm text-slate-300 py-8">No categorized spending yet.</p>
+        )}
       </div>
     </div>
   );
