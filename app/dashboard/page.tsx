@@ -15,8 +15,6 @@ import FeedHealthCard from '@/components/FeedHealthCard';
 import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbles';
 import RecentArrivals from '@/components/RecentArrivals';
 import { loadFeedHealth } from '@/lib/feedHealthRead';
-import UnscoredBreaches from '@/components/UnscoredBreaches';
-import type { BreachFinding } from '@/lib/domain/adherence';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
@@ -548,7 +546,6 @@ function CategoryLine({ c, note }: { c: OutlookCategory; note: string }) {
 }
 
 /** Static strings, because Tailwind reads this file rather than the value of an expression. */
-const PANEL_GRID = ['', 'grid-cols-1', 'grid-cols-2', 'grid-cols-3'];
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -610,10 +607,6 @@ export default async function DashboardPage() {
     total,
   }));
 
-  // Breaches on categories nobody scores — a fixed mortgage line drawing over its budget is a true
-  // fact whether or not behaviour is the variable. §5's "tracked and reported, never scored".
-  const unscoredBreaches = outlook.findings.filter((f): f is BreachFinding => f.kind === 'breach' && !f.scored);
-
   // EVERY operational spending category, not the scored subset.
   //
   // The lists below partition to `isScoredCategory` — discretionary lines, where behaviour is the
@@ -638,8 +631,6 @@ export default async function DashboardPage() {
       tooEarly: p.status === 'too-early' || p.status === 'future' || p.status === 'no-budget',
     }));
 
-  const sidePanels = [outlook.offCycleElsewhere.length, unscoredBreaches.length]
-    .filter((n) => n > 0).length;
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -858,24 +849,16 @@ export default async function DashboardPage() {
           since the reader last looked. */}
       <RecentArrivals arrivals={recentArrivals} staleFeed={feedFindings.length > 0} />
 
-      {sidePanels > 0 && (
-        // Sized to what is actually there. Fixed at three columns, a lone panel — routinely the
-        // unscored list, since withheld and off-cycle are both empty in a healthy month — rendered
-        // as a narrow column beside two thirds of white space, which is what made a long list in it
-        // look even longer.
-        <div className={`grid ${PANEL_GRID[sidePanels]} gap-4 mb-6`}>
-          {outlook.offCycleElsewhere.length > 0 && (
-            <Panel title="Off-cycle earlier this year">
-              {outlook.offCycleElsewhere.map((c) => (
-                <CategoryLine key={`${c.categoryId}-${c.month}`} c={c} note={`${MONTHS[c.month]} drew outside its schedule`} />
-              ))}
-            </Panel>
-          )}
-          {unscoredBreaches.length > 0 && (
-            <Panel title="Tracked, not scored">
-              <UnscoredBreaches findings={unscoredBreaches} monthsElapsed={asOf.month + 1} />
-            </Panel>
-          )}
+      {/* One panel where there were three, so the grid that sized itself to the survivors is gone
+          with them — a single-column grid is a div, and the arithmetic behind it was machinery for
+          a layout that no longer varies. */}
+      {outlook.offCycleElsewhere.length > 0 && (
+        <div className="mb-6">
+          <Panel title="Off-cycle earlier this year">
+            {outlook.offCycleElsewhere.map((c) => (
+              <CategoryLine key={`${c.categoryId}-${c.month}`} c={c} note={`${MONTHS[c.month]} drew outside its schedule`} />
+            ))}
+          </Panel>
         </div>
       )}
 
