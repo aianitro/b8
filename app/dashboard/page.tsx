@@ -638,7 +638,6 @@ export default async function DashboardPage() {
       budgeted: c.budgeted,
       actual: c.actual,
       projectedRatio: c.projectedRatio,
-      projectedVariance: c.projectedVariance,
       tooEarly: c.status === 'too-early' || c.withheldReason !== null,
     }));
 

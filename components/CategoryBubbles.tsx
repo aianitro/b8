@@ -13,8 +13,6 @@ export interface BubbleCategory {
   actual: number;
   /** Where the month is heading, as a fraction of budget. Null when there is no basis yet. */
   projectedRatio: number | null;
-  /** `projected − budgeted`. Positive means the month is heading past the line. */
-  projectedVariance: number | null;
   /** True while the month is too young to project from — drawn, but never coloured as a verdict. */
   tooEarly: boolean;
 }
@@ -105,15 +103,13 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
           <>
             <span className="font-medium text-slate-700">{active.category}</span>
             {' · '}{fmt(active.actual)} of {fmt(active.budgeted)}
+            {active.actual > active.budgeted && (
+              <span className="text-red-600 font-medium">
+                {` · ${fmt(active.actual - active.budgeted)} over already`}
+              </span>
+            )}
             {active.projectedRatio !== null && !active.tooEarly && (
-              <>
-                {' · projects to close at '}{Math.round(active.projectedRatio * 100)}%
-                {active.projectedVariance !== null && active.projectedVariance > 0 && (
-                  <span className="text-red-600 font-medium">
-                    {` · ${fmt(active.projectedVariance)} over`}
-                  </span>
-                )}
-              </>
+              <> · projects to close at {Math.round(active.projectedRatio * 100)}%</>
             )}
             {active.tooEarly && <> · too early to project</>}
           </>
@@ -135,15 +131,18 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
           // the reader can see is bad and cannot name without hovering.
           const nameSize = Math.min(15, Math.max(10, c.r / 3.2));
           const inside = fitLabel(cat.category, c.r, nameSize);
-          // On a bubble heading over, the OVERAGE replaces the budget as the second line. The
-          // budget is already encoded in the area; "$150" under a red circle restates what the
-          // size said, where "+$150 over" is the figure that would otherwise need a hover.
+          // Over means SPENT past the line, not projected to pass it. Those are different claims
+          // and only one of them is money that has left: a category at $110 of $150 is heading
+          // over and is not over, and printing "+$150 over" on it reports a forecast as a fact.
+          // The colour carries the forecast; this figure carries what has actually happened.
           //
-          // It also earns a smaller bubble than the budget line does. "+$80" is half the width of
-          // "$40" plus a name, and on a red circle it is the whole reason the reader stopped —
-          // Education is a 40-pixel dot and the most over-budget category on the page.
-          const over = cat.projectedVariance !== null && cat.projectedVariance > 0 && !cat.tooEarly;
-          const secondLine = over ? `+${fmt(cat.projectedVariance!)} over` : fmt(cat.budgeted);
+          // The overage replaces the budget rather than joining it, because the budget is already
+          // encoded in the area — "$150" under a breached circle restates what the size said. It
+          // also earns a smaller circle than a budget line does: "+$20 over" is short, and on a
+          // breached bubble it is the whole reason the reader stopped.
+          const overBy = cat.actual - cat.budgeted;
+          const over = overBy > 0;
+          const secondLine = over ? `+${fmt(overBy)} over` : fmt(cat.budgeted);
           const showAmount = inside !== null
             && c.r >= (over ? 34 : 46)
             && fitLabel(secondLine, c.r, 11) === secondLine;
