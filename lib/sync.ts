@@ -163,9 +163,40 @@ async function syncItem(
     hasMore = has_more;
   }
 
+  // What Plaid says about ITS OWN refresh of the institution, recorded beside our cursor.
+  //
+  // Everything above this line reports on our call to Plaid, and that call succeeds throughout an
+  // institution outage — it simply returns an empty page. `/item/get` carries the step before it:
+  // `status.transactions.last_failed_update` moving ahead of `last_successful_update` is the bank
+  // feed going dark, and it is the only place that state appears. Read once per item per sync,
+  // which is one extra request per institution per day.
+  //
+  // Failure here must not fail the sync. The transactions are already committed by this point and
+  // a freshness reading is diagnostic, not transactional — losing it costs a day of observability,
+  // whereas throwing would roll a successful sync into the error count and make the health signal
+  // the thing that breaks health.
+  let itemOk: string | null = null;
+  let itemFailed: string | null = null;
+  try {
+    const { data } = await plaidClient.itemGet({ access_token: accessToken });
+    itemOk = data.status?.transactions?.last_successful_update ?? null;
+    itemFailed = data.status?.transactions?.last_failed_update ?? null;
+  } catch (err) {
+    log.warn('item status unavailable', { error: err instanceof Error ? err.message : String(err) });
+  }
+
+  // One statement, so an item's cursor and its freshness can never disagree about which sync they
+  // came from. COALESCE keeps the last known reading when this run could not fetch one, rather
+  // than blanking it to NULL — which `feedHealth` reads as "never observed" and declines to
+  // report, quietly turning an unreachable item into a healthy-looking one.
   await db.query(
-    `UPDATE accounts SET cursor = $1, last_synced_at = NOW() WHERE id = ANY($2)`,
-    [currentCursor, accountIds]
+    `UPDATE accounts
+        SET cursor = $1,
+            last_synced_at = NOW(),
+            item_last_successful_update = COALESCE($3::timestamptz, item_last_successful_update),
+            item_last_failed_update     = COALESCE($4::timestamptz, item_last_failed_update)
+      WHERE id = ANY($2)`,
+    [currentCursor, accountIds, itemOk, itemFailed]
   );
 
   if (unmatchedAccountIds.size > 0) {

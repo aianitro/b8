@@ -11,6 +11,8 @@ import LandscapeBalanceChart from '@/components/charts/LandscapeBalanceChart';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
+import FeedHealthCard from '@/components/FeedHealthCard';
+import { loadFeedHealth } from '@/lib/feedHealthRead';
 import UnscoredBreaches from '@/components/UnscoredBreaches';
 import type { BreachFinding } from '@/lib/domain/adherence';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
@@ -537,13 +539,14 @@ export default async function DashboardPage() {
   // Kicked off alongside the rest rather than awaited after, so the reconciliation check
   // doesn't add a serial round trip to page load.
   const driftPromise = findBalanceDrift();
+  const feedPromise = loadFeedHealth();
   const [stats, monthRead, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual] =
     await Promise.all([
       getStats(asOf), loadMonthOutlook(asOf), getCashFlowSeries(asOf),
       getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCashFlow(asOf), getCategoryBreakdown(asOf),
       getBudgetVsActual(asOf),
     ]);
-  const driftFindings = await driftPromise;
+  const [driftFindings, feedFindings] = await Promise.all([driftPromise, feedPromise]);
 
   // The whole verdict, from one reader shared with the daily job. Its three queries still run
   // concurrently with everything else above — `loadMonthOutlook` issues them together and is itself
@@ -597,6 +600,11 @@ export default async function DashboardPage() {
 
       {/* Rendered above the hero deliberately: if a balance doesn't reconcile, that's context
           you want before reading the headline figure, not after. */}
+      {/* Above the drift strip, and above the hero, because it qualifies both: a balance that
+          does not reconcile and a month that looks quiet are each explained by a feed that stopped
+          arriving. Reading either without knowing that is how a stale figure gets acted on. */}
+      <FeedHealthCard findings={feedFindings} />
+
       <DriftAlertCard findings={driftFindings} />
 
       {/* The hero, and it answers a budget question: will this month close inside its limits, and
