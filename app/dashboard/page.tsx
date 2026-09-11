@@ -3,7 +3,6 @@ export const dynamic = 'force-dynamic';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import db from '@/lib/db';
-import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
 import CategoryDonutChart, { type CategorySlice } from '@/components/charts/CategoryDonutChart';
 import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts/BudgetVsActualChart';
 import ProfitLossChart from '@/components/charts/ProfitLossChart';
@@ -34,9 +33,6 @@ import { MONTHS, drillHref } from '@/lib/drilldown';
 import { daysInMonth } from '@/lib/domain/pacing';
 
 
-function blankMonths<T extends object>(fill: T): Array<{ month: string } & T> {
-  return MONTHS.map((month) => ({ month, ...fill }));
-}
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -253,26 +249,6 @@ async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpend[]> 
   return out;
 }
 
-async function getCashFlow(asOf: DashboardAsOf): Promise<CashFlowData[]> {
-  const result = await db.query<{ month_num: number; total_out: number; total_in: number }>(`
-    SELECT EXTRACT(MONTH FROM t.date)::int AS month_num,
-           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)      AS total_out,
-           COALESCE(ABS(SUM(t.amount) FILTER (WHERE t.amount < 0)), 0) AS total_in
-    FROM transactions t
-    JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-    LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
-    WHERE EXTRACT(YEAR FROM t.date) = $1
-      AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
-      AND t.hidden = FALSE
-    GROUP BY month_num ORDER BY month_num
-  `, [asOf.year]);
-  const rows = blankMonths<Omit<CashFlowData, 'month'>>({ in: 0, out: 0, net: 0 });
-  for (const r of result.rows) {
-    const row = rows[r.month_num - 1];
-    row.out = Number(r.total_out); row.in = Number(r.total_in); row.net = row.in - row.out;
-  }
-  return rows;
-}
 
 async function getCategoryBreakdown(asOf: DashboardAsOf): Promise<CategorySlice[]> {
   const result = await db.query<CategorySlice>(`
@@ -518,11 +494,11 @@ export default async function DashboardPage() {
   // doesn't add a serial round trip to page load.
   const driftPromise = findBalanceDrift();
   const feedPromise = loadFeedHealth();
-  const [stats, monthRead, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual,
+  const [stats, monthRead, todayStats, weekStats, monthly, breakdown, budgetVsActual,
          recentArrivals, yearEnd] =
     await Promise.all([
       getStats(asOf), loadMonthOutlook(asOf),
-      getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCashFlow(asOf), getCategoryBreakdown(asOf),
+      getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCategoryBreakdown(asOf),
       getBudgetVsActual(asOf), getRecentArrivals(),
       // Operational, matching /budget's default tab, so the two pages show the same figure. The
       // capital year is lumpy by construction — a remodel draws $40,000 in May — and averaging it
@@ -903,10 +879,10 @@ export default async function DashboardPage() {
       {/* Charts */}
       <div className="space-y-6">
         <ProfitLossChart data={plSeries} />
-        <div className="grid grid-cols-2 gap-6">
-          <CategoryDonutChart data={breakdown} />
-          <CashFlowChart data={cashflow} />
-        </div>
+        {/* The donut lost the pair it sat beside when Cash Flow went. Full width rather than half
+            a row with white space next to it — the operational book has fourteen categories and
+            the legend was the cramped half of that layout anyway. */}
+        <CategoryDonutChart data={breakdown} />
         <BudgetVsActualChart data={budgetVsActual} />
       </div>
     </div>
