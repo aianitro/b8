@@ -7,9 +7,9 @@ import { LANDSCAPE_HEX, STATUS_HEX } from '@/lib/chartColors';
 
 export interface ProfitLossPoint {
   month: string;
-  /** Operational spending in this month alone. Null for months that have not happened. */
+  /** Operational spending for the month, already NEGATED so it hangs below the zero line. */
   spent: number | null;
-  /** Money in for the month, already NEGATED so it hangs below the zero line. */
+  /** Money in for the month, positive, rising above the line. */
   received: number | null;
   /** Cumulative P/L for settled months; null once the year turns to forecast. */
   pl: number | null;
@@ -44,18 +44,27 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Profit &amp; Loss</p>
       <p className="text-[11px] text-slate-400 mb-4">
-        Bars: money out above the line, money in below · Line: cumulative income less spending, dashed once forecast
+        Bars: money in above the line, money out below · Line: cumulative income less spending, dashed once forecast
       </p>
       <ResponsiveContainer width="100%" height={260}>
-        <ComposedChart data={data} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+        {/* `barGap="-100%"` puts the two bars in ONE column instead of side by side, which is what
+            makes money in sit directly above the money out it has to cover.
+            
+            Not a shared `stackId`: Recharts stacks by accumulation, so [+7,631, −3,312] becomes a
+            running total — the negative eats into the positive and both rects come out sharing a
+            top edge, drawing money out as a slice of money in. And not `stackOffset="sign"`, which
+            is the documented fix for that and hangs the renderer outright on this chart, mixing
+            bars and a null-gapped line. Full overlap needs neither: the two series have opposite
+            signs, so they can never collide vertically. */}
+        <ComposedChart data={data} barGap="-100%" margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
           <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} />
           <Tooltip
-            // Money in is stored negative to make the bar hang downward, so it is put back before
-            // anyone reads it. Only that series: the P/L line's sign is the whole verdict and
-            // stripping it would turn a loss into a gain on the way to the screen.
-            formatter={(v, name) => fmt(name === 'Money in' ? Math.abs(Number(v)) : Number(v))}
+            // Money out is stored negative to make the bar hang downward, so it is put back
+            // before anyone reads it. Only that series: the P/L line's sign is the whole verdict
+            // and stripping it would turn a loss into a gain on the way to the screen.
+            formatter={(v, name) => fmt(name === 'Money out' ? Math.abs(Number(v)) : Number(v))}
             contentStyle={{ border: '1px solid #e2e8f0', borderRadius: '10px', fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }}
           />
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: '#64748b' }} />
@@ -63,13 +72,13 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
               below it the year is down — so it is drawn darker than the grid behind it. */}
           <ReferenceLine y={0} stroke="#cbd5e1" strokeWidth={1} />
           {/* Behind the line, and muted: the bars are the context, the running total is the point. */}
-          <Bar dataKey="spent" name="Money out" fill={LANDSCAPE_HEX.operational}
-               fillOpacity={0.25} radius={[3, 3, 0, 0]} />
-          {/* Mirrored below the axis. Out above and in below makes the month's shape legible
-              without arithmetic: the deeper bar is the bigger number, and where they are close the
-              month roughly paid for itself. */}
+          {/* Money in rises from zero, money out hangs below it in the same column — the
+              comparison the chart is for, made vertical rather than leaving the eye to pair two
+              neighbouring bars. */}
           <Bar dataKey="received" name="Money in" fill={STATUS_HEX.good}
-               fillOpacity={0.2} radius={[0, 0, 3, 3]} />
+               fillOpacity={0.22} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="spent" name="Money out" fill={LANDSCAPE_HEX.operational}
+               fillOpacity={0.25} radius={[0, 0, 3, 3]} />
           {/* Two series, because Recharts cannot change a line's dash mid-path. They share the last
               settled month so the join is continuous rather than leaving a gap at exactly the
               boundary between what happened and what is expected. */}

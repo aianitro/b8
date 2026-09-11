@@ -563,10 +563,11 @@ export default async function DashboardPage() {
     month,
     // Bars stop where the data does. A future month drawn at $0 reads as a month that cost
     // nothing, which is a claim; absent reads as not yet, which is the truth.
-    spent: i <= asOf.month ? (monthly[i]?.operational ?? 0) : null,
-    // NEGATED so the bar hangs below the zero line. The value carries the sign the chart needs;
-    // the tooltip puts it back, because "money in −$12,000" is nonsense on the way out.
-    received: i <= asOf.month ? -(monthly[i]?.received ?? 0) : null,
+    // Money OUT is the negated one: it hangs below the axis, money in rises above it. The value
+    // carries the sign the chart needs and the tooltip puts it back, because "money out −$26,000"
+    // is nonsense on the way to a reader.
+    spent: i <= asOf.month ? -(monthly[i]?.operational ?? 0) : null,
+    received: i <= asOf.month ? (monthly[i]?.received ?? 0) : null,
     pl: i <= lastSettled ? yearEnd.monthly[i].cumulative : null,
     plProjected: i >= lastSettled ? yearEnd.monthly[i].cumulative : null,
   }));
