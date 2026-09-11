@@ -263,7 +263,13 @@ export default async function BudgetPage({ searchParams }: PageProps) {
               {
                 label: 'YTD Spent',
                 value: fmt(totalSpent),
-                sub: `${Math.round(totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0)}% used · expected ${fmt(expectedSpend)}`,
+                // Expected alone. "72% used" measured spend against the WHOLE year, which says
+                // nothing in September without the reader supplying the elapsed fraction
+                // themselves — and 72% of the year's money at 78% through the year is either fine
+                // or not depending on a second number that was not on screen. Expected is that
+                // comparison already made, on the real schedules, and it is what the Remaining
+                // card is coloured by, so the two now agree instead of offering rival yardsticks.
+                sub: `expected ${fmt(expectedSpend)}`,
               },
               {
                 label: 'Remaining',
