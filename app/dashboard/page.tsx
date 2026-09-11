@@ -86,7 +86,7 @@ async function getStats(asOf: DashboardAsOf) {
 }
 
 
-interface MonthlySpend { month: string; operational: number }
+interface MonthlySpend { month: string; operational: number; received: number }
 
 interface TodayStats {
   spent: number;
@@ -232,9 +232,10 @@ async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpend[]> 
   // The budget-per-month reference this used to fetch alongside is gone with the line it drew.
   // It summed every category including income, so it put the whole salary above the bars it was
   // meant to measure — and the P/L line now answers "are we ahead" better than a flat average did.
-  const { rows } = await db.query<{ month_num: number; total: string }>(`
+  const { rows } = await db.query<{ month_num: number; total: string; received: string }>(`
     SELECT EXTRACT(MONTH FROM t.date)::int AS month_num,
-           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS total
+           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text        AS total,
+           COALESCE(ABS(SUM(t.amount) FILTER (WHERE t.amount < 0)), 0)::text   AS received
     FROM transactions t
     JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
     LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
@@ -244,8 +245,11 @@ async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpend[]> 
     GROUP BY month_num
   `, [asOf.year]);
 
-  const out: MonthlySpend[] = MONTHS.map((month) => ({ month, operational: 0 }));
-  for (const r of rows) out[r.month_num - 1].operational = Number(r.total);
+  const out: MonthlySpend[] = MONTHS.map((month) => ({ month, operational: 0, received: 0 }));
+  for (const r of rows) {
+    out[r.month_num - 1].operational = Number(r.total);
+    out[r.month_num - 1].received = Number(r.received);
+  }
   return out;
 }
 
@@ -560,6 +564,9 @@ export default async function DashboardPage() {
     // Bars stop where the data does. A future month drawn at $0 reads as a month that cost
     // nothing, which is a claim; absent reads as not yet, which is the truth.
     spent: i <= asOf.month ? (monthly[i]?.operational ?? 0) : null,
+    // NEGATED so the bar hangs below the zero line. The value carries the sign the chart needs;
+    // the tooltip puts it back, because "money in −$12,000" is nonsense on the way out.
+    received: i <= asOf.month ? -(monthly[i]?.received ?? 0) : null,
     pl: i <= lastSettled ? yearEnd.monthly[i].cumulative : null,
     plProjected: i >= lastSettled ? yearEnd.monthly[i].cumulative : null,
   }));
