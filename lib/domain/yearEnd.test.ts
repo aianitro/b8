@@ -116,3 +116,17 @@ describe('projectYearEndByMonth', () => {
     expect(() => projectYearEndByMonth([], [], 12)).toThrow(RangeError);
   });
 });
+
+describe('projectYearEndByMonth per-side output', () => {
+  it('reports each side as a positive magnitude, netting to the same figure', () => {
+    const income  = [mrow(12000, [-1100,0,0,0,0,0,0,0,0,0,0,0], 3)];
+    const expense = [mrow(24000, [2500,0,0,0,0,0,0,0,0,0,0,0], 3)];
+    const s = projectYearEndByMonth(income, expense, 3);
+    expect(s[0].income).toBe(1100);    // January actual, flipped out of the ledger's sign
+    expect(s[0].expense).toBe(2500);
+    expect(s[0].net).toBe(1100 - 2500);
+    // A forecast month falls back to plan on both sides.
+    expect(s[6].income).toBeCloseTo(1000, 6);
+    expect(s[6].expense).toBeCloseTo(2000, 6);
+  });
+});

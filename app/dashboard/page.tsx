@@ -566,8 +566,14 @@ export default async function DashboardPage() {
     // Money OUT is the negated one: it hangs below the axis, money in rises above it. The value
     // carries the sign the chart needs and the tooltip puts it back, because "money out −$26,000"
     // is nonsense on the way to a reader.
-    spent: i <= asOf.month ? -(monthly[i]?.operational ?? 0) : null,
-    received: i <= asOf.month ? (monthly[i]?.received ?? 0) : null,
+    //
+    // Settled and forecast are separate series so they can be drawn differently, and the boundary
+    // is the same one the line uses — `lastSettled`. The current month is FORECAST on both: it is
+    // eleven days old, and a solid bar for it would claim a finished month.
+    spent:    i <= lastSettled ? -(monthly[i]?.operational ?? 0) : null,
+    received: i <= lastSettled ?  (monthly[i]?.received ?? 0)    : null,
+    spentProjected:    i >= asOf.month ? -yearEnd.monthly[i].expense : null,
+    receivedProjected: i >= asOf.month ?  yearEnd.monthly[i].income  : null,
     pl: i <= lastSettled ? yearEnd.monthly[i].cumulative : null,
     plProjected: i >= lastSettled ? yearEnd.monthly[i].cumulative : null,
   }));
