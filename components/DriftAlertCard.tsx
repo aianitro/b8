@@ -80,7 +80,7 @@ export default function DriftAlertCard({ findings }: { findings: DriftFinding[] 
   }
 
   return (
-    <div className="border border-amber-200 bg-amber-50/70 rounded-xl mb-4">
+    <div className="border border-amber-200 bg-amber-50/70 rounded-xl">
       {/* Two SIBLING interactive elements, not one nested in the other — a <button> cannot
           legally contain other interactive content, and nesting the fix inside the disclosure
           toggle would also mean one click landing on two different actions is only one DOM edit
@@ -122,28 +122,36 @@ export default function DriftAlertCard({ findings }: { findings: DriftFinding[] 
         <div className="px-3 pb-3 pt-1 border-t border-amber-200/70 mt-0.5">
           <p className="text-[11px] text-amber-700/80 mt-2">{summary}</p>
 
-          <div className="flex items-center justify-end gap-3 mt-3 text-[10px] font-medium uppercase tracking-wide text-amber-700/50">
-            <span className="w-20 text-right">Recorded here</span>
-            <span className="w-20 text-right">Bank</span>
-            <span className="w-24 text-right">Difference</span>
-          </div>
-
-          <ul className="space-y-1.5 mt-1.5">
+          {/* One account per block, name on its own line, figures beneath it.
+              
+              This was four columns in a row — name, ours, the bank's, the gap — which fitted while
+              the strip ran the width of the page. Docked in the corner the card is about 380px and
+              the columns collided: the status pill printed straight through the first figure. A
+              narrow card cannot hold four columns, so the row becomes two lines rather than four
+              squeezed ones, and the labels move onto each figure where they cannot drift out of
+              register with it. */}
+          <ul className="space-y-2.5 mt-3">
             {findings.map((f) => (
-              <li key={f.accountId} className="flex items-center justify-between gap-4 text-xs">
-                <span className="flex items-center gap-2 min-w-0">
+              <li key={f.accountId} className="text-xs">
+                <div className="flex items-center gap-2 min-w-0">
                   <Link href={`/accounts/${f.accountId}`} className="font-medium text-amber-900 hover:underline truncate">
                     {f.name}
                   </Link>
                   <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-200/70 text-amber-900 font-medium">
                     {f.safeToDerive ? 'no starting balance' : 'check transactions'}
                   </span>
-                </span>
-                <span className="flex items-center gap-3 shrink-0 font-mono">
-                  <span className="w-20 text-right text-amber-700/70">{fmt(f.ledgerBalance)}</span>
-                  <span className="w-20 text-right text-amber-700/70">{fmt(f.expectedBalance)}</span>
-                  <span className="w-24 text-right font-semibold text-amber-900">{fmtSigned(f.drift)}</span>
-                </span>
+                </div>
+                <div className="flex items-baseline justify-between gap-2 mt-1 font-mono text-[11px]">
+                  <span className="text-amber-700/70">
+                    <span className="font-sans text-[9px] uppercase tracking-wide text-amber-700/50">here </span>
+                    {fmt(f.ledgerBalance)}
+                  </span>
+                  <span className="text-amber-700/70">
+                    <span className="font-sans text-[9px] uppercase tracking-wide text-amber-700/50">bank </span>
+                    {fmt(f.expectedBalance)}
+                  </span>
+                  <span className="font-semibold text-amber-900">{fmtSigned(f.drift)}</span>
+                </div>
               </li>
             ))}
           </ul>
