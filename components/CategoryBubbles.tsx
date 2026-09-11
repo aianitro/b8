@@ -38,18 +38,30 @@ function bubbleColor(c: BubbleCategory): string {
 // label came out two sizes larger than intended, overflowing circles that had looked fine in the
 // maths.
 const WIDTH = 1000;
-const HEIGHT = 340;
+// Taller than the circles need, because the smallest ones carry their name in the gap beneath
+// them and a tight box clips it.
+const HEIGHT = 380;
 
 /** Rough width of a character at a given font size, for fitting a label inside a circle. */
 const charWidth = (fontSize: number) => fontSize * 0.55;
+
+/**
+ * Fewer characters than this inside a circle and the label is not a name any more.
+ *
+ * "Onlin…" and "Educa…" are what a purely geometric fit produced once every category was drawn
+ * rather than the scored nine — technically inside the circle, and unreadable. Below this, the
+ * name goes underneath the bubble where it has the whole width of the gap to itself.
+ */
+const MIN_INSIDE_CHARS = 9;
 
 /** The longest prefix of `name` that fits across a circle of radius `r`, ellipsised if cut. */
 function fitLabel(name: string, r: number, fontSize: number): string | null {
   // 1.7r, not 2r: a chord near the edge of a circle is shorter than its diameter, and text set to
   // the full width visibly breaches the curve at both ends.
   const maxChars = Math.floor((r * 1.7) / charWidth(fontSize));
-  if (maxChars < 3) return null;
-  return name.length <= maxChars ? name : `${name.slice(0, maxChars - 1)}…`;
+  if (name.length <= maxChars) return name;
+  if (maxChars < MIN_INSIDE_CHARS) return null;
+  return `${name.slice(0, maxChars - 1)}…`;
 }
 
 /**
@@ -71,7 +83,7 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
       WIDTH, HEIGHT,
       // Looser than the default: at 0.62 the circles crowded the box edge to edge and the picture
       // read as a solid mass rather than as distinct amounts.
-      { fill: 0.5, padding: 6, minRadius: 12 }
+      { fill: 0.46, padding: 14, minRadius: 13 }
     ),
     [categories]
   );
@@ -129,7 +141,9 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
           // Big circles carry their own label; small ones get it underneath rather than going
           // unnamed. An unlabelled RED bubble is the worst case the old rule produced — a finding
           // the reader can see is bad and cannot name without hovering.
-          const nameSize = Math.min(15, Math.max(10, c.r / 3.2));
+          // Rounded for the same reason the coordinates are: an unrounded font size is a second
+          // float whose server and client spellings differ.
+          const nameSize = Math.round(Math.min(15, Math.max(10, c.r / 3.2)) * 10) / 10;
           const inside = fitLabel(cat.category, c.r, nameSize);
           // Over means SPENT past the line, not projected to pass it. Those are different claims
           // and only one of them is money that has left: a category at $110 of $150 is heading

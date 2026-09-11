@@ -626,19 +626,28 @@ export default async function DashboardPage() {
   // fact whether or not behaviour is the variable. §5's "tracked and reported, never scored".
   const unscoredBreaches = outlook.findings.filter((f): f is BreachFinding => f.kind === 'breach' && !f.scored);
 
-  // Every category the hero scored, as one circle each: what it was given, and where it is going.
-  // Drawn from the same three partitions the list below renders, so the two cannot disagree about
-  // which categories are in play. `withheld` is included and deliberately left uncoloured — a
-  // category whose verdict was refused still has a budget, and omitting it would make the picture
-  // claim the month is smaller than it is.
-  const bubbleCategories: BubbleCategory[] = [...outlook.sayingNo, ...outlook.holding, ...outlook.withheld]
-    .filter((c) => c.budgeted > 0)
-    .map((c) => ({
-      category: c.category,
-      budgeted: c.budgeted,
-      actual: c.actual,
-      projectedRatio: c.projectedRatio,
-      tooEarly: c.status === 'too-early' || c.withheldReason !== null,
+  // EVERY operational spending category, not the scored subset.
+  //
+  // The lists below partition to `isScoredCategory` — discretionary lines, where behaviour is the
+  // variable — and that is right for a verdict. It is wrong for a picture of where the money is:
+  // groceries, fuel, property tax and utilities are most of the month by value and none of them
+  // are a decision anyone makes monthly, so a chart drawn off the partitions showed a household
+  // spending about $1,150 when the real figure is several times that. The bubbles are a map, not
+  // a judgement, and a map that omits the largest territory is the wrong shape.
+  //
+  // `monthRead.allPaces` comes off the same fetch, the same actuals and the same recurrence the
+  // verdict uses, so a category appearing in both cannot carry two different figures.
+  // Scoped to the as-of month. `categoryPacing` emits a record per category PER MONTH — that is
+  // what lets `offCycleElsewhere` report an earlier month's breach — so taking the array whole
+  // drew a category once for every month it had a budget in, 28 circles over 21 categories.
+  const bubbleCategories: BubbleCategory[] = monthRead.allPaces
+    .filter((p) => p.month === asOf.month && p.budgeted > 0)
+    .map((p) => ({
+      category: p.category,
+      budgeted: p.budgeted,
+      actual: p.actual,
+      projectedRatio: p.projectedRatio,
+      tooEarly: p.status === 'too-early' || p.status === 'future' || p.status === 'no-budget',
     }));
 
   const sidePanels = [outlook.withheld.length, outlook.offCycleElsewhere.length, unscoredBreaches.length]

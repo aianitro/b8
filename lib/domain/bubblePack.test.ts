@@ -99,3 +99,15 @@ describe('recentring', () => {
     expect(overlaps(packCircles(budgets, W, H))).toBeNull();
   });
 });
+
+describe('output precision', () => {
+  it('rounds every coordinate, so server and client render the same string', () => {
+    // An unrounded float serialises to a different number of digits in Node and in the browser,
+    // which React reports as a hydration mismatch on every circle.
+    for (const c of packCircles(budgets, W, H)) {
+      for (const n of [c.x, c.y, c.r]) {
+        expect(Number(n.toFixed(2))).toBe(n);
+      }
+    }
+  });
+});

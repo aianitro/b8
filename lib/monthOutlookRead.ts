@@ -1,7 +1,7 @@
 import db from './db';
-import type { AdherenceInput } from './domain/adherence';
+import { isTrackedCategory, type AdherenceInput } from './domain/adherence';
 import { categorizationCoverage, monthOutlook, type CoverageGroup, type MonthOutlook } from './domain/monthOutlook';
-import type { AsOf } from './domain/pacing';
+import { categoryPacing, type AsOf, type CategoryPace } from './domain/pacing';
 import { detectRecurring, RECURRENCE_LOOKBACK_MONTHS, type RecurrenceTxn } from './domain/recurrence';
 
 /**
@@ -292,6 +292,23 @@ export interface MonthOutlookRead {
   outlook: MonthOutlook;
   /** How many `mapped_category` groups this month's unfiltered aggregation produced. */
   coverageGroupCount: number;
+  /**
+   * Pacing for EVERY operational spending category, not only the scored ones.
+   *
+   * `outlook` partitions to `isScoredCategory` — discretionary lines, where behaviour is the
+   * variable — and that is right for a verdict: a mortgage drawing its mortgage is not a decision
+   * anyone made this month. It is wrong for a picture of where the money is. Groceries, fuel and
+   * utilities are most of the month by value and none of them appear in the partitions, so a chart
+   * built off them shows a household spending $1,150 when it is spending several times that.
+   *
+   * Computed from the SAME rows, actuals and recurrence the verdict uses — one fetch, one set —
+   * so the two can disagree about nothing. The scored subset is exactly the rows the partitions
+   * already carry; this is a superset, never a second opinion about a shared member.
+   *
+   * Still filtered to operational, non-income, budget-bearing rows. Capital has its own page and
+   * its own clock, and an income line has no overspend to draw.
+   */
+  allPaces: CategoryPace[];
 }
 
 export async function loadMonthOutlook(asOf: AsOf): Promise<MonthOutlookRead> {
@@ -311,9 +328,18 @@ export async function loadMonthOutlook(asOf: AsOf): Promise<MonthOutlookRead> {
   // about whether `Sport` is heading for $265 or $993.75.
   const recurrence = detectRecurring(recurrenceWindow, asOf);
 
-  const outlook: MonthOutlook = monthOutlook(
-    toAdherenceInput(categories, actuals, asOf), asOf, coverage, recurrence,
-  );
+  const inputs = toAdherenceInput(categories, actuals, asOf);
 
-  return { outlook, coverageGroupCount: coverageGroups.length };
+  const outlook: MonthOutlook = monthOutlook(inputs, asOf, coverage, recurrence);
+
+  // The wider set, off the same inputs. `categoryPacing` is not restricted to scored rows — the
+  // restriction lives in `isScoredCategory`, one level up — so the only filter applied here is the
+  // one this consumer actually wants.
+  // `isTrackedCategory` is the repo's own name for this set — operational, budget-bearing, not
+  // income — and it is the exact predicate §5 means by "the rest are tracked and reported, never
+  // scored". Imported rather than restated: a second copy of a membership rule is a second place
+  // for it to drift, and this one already governs `outlook.findings`.
+  const allPaces = categoryPacing(inputs.filter(isTrackedCategory), asOf, recurrence);
+
+  return { outlook, coverageGroupCount: coverageGroups.length, allPaces };
 }
