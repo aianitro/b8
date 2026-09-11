@@ -465,12 +465,6 @@ function heroCopy(state: OutlookState, authoritative: boolean): { title: string;
   return { title: stated.title, tone: 'text-slate-300', pill: 'bg-slate-800 text-slate-400' };
 }
 
-const WITHHELD_COPY: Record<'too-early' | 'no-budget' | 'negative-budget', string> = {
-  'too-early': 'too early in the month to project',
-  'no-budget': 'nothing budgeted this month',
-  'negative-budget': 'budget is negative — fix it at /categories',
-};
-
 /**
  * The transactions behind one verdict: the named categories, in the month the verdict is about.
  *
@@ -644,7 +638,7 @@ export default async function DashboardPage() {
       tooEarly: p.status === 'too-early' || p.status === 'future' || p.status === 'no-budget',
     }));
 
-  const sidePanels = [outlook.withheld.length, outlook.offCycleElsewhere.length, unscoredBreaches.length]
+  const sidePanels = [outlook.offCycleElsewhere.length, unscoredBreaches.length]
     .filter((n) => n > 0).length;
 
   return (
@@ -728,15 +722,15 @@ export default async function DashboardPage() {
               // with a budget is over" is the vacuous sentence [[N40]] is about, one shape along.
               <>
                 No scored category has a verdict this month yet — all{' '}
-                {outlook.withheld.length} are withheld, for the reasons under “No verdict” below.
+                {outlook.withheld.length} are withheld, most often for having nothing budgeted.
               </>
             ) : outlook.withheld.length > 0 ? (
               <>
                 None of the {outlook.scoredCategoryCount - outlook.withheld.length}{' '}
                 {outlook.scoredCategoryCount - outlook.withheld.length === 1 ? 'category' : 'categories'} with a
                 budget this month is over or projecting over as of day {asOf.day} of {monthLength}; the other{' '}
-                {outlook.withheld.length} {outlook.withheld.length === 1 ? 'has' : 'have'} no verdict —
-                see “No verdict” below.
+                {outlook.withheld.length} {outlook.withheld.length === 1 ? 'has' : 'have'} no verdict,
+                most often for having nothing budgeted this month.
               </>
             ) : (
               <>
@@ -870,13 +864,6 @@ export default async function DashboardPage() {
         // as a narrow column beside two thirds of white space, which is what made a long list in it
         // look even longer.
         <div className={`grid ${PANEL_GRID[sidePanels]} gap-4 mb-6`}>
-          {outlook.withheld.length > 0 && (
-            <Panel title="No verdict">
-              {outlook.withheld.map((c) => (
-                <CategoryLine key={c.categoryId} c={c} note={WITHHELD_COPY[c.withheldReason!]} />
-              ))}
-            </Panel>
-          )}
           {outlook.offCycleElsewhere.length > 0 && (
             <Panel title="Off-cycle earlier this year">
               {outlook.offCycleElsewhere.map((c) => (
