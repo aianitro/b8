@@ -11,6 +11,9 @@ export interface ProfitLossPoint {
   spent: number | null;
   /** Money in for the month, positive, rising above the line. */
   received: number | null;
+  /** The same pair for months still to come, drawn faded. */
+  spentProjected: number | null;
+  receivedProjected: number | null;
   /** Cumulative P/L for settled months; null once the year turns to forecast. */
   pl: number | null;
   /** The same series from the last settled month onward, drawn dashed. */
@@ -72,7 +75,7 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
             // Money out is stored negative to make the bar hang downward, so it is put back
             // before anyone reads it. Only that series: the P/L line's sign is the whole verdict
             // and stripping it would turn a loss into a gain on the way to the screen.
-            formatter={(v, name) => fmt(name === 'Money out' ? Math.abs(Number(v)) : Number(v))}
+            formatter={(v, name) => fmt(String(name).startsWith('Money out') ? Math.abs(Number(v)) : Number(v))}
             contentStyle={{ border: '1px solid #e2e8f0', borderRadius: '10px', fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }}
           />
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: '#64748b' }} />
@@ -87,6 +90,17 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
                fillOpacity={0.22} radius={[3, 3, 0, 0]} />
           <Bar dataKey="spent" name="Money out" fill={LANDSCAPE_HEX.operational}
                fillOpacity={0.25} radius={[0, 0, 3, 3]} />
+          {/* The months still to come. Same colours, roughly half the fill, and an outline — a
+              forecast should be recognisable as one at a glance without being a fourth hue to
+              learn. They carry the same `barSize`/`barGap` as the pair above, so all four series
+              land in one column and the settled and forecast bars, which never share a month,
+              cannot overlap. */}
+          <Bar dataKey="receivedProjected" name="Money in (projected)" fill={STATUS_HEX.good}
+               fillOpacity={0.1} stroke={STATUS_HEX.good} strokeOpacity={0.45} strokeDasharray="3 2"
+               radius={[3, 3, 0, 0]} />
+          <Bar dataKey="spentProjected" name="Money out (projected)" fill={LANDSCAPE_HEX.operational}
+               fillOpacity={0.12} stroke={LANDSCAPE_HEX.operational} strokeOpacity={0.45} strokeDasharray="3 2"
+               radius={[0, 0, 3, 3]} />
           {/* Two series, because Recharts cannot change a line's dash mid-path. They share the last
               settled month so the join is continuous rather than leaving a gap at exactly the
               boundary between what happened and what is expected. */}

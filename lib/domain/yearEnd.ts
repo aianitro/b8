@@ -112,6 +112,10 @@ export function monthlyRow(
 }
 
 export interface MonthPoint {
+  /** Money in for this month — actual where settled, plan where forecast. */
+  income: number;
+  /** Money out for this month, as a positive magnitude, on the same rule. */
+  expense: number;
   /** Net for this month alone: income less expense. */
   net: number;
   /** Running total from January. The December value is the year's P/L. */
@@ -151,7 +155,7 @@ export function projectYearEndByMonth(
     running += net;
     // The AS-OF month counts as projected: part of it has not happened, and a solid line drawn to
     // its end would claim a settled figure for a month still running.
-    out.push({ net, cumulative: running, projected: m >= monthIdx });
+    out.push({ income: income[m], expense: expense[m], net, cumulative: running, projected: m >= monthIdx });
   }
   return out;
 }
