@@ -117,6 +117,12 @@ function tryPack(
  * side. Centring is cosmetic and it matters: an off-centre cluster reads as though the empty half
  * means something.
  */
+// Two decimals is finer than a pixel at any size this renders at, and it is the reason the output
+// is rounded AT ALL: an unrounded coordinate serialises to 17 significant digits on the server and
+// 16 in the browser — `193.8309000499607` against `193.83090004996063` — and React reports that as
+// a hydration mismatch on every circle. Same number, two spellings, one warning per bubble.
+const px = (n: number) => Math.round(n * 100) / 100;
+
 function recenter(circles: PackedCircle[], width: number, height: number): PackedCircle[] {
   if (circles.length === 0) return circles;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -126,7 +132,7 @@ function recenter(circles: PackedCircle[], width: number, height: number): Packe
   }
   const dx = (width - (minX + maxX)) / 2;
   const dy = (height - (minY + maxY)) / 2;
-  return circles.map((c) => ({ ...c, x: c.x + dx, y: c.y + dy }));
+  return circles.map((c) => ({ ...c, x: px(c.x + dx), y: px(c.y + dy), r: px(c.r) }));
 }
 
 /** First point on an outward spiral where this circle touches nothing and stays inside the box. */
