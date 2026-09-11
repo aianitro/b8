@@ -3,11 +3,8 @@ export const dynamic = 'force-dynamic';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import db from '@/lib/db';
-import MonthlySpendingChart, { type MonthlySpendingData } from '@/components/charts/MonthlySpendingChart';
 import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
-import CategoryDonutChart, { type CategorySlice } from '@/components/charts/CategoryDonutChart';
 import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts/BudgetVsActualChart';
-import LandscapeBalanceChart from '@/components/charts/LandscapeBalanceChart';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
@@ -29,6 +26,7 @@ import { MONTHS, drillHref } from '@/lib/drilldown';
 // The calendar rule, imported rather than restated: `./pacing` exports it precisely so a caller
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
 // April is. A second leap-year rule here would drift on 2100.
+import { projectYearEnd, type YearEndRow } from '@/lib/domain/yearEnd';
 import { daysInMonth } from '@/lib/domain/pacing';
 
 
@@ -60,12 +58,15 @@ async function getStats(asOf: DashboardAsOf) {
       -- overstated the budget by the whole income side while "Spent" (positive amounts only)
       -- never included a cent of it.
       (SELECT COALESCE(SUM(annual_budget), 0) FROM budget_categories
-        WHERE exclude_from_budget = FALSE AND is_income = FALSE)::text AS total_budget,
-      (SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)
+        WHERE exclude_from_budget = FALSE AND is_income = FALSE AND landscape = 'operational')::text AS total_budget,
+      -- Net of refunds, matching app/budget/page.tsx. Gross and net disagreed by $11,169 across
+      -- 2026, enough that the same year read over pace on one page and on track on the other.
+      (SELECT COALESCE(SUM(t.amount), 0)
          FROM transactions t
          JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          JOIN budget_categories bc ON bc.name = t.mapped_category
               AND bc.exclude_from_budget = FALSE AND bc.is_income = FALSE
+              AND bc.landscape = 'operational'
          WHERE EXTRACT(YEAR FROM t.date) = $1 AND t.hidden = FALSE)::text AS ytd_spent,
       (SELECT COUNT(*) FROM transactions t JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          WHERE t.mapped_category IS NULL AND t.hidden = FALSE)::text AS uncategorized,
@@ -83,53 +84,45 @@ async function getStats(asOf: DashboardAsOf) {
   };
 }
 
-// The flow-derived month-by-month series — beginning balance plus transactions, per landscape.
-async function getCashFlowSeries(asOf: DashboardAsOf): Promise<{
-  monthlyOperational: number[];
-  monthlyCapital: number[];
-  monthlySeries: number[];
-}> {
-  const [accountsRes, netRes, balancesRes] = await Promise.all([
-    db.query<{ id: string; landscape: string }>(
-      'SELECT id, landscape FROM accounts WHERE track_transactions = TRUE'
-    ),
-    db.query<{ account_id: string; month: number; net: string }>(`
-      SELECT t.account_id,
-             EXTRACT(MONTH FROM t.date)::int AS month,
-             (COALESCE(ABS(SUM(t.amount) FILTER (WHERE t.amount < 0)), 0)
-              - COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0))::text AS net
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-      WHERE EXTRACT(YEAR FROM t.date) = $1
-      GROUP BY t.account_id, EXTRACT(MONTH FROM t.date)::int
-    `, [asOf.year]),
-    db.query<{ account_id: string; beginning_balance: string }>(
-      'SELECT account_id, beginning_balance FROM account_balances WHERE year = $1', [asOf.year]
-    ),
-  ]);
+// The operational year, as it will end if the rest of it goes to plan. Same three inputs the
+// budget header feeds `projectYearEnd` — a schedule, the closed months, and the month in progress
+// — read here for the operational book alone, since that is the book this page is about.
+//
+// Split either side of the as-of month rather than summed year-to-date, because the projection
+// settles closed months on fact and the current one on plan-or-actual whichever is larger. A
+// single YTD total cannot be taken apart again once added up.
+async function getYearEnd(asOf: DashboardAsOf) {
+  const { rows } = await db.query<{
+    is_income: boolean; annual_budget: string; monthly_amounts: string[] | null;
+    closed_months: string; current_month: string;
+  }>(`
+    SELECT bc.is_income, bc.annual_budget::text, bc.monthly_amounts,
+           COALESCE(SUM(t.amount) FILTER (
+             WHERE EXTRACT(MONTH FROM t.date) < $2), 0)::text AS closed_months,
+           COALESCE(SUM(t.amount) FILTER (
+             WHERE EXTRACT(MONTH FROM t.date) = $2), 0)::text AS current_month
+      FROM budget_categories bc
+      LEFT JOIN transactions t ON t.mapped_category = bc.name
+        AND EXTRACT(YEAR FROM t.date) = $1 AND t.hidden = FALSE
+      LEFT JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+     WHERE bc.exclude_from_budget = FALSE
+       AND bc.landscape = 'operational'
+       AND (t.id IS NULL OR a.id IS NOT NULL)
+     GROUP BY bc.id, bc.is_income, bc.annual_budget, bc.monthly_amounts
+  `, [asOf.year, asOf.month + 1]);
 
-  const netByAccount = new Map<string, Map<number, number>>();
-  for (const r of netRes.rows) {
-    if (!netByAccount.has(r.account_id)) netByAccount.set(r.account_id, new Map());
-    netByAccount.get(r.account_id)!.set(r.month, Number(r.net));
-  }
-  const beginningByAccount = new Map(balancesRes.rows.map((r) => [r.account_id, Number(r.beginning_balance)]));
-
-  const monthlySeries = new Array(asOf.month + 1).fill(0);
-  const monthlyOperational = new Array(asOf.month + 1).fill(0);
-  const monthlyCapital = new Array(asOf.month + 1).fill(0);
-  for (const a of accountsRes.rows) {
-    const byMonth = netByAccount.get(a.id) ?? new Map();
-    let running = beginningByAccount.get(a.id) ?? 0;
-    for (let i = 0; i <= asOf.month; i++) {
-      running += byMonth.get(i + 1) ?? 0;
-      monthlySeries[i] += running;
-      if (a.landscape === 'operational') monthlyOperational[i] += running;
-      else monthlyCapital[i] += running;
-    }
-  }
-  return { monthlySeries, monthlyOperational, monthlyCapital };
+  const toRow = (r: typeof rows[number]): YearEndRow => ({
+    annualBudget: Number(r.annual_budget),
+    monthlyAmounts: r.monthly_amounts?.length === 12 ? r.monthly_amounts.map(Number) : null,
+    closedMonths: Number(r.closed_months),
+    currentMonth: Number(r.current_month),
+  });
+  const income  = rows.filter((r) => r.is_income).map(toRow);
+  const expense = rows.filter((r) => !r.is_income).map(toRow);
+  const netToDate = -rows.reduce((sum, r) => sum + Number(r.closed_months) + Number(r.current_month), 0);
+  return { ...projectYearEnd(income, expense, asOf.month), netToDate };
 }
+
 
 interface TodayStats {
   spent: number;
@@ -147,7 +140,7 @@ async function getTodayStats(): Promise<TodayStats> {
       LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
       WHERE t.date = CURRENT_DATE
         AND t.hidden = FALSE
-        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
     `),
     // Average of the same weekday's total spend over the trailing 30 days (excluding today) —
     // "is today unusual" without building full anomaly detection.
@@ -162,7 +155,7 @@ async function getTodayStats(): Promise<TodayStats> {
           AND t.date < CURRENT_DATE
           AND EXTRACT(DOW FROM t.date) = EXTRACT(DOW FROM CURRENT_DATE)
           AND t.hidden = FALSE
-          AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+          AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
         GROUP BY t.date
       ) daily
     `),
@@ -203,7 +196,7 @@ async function getWeekStats(): Promise<WeekStats> {
       LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
       WHERE t.date >= date_trunc('week', CURRENT_DATE)
         AND t.hidden = FALSE
-        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
     `),
     // Same portion of the week, shifted back exactly 7 days — a fair week-over-week comparison
     // regardless of which day of the week "today" is.
@@ -215,7 +208,7 @@ async function getWeekStats(): Promise<WeekStats> {
       WHERE t.date >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 days'
         AND t.date <= CURRENT_DATE - INTERVAL '7 days'
         AND t.hidden = FALSE
-        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
     `),
     db.query<{ weekly_budget: string }>(`
       SELECT COALESCE(SUM(annual_budget) / 52, 0)::text AS weekly_budget
@@ -230,37 +223,6 @@ async function getWeekStats(): Promise<WeekStats> {
   };
 }
 
-async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpendingData[]> {
-  const [spending, budgets] = await Promise.all([
-    db.query<{ month_num: number; landscape: string; total: number }>(`
-      SELECT EXTRACT(MONTH FROM t.date)::int AS month_num, a.landscape,
-             COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0) AS total
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-      LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
-      WHERE EXTRACT(YEAR FROM t.date) = $1
-        AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
-        AND t.hidden = FALSE
-      GROUP BY month_num, a.landscape
-    `, [asOf.year]),
-    db.query<{ landscape: string; monthly_budget: number }>(
-      'SELECT landscape, SUM(annual_budget)/12 AS monthly_budget FROM budget_categories WHERE exclude_from_budget = FALSE GROUP BY landscape'
-    ),
-  ]);
-  const monthlyBudget: Record<string, number> = {};
-  for (const r of budgets.rows) monthlyBudget[r.landscape] = Number(r.monthly_budget);
-  const rows = blankMonths<Omit<MonthlySpendingData, 'month'>>({
-    operational: 0, capital: 0,
-    budget_operational: monthlyBudget['operational'] ?? 0,
-    budget_capital: monthlyBudget['capital'] ?? 0,
-  });
-  for (const r of spending.rows) {
-    const row = rows[r.month_num - 1];
-    if (r.landscape === 'operational') row.operational = Number(r.total);
-    if (r.landscape === 'capital') row.capital = Number(r.total);
-  }
-  return rows;
-}
 
 async function getCashFlow(asOf: DashboardAsOf): Promise<CashFlowData[]> {
   const result = await db.query<{ month_num: number; total_out: number; total_in: number }>(`
@@ -271,7 +233,7 @@ async function getCashFlow(asOf: DashboardAsOf): Promise<CashFlowData[]> {
     JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
     LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
     WHERE EXTRACT(YEAR FROM t.date) = $1
-      AND (t.mapped_category IS NULL OR bc.exclude_from_budget = FALSE)
+      AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
       AND t.hidden = FALSE
     GROUP BY month_num ORDER BY month_num
   `, [asOf.year]);
@@ -283,37 +245,22 @@ async function getCashFlow(asOf: DashboardAsOf): Promise<CashFlowData[]> {
   return rows;
 }
 
-async function getCategoryBreakdown(asOf: DashboardAsOf): Promise<CategorySlice[]> {
-  const result = await db.query<CategorySlice>(`
-    SELECT t.mapped_category AS name, bc.landscape,
-           SUM(t.amount) FILTER (WHERE t.amount > 0) AS value
-    FROM transactions t
-    JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-    JOIN budget_categories bc ON bc.name = t.mapped_category
-    WHERE t.mapped_category IS NOT NULL
-      AND bc.exclude_from_budget = FALSE
-      AND t.hidden = FALSE
-      AND EXTRACT(YEAR FROM t.date) = $1
-    GROUP BY t.mapped_category, bc.landscape
-    HAVING SUM(t.amount) FILTER (WHERE t.amount > 0) > 0
-    ORDER BY value DESC
-  `, [asOf.year]);
-  return result.rows.map((r) => ({ ...r, value: Number(r.value) }));
-}
 
 async function getBudgetVsActual(asOf: DashboardAsOf): Promise<BudgetVsActualRow[]> {
   const result = await db.query<BudgetVsActualRow>(`
     SELECT bc.name AS category, bc.landscape, bc.annual_budget AS budget,
-           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0) AS spent
+           COALESCE(SUM(t.amount), 0) AS spent
     FROM budget_categories bc
     LEFT JOIN transactions t ON t.mapped_category = bc.name
       AND EXTRACT(YEAR FROM t.date) = $1
       AND t.hidden = FALSE
     LEFT JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
     WHERE bc.exclude_from_budget = FALSE
+      AND bc.landscape = 'operational'
+      AND bc.is_income = FALSE
       AND (t.id IS NULL OR a.id IS NOT NULL)
     GROUP BY bc.name, bc.landscape, bc.annual_budget
-    ORDER BY bc.landscape, spent DESC
+    ORDER BY spent DESC
   `, [asOf.year]);
   return result.rows.map((r) => ({ ...r, budget: Number(r.budget), spent: Number(r.spent) }));
 }
@@ -537,11 +484,10 @@ export default async function DashboardPage() {
   // Kicked off alongside the rest rather than awaited after, so the reconciliation check
   // doesn't add a serial round trip to page load.
   const driftPromise = findBalanceDrift();
-  const [stats, monthRead, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual] =
+  const [stats, monthRead, yearEnd, todayStats, weekStats, cashflow, budgetVsActual] =
     await Promise.all([
-      getStats(asOf), loadMonthOutlook(asOf), getCashFlowSeries(asOf),
-      getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCashFlow(asOf), getCategoryBreakdown(asOf),
-      getBudgetVsActual(asOf),
+      getStats(asOf), loadMonthOutlook(asOf), getYearEnd(asOf),
+      getTodayStats(), getWeekStats(), getCashFlow(asOf), getBudgetVsActual(asOf),
     ]);
   const driftFindings = await driftPromise;
 
@@ -568,13 +514,6 @@ export default async function DashboardPage() {
   const weekDelta = weekStats.spent - weekStats.spentComparableLastWeek;
   const expectedWeekSpend = weekStats.weeklyBudgetReference * (weekStats.isoDow / 7);
   const weekPaceRatio = expectedWeekSpend > 0 ? weekStats.spent / expectedWeekSpend : 0;
-
-  const cashFlowSeries = flow.monthlySeries.map((total, i) => ({
-    month: MONTHS[i],
-    operational: flow.monthlyOperational[i],
-    capital: flow.monthlyCapital[i],
-    total,
-  }));
 
   // Breaches on categories nobody scores — a fixed mortgage line drawing over its budget is a true
   // fact whether or not behaviour is the variable. §5's "tracked and reported, never scored".
@@ -716,6 +655,19 @@ export default async function DashboardPage() {
                 so there is no share to compute one over.
               </>
             )
+          ) : outlook.coverage.unattributedCount === 0 ? (
+            // Nothing escaped the hero, so there is nothing to caveat and the sentence says so in
+            // one line. The PERCENTAGE still ships — §5's rule is that the headline never appears
+            // without the share of spend it saw, and that holds at 100% too. What is dropped here
+            // is only the breakdown of a shortfall that does not exist: naming $0.00 across 0
+            // transactions, and then pointing at a review queue that is empty, spends four lines
+            // saying nothing is wrong. The full form returns the moment a single row is
+            // unattributed.
+            <>
+              Computed over {outlook.coveragePercent}% of this month&apos;s spend,{' '}
+              {fmtCents(outlook.coverage.scoredSpend)} across the scored categories. Spend in
+              categories this hero never scores is in neither figure.
+            </>
           ) : (
             <>
               Computed over {outlook.coveragePercent}% of this month&apos;s spend —{' '}
@@ -879,11 +831,23 @@ export default async function DashboardPage() {
           to sit here counted the current month as fully elapsed — 33% of the year on 1 April
           against a true 25% — which inflated expected spend and flattered the pace. It is deleted
           rather than repaired: the per-category month above is the figure the page exists for. */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <KpiCard label="Annual Budget" value={fmt(stats.budget)} />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <KpiCard
-          label="Remaining"
+          label="Projected P/L"
+          value={`${yearEnd.profitLoss < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.profitLoss))}`}
+          sub="where the year closes if the plan holds"
+          highlight={yearEnd.profitLoss < 0 ? 'red' : 'green'}
+          href="/budget"
+        />
+        <KpiCard
+          label="Net so far"
+          value={`${yearEnd.netToDate < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.netToDate))}`}
+          sub={`${fmt(yearEnd.income)} in · ${fmt(yearEnd.expense)} out, projected`}
+        />
+        <KpiCard
+          label="Budget left"
           value={fmt(stats.remaining)}
+          sub={`of ${fmt(stats.budget)} for the year`}
           highlight={stats.remaining < 0 ? 'red' : 'green'}
         />
         <KpiCard
@@ -897,14 +861,15 @@ export default async function DashboardPage() {
 
       {/* Charts */}
       <div className="space-y-6">
-        <LandscapeBalanceChart data={cashFlowSeries} />
-        <MonthlySpendingChart data={monthly} />
-        <div className="grid grid-cols-2 gap-6">
-          <CategoryDonutChart data={breakdown} />
-          <CashFlowChart data={cashflow} />
-        </div>
+        <CashFlowChart data={cashflow} />
         <BudgetVsActualChart data={budgetVsActual} />
       </div>
+
+      {/* The other book, one link rather than a second set of figures interleaved with these. */}
+      <p className="mt-6 text-xs text-slate-400">
+        Capital — property, mortgages, investments and the remodel — is on{' '}
+        <Link href="/capital" className="text-blue-600 hover:underline">its own page</Link>.
+      </p>
     </div>
   );
 }

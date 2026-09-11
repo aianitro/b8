@@ -11,6 +11,7 @@ const NAV = [
   { href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard },
   { href: '/net-worth',    label: 'Net Worth',     icon: Wallet },
   { href: '/budget',       label: 'Budget',        icon: PieChart },
+  { href: '/capital',      label: 'Capital',       icon: Landmark },
   { href: '/balances',     label: 'Balances',      icon: Landmark },
   { href: '/transactions', label: 'Transactions',  icon: ArrowLeftRight },
   { href: '/rules',        label: 'Rules',         icon: Zap },
