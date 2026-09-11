@@ -13,6 +13,8 @@ export interface BubbleCategory {
   actual: number;
   /** Where the month is heading, as a fraction of budget. Null when there is no basis yet. */
   projectedRatio: number | null;
+  /** `projected − budgeted`. Positive means the month is heading past the line. */
+  projectedVariance: number | null;
   /** True while the month is too young to project from — drawn, but never coloured as a verdict. */
   tooEarly: boolean;
 }
@@ -104,7 +106,14 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
             <span className="font-medium text-slate-700">{active.category}</span>
             {' · '}{fmt(active.actual)} of {fmt(active.budgeted)}
             {active.projectedRatio !== null && !active.tooEarly && (
-              <> · projects to close at {Math.round(active.projectedRatio * 100)}%</>
+              <>
+                {' · projects to close at '}{Math.round(active.projectedRatio * 100)}%
+                {active.projectedVariance !== null && active.projectedVariance > 0 && (
+                  <span className="text-red-600 font-medium">
+                    {` · ${fmt(active.projectedVariance)} over`}
+                  </span>
+                )}
+              </>
             )}
             {active.tooEarly && <> · too early to project</>}
           </>
@@ -126,7 +135,18 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
           // the reader can see is bad and cannot name without hovering.
           const nameSize = Math.min(15, Math.max(10, c.r / 3.2));
           const inside = fitLabel(cat.category, c.r, nameSize);
-          const showAmount = c.r >= 46 && inside !== null;
+          // On a bubble heading over, the OVERAGE replaces the budget as the second line. The
+          // budget is already encoded in the area; "$150" under a red circle restates what the
+          // size said, where "+$150 over" is the figure that would otherwise need a hover.
+          //
+          // It also earns a smaller bubble than the budget line does. "+$80" is half the width of
+          // "$40" plus a name, and on a red circle it is the whole reason the reader stopped —
+          // Education is a 40-pixel dot and the most over-budget category on the page.
+          const over = cat.projectedVariance !== null && cat.projectedVariance > 0 && !cat.tooEarly;
+          const secondLine = over ? `+${fmt(cat.projectedVariance!)} over` : fmt(cat.budgeted);
+          const showAmount = inside !== null
+            && c.r >= (over ? 34 : 46)
+            && fitLabel(secondLine, c.r, 11) === secondLine;
           return (
             <Link key={c.key} href={`/transactions?category=${encodeURIComponent(c.key)}&month=${new Date().getMonth() + 1}&from=dashboard`}>
               <g
@@ -150,8 +170,9 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
                 )}
                 {showAmount && (
                   <text x={c.x} y={c.y + nameSize + 3} textAnchor="middle" fontSize={11}
-                        fill="#fff" fillOpacity={0.85} style={{ pointerEvents: 'none' }}>
-                    {fmt(cat.budgeted)}
+                        fill="#fff" fillOpacity={over ? 1 : 0.85}
+                        fontWeight={over ? 600 : 400} style={{ pointerEvents: 'none' }}>
+                    {secondLine}
                   </text>
                 )}
               </g>
