@@ -7,7 +7,7 @@ import MonthlySpendingChart, { type MonthlySpendingData } from '@/components/cha
 import CashFlowChart, { type CashFlowData } from '@/components/charts/CashFlowChart';
 import CategoryDonutChart, { type CategorySlice } from '@/components/charts/CategoryDonutChart';
 import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts/BudgetVsActualChart';
-import LandscapeBalanceChart from '@/components/charts/LandscapeBalanceChart';
+import ProfitLossChart from '@/components/charts/ProfitLossChart';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
@@ -86,56 +86,6 @@ async function getStats(asOf: DashboardAsOf) {
   };
 }
 
-// The flow-derived month-by-month series — beginning balance plus transactions, per landscape.
-async function getCashFlowSeries(asOf: DashboardAsOf): Promise<{
-  monthlyOperational: number[];
-  monthlyCapital: number[];
-  monthlySeries: number[];
-}> {
-  const [accountsRes, netRes, balancesRes] = await Promise.all([
-    db.query<{ id: string; landscape: string }>(
-      // The balance series is built by walking accounts, so it is the one query on this page
-      // scoped by the ACCOUNT's landscape rather than the category's — there is no category to
-      // ask, and an account's own book is what its balance belongs to.
-      "SELECT id, landscape FROM accounts WHERE track_transactions = TRUE AND landscape = 'operational'" 
-    ),
-    db.query<{ account_id: string; month: number; net: string }>(`
-      SELECT t.account_id,
-             EXTRACT(MONTH FROM t.date)::int AS month,
-             (COALESCE(ABS(SUM(t.amount) FILTER (WHERE t.amount < 0)), 0)
-              - COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0))::text AS net
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-      WHERE EXTRACT(YEAR FROM t.date) = $1
-      GROUP BY t.account_id, EXTRACT(MONTH FROM t.date)::int
-    `, [asOf.year]),
-    db.query<{ account_id: string; beginning_balance: string }>(
-      'SELECT account_id, beginning_balance FROM account_balances WHERE year = $1', [asOf.year]
-    ),
-  ]);
-
-  const netByAccount = new Map<string, Map<number, number>>();
-  for (const r of netRes.rows) {
-    if (!netByAccount.has(r.account_id)) netByAccount.set(r.account_id, new Map());
-    netByAccount.get(r.account_id)!.set(r.month, Number(r.net));
-  }
-  const beginningByAccount = new Map(balancesRes.rows.map((r) => [r.account_id, Number(r.beginning_balance)]));
-
-  const monthlySeries = new Array(asOf.month + 1).fill(0);
-  const monthlyOperational = new Array(asOf.month + 1).fill(0);
-  const monthlyCapital = new Array(asOf.month + 1).fill(0);
-  for (const a of accountsRes.rows) {
-    const byMonth = netByAccount.get(a.id) ?? new Map();
-    let running = beginningByAccount.get(a.id) ?? 0;
-    for (let i = 0; i <= asOf.month; i++) {
-      running += byMonth.get(i + 1) ?? 0;
-      monthlySeries[i] += running;
-      if (a.landscape === 'operational') monthlyOperational[i] += running;
-      else monthlyCapital[i] += running;
-    }
-  }
-  return { monthlySeries, monthlyOperational, monthlyCapital };
-}
 
 interface TodayStats {
   spent: number;
@@ -586,10 +536,10 @@ export default async function DashboardPage() {
   // doesn't add a serial round trip to page load.
   const driftPromise = findBalanceDrift();
   const feedPromise = loadFeedHealth();
-  const [stats, monthRead, flow, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual,
+  const [stats, monthRead, todayStats, weekStats, monthly, cashflow, breakdown, budgetVsActual,
          recentArrivals, yearEnd] =
     await Promise.all([
-      getStats(asOf), loadMonthOutlook(asOf), getCashFlowSeries(asOf),
+      getStats(asOf), loadMonthOutlook(asOf),
       getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCashFlow(asOf), getCategoryBreakdown(asOf),
       getBudgetVsActual(asOf), getRecentArrivals(),
       // Operational, matching /budget's default tab, so the two pages show the same figure. The
@@ -623,18 +573,12 @@ export default async function DashboardPage() {
   const expectedWeekSpend = weekStats.weeklyBudgetReference * (weekStats.isoDow / 7);
   const weekPaceRatio = expectedWeekSpend > 0 ? weekStats.spent / expectedWeekSpend : 0;
 
-  // Twelve months, not just the elapsed ones: the balance lines still stop where the data stops,
-  // but the P/L runs on to December so the projection has somewhere to be drawn.
-  //
   // `pl` and `plProjected` overlap on the last settled month. Without that shared point the dashed
   // line would start a month adrift of where the solid one ended, leaving a visible gap exactly at
   // the boundary the chart exists to show.
   const lastSettled = asOf.month - 1;
-  const cashFlowSeries = MONTHS.map((month, i) => ({
+  const plSeries = MONTHS.map((month, i) => ({
     month,
-    operational: i < flow.monthlySeries.length ? flow.monthlyOperational[i] : null,
-    capital: i < flow.monthlySeries.length ? flow.monthlyCapital[i] : null,
-    total: i < flow.monthlySeries.length ? flow.monthlySeries[i] : null,
     pl: i <= lastSettled ? yearEnd.monthly[i].cumulative : null,
     plProjected: i >= lastSettled ? yearEnd.monthly[i].cumulative : null,
   }));
@@ -963,7 +907,7 @@ export default async function DashboardPage() {
 
       {/* Charts */}
       <div className="space-y-6">
-        <LandscapeBalanceChart data={cashFlowSeries} />
+        <ProfitLossChart data={plSeries} />
         <MonthlySpendingChart data={monthly} />
         <div className="grid grid-cols-2 gap-6">
           <CategoryDonutChart data={breakdown} />
