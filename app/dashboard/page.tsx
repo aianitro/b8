@@ -3,8 +3,7 @@ export const dynamic = 'force-dynamic';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import db from '@/lib/db';
-import CategoryDonutChart, { type CategorySlice } from '@/components/charts/CategoryDonutChart';
-import BudgetVsActualChart, { type BudgetVsActualRow } from '@/components/charts/BudgetVsActualChart';
+import BudgetTracks, { type BudgetTrackRow } from '@/components/charts/BudgetTracks';
 import ProfitLossChart from '@/components/charts/ProfitLossChart';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import { findBalanceDrift } from '@/lib/drift';
@@ -283,28 +282,14 @@ async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpend[]> 
 }
 
 
-async function getCategoryBreakdown(asOf: DashboardAsOf): Promise<CategorySlice[]> {
-  const result = await db.query<CategorySlice>(`
-    SELECT t.mapped_category AS name, bc.landscape,
-           SUM(t.amount) FILTER (WHERE t.amount > 0) AS value
-    FROM transactions t
-    JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-    JOIN budget_categories bc ON bc.name = t.mapped_category AND bc.landscape = 'operational'
-    WHERE t.mapped_category IS NOT NULL
-      AND bc.exclude_from_budget = FALSE
-      AND t.hidden = FALSE
-      AND EXTRACT(YEAR FROM t.date) = $1
-    GROUP BY t.mapped_category, bc.landscape
-    HAVING SUM(t.amount) FILTER (WHERE t.amount > 0) > 0
-    ORDER BY value DESC
-  `, [asOf.year]);
-  return result.rows.map((r) => ({ ...r, value: Number(r.value) }));
-}
 
-async function getBudgetVsActual(asOf: DashboardAsOf): Promise<BudgetVsActualRow[]> {
-  const result = await db.query<BudgetVsActualRow>(`
+async function getBudgetVsActual(asOf: DashboardAsOf): Promise<BudgetTrackRow[]> {
+  const result = await db.query<BudgetTrackRow & { landscape: string }>(`
+    -- Net of refunds, like every other spend figure on this page. Gross was overstating Travel by
+    -- $4,099 of cancelled bookings and Health by $1,836 of reimbursements — enough to put Health
+    -- at 198% of its budget when it is at 137%.
     SELECT bc.name AS category, bc.landscape, bc.annual_budget AS budget,
-           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0) AS spent
+           COALESCE(SUM(t.amount), 0) AS spent
     FROM budget_categories bc
     LEFT JOIN transactions t ON t.mapped_category = bc.name
       AND EXTRACT(YEAR FROM t.date) = $1
@@ -463,11 +448,11 @@ export default async function DashboardPage() {
   // doesn't add a serial round trip to page load.
   const driftPromise = findBalanceDrift();
   const feedPromise = loadFeedHealth();
-  const [stats, monthRead, todayStats, weekStats, monthly, breakdown, budgetVsActual,
+  const [stats, monthRead, todayStats, weekStats, monthly, budgetVsActual,
          recentArrivals, yearEnd] =
     await Promise.all([
       getStats(asOf), loadMonthOutlook(asOf),
-      getTodayStats(), getWeekStats(), getMonthlySpending(asOf), getCategoryBreakdown(asOf),
+      getTodayStats(), getWeekStats(), getMonthlySpending(asOf),
       getBudgetVsActual(asOf), getRecentArrivals(),
       // Operational, matching /budget's default tab, so the two pages show the same figure. The
       // capital year is lumpy by construction — a remodel draws $40,000 in May — and averaging it
@@ -481,6 +466,12 @@ export default async function DashboardPage() {
   // one entry in this `Promise.all`, so nothing became serial in the move.
   const outlook: MonthOutlook = monthRead.outlook;
 
+
+  // Share of the year gone, from the page's own clock read. The tracks compare a year's spend to
+  // a year's budget, and without this the reader has to date the figure themselves.
+  const startOfYear = Date.UTC(asOf.year, 0, 1);
+  const yearElapsed =
+    (Date.UTC(asOf.year, asOf.month, asOf.day) - startOfYear) / (Date.UTC(asOf.year + 1, 0, 1) - startOfYear);
 
   const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
   const todayVsAvgRatio = todayStats.avgSameWeekday > 0 ? todayStats.spent / todayStats.avgSameWeekday : 0;
@@ -665,8 +656,10 @@ export default async function DashboardPage() {
         {/* The donut lost the pair it sat beside when Cash Flow went. Full width rather than half
             a row with white space next to it — the operational book has fourteen categories and
             the legend was the cramped half of that layout anyway. */}
-        <CategoryDonutChart data={breakdown} />
-        <BudgetVsActualChart data={budgetVsActual} />
+        {/* One widget where there were two. The donut said how big each category is and nothing
+            about whether it is on plan; the budget-vs-actual bars said whether it is on plan and
+            drew a $378 line the same length as a $29,000 one. */}
+        <BudgetTracks rows={budgetVsActual} yearElapsed={yearElapsed} />
       </div>
     </div>
   );
