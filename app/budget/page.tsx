@@ -296,7 +296,10 @@ export default async function BudgetPage({ searchParams }: PageProps) {
               {
                 label: 'Projected P/L',
                 value: (projectedPL < 0 ? '−' : '+') + fmt(Math.abs(projectedPL)),
-                sub: `${netToDate < 0 ? '−' : '+'}${fmt(Math.abs(netToDate))} so far`,
+                sub: `${netToDate < 0 ? '−' : '+'}${fmt(Math.abs(netToDate))} so far`
+                  + (yearEnd.uncategorized.net !== 0
+                      ? ` · ${fmt(Math.abs(yearEnd.uncategorized.net))} unfiled, not counted`
+                      : ''),
                 highlight: projectedPL < 0 ? 'text-red-500' : 'text-emerald-600',
               },
             ].map(({ label, value, sub, highlight }) => (

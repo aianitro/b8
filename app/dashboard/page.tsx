@@ -613,7 +613,10 @@ export default async function DashboardPage() {
         <KpiCard
           label="Projected P/L"
           value={`${yearEnd.profitLoss < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.profitLoss))}`}
-          sub={`${yearEnd.netToDate < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.netToDate))} so far`}
+          sub={`${yearEnd.netToDate < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.netToDate))} so far`
+            + (yearEnd.uncategorized.net !== 0
+                ? ` · ${fmt(Math.abs(yearEnd.uncategorized.net))} unfiled, not counted`
+                : '')}
           highlight={yearEnd.profitLoss < 0 ? 'red' : 'green'}
           href="/budget"
         />
