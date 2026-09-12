@@ -311,3 +311,31 @@ suite), and the page renders it exactly right. But it means Phase 0.5's headline
 answering "nothing to score" on the only database that matters, and it should be a conscious
 decision rather than a discovery. A control-mode editor is the natural immediate successor to step
 31 — and it is also a precondition for the owner's screenshot capture being representative.
+
+**DISCHARGED 2026-09-11.** The write path exists, and the dead end is closed.
+
+- `lib/categoryControl.ts` (new, with `lib/categoryControl.test.ts`) parses the value and restates
+  the debt-service coupling rule. Extracted from the route for the same reason `budgetMath.ts` was.
+- `POST /api/categories` accepts `control_mode`, defaulting to `'fixed'` when absent — the column's
+  own default, kept so an unreviewed category still stays out of the scored set. An invalid value is
+  a 400 rather than a silent coercion to that default, which would have reported success while
+  writing the one value that means "do not score this".
+- `PATCH /api/categories` gained a `control_mode` branch. It reads `is_debt_service` first and
+  returns a stated 409 `DEBT_SERVICE_FIXED`, because the handler has no `try`/`catch` and the
+  coupling CHECK would otherwise surface as a 500. The CHECK remains the enforcement.
+- `app/categories/page.tsx` now selects `control_mode`, which also ends P0.5-28 **N1**'s type lie on
+  this page: the rows were already cast to `BudgetCategory` while the column was absent from the
+  `SELECT`, so the field was `undefined` at runtime behind a non-nullable type.
+- `components/CategoryManager.tsx` renders a per-row control on operational, budgeted, outgoing rows
+  only, and `—` elsewhere, since `control_mode` is physically present but inert on every other row.
+  The page container widened to `max-w-6xl`: the seventh column overflowed `max-w-4xl` and clipped
+  the schedule and remove controls.
+
+Verified against a production build on a scratch `b8_demo`, not by test alone: a row moved to
+`discretionary` and the value landed; an invalid value returned 400; a row forced to
+`is_debt_service` returned the 409 and then accepted `fixed`; an unknown id returned 404; the other
+`PATCH` branches still answer 200. The browser path was exercised too — changing the select on
+Groceries wrote `discretionary` to the database.
+
+**Not done through the spec/gate cycle.** This landed as a direct fix on `main`, so it carries unit
+tests and manual end-to-end evidence but no G0 spec, no adversarial review, and no G3/G4 record.
