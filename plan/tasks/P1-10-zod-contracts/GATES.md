@@ -9,6 +9,9 @@
 | G1 contract | **FAIL** (spec defect, not a diff defect) | 2026-09-12 | Guardian's diff is correct on every substantive check. Acceptance #40–#43 cannot pass as written and do not measure what they claim — G1-D1 below. Task returns to spec-writer, restarts at G0. Lease closed. |
 | G0 spec | **PASS** (cycle 3) | 2026-09-12 | #40–#43 rewritten to parse imports instead of matching substrings; tested against all three conditions the gate set, plus a fourth it did not. Still 52 commands, 28 fixtures. `.frozen` recreated. |
 | G1 contract | **PASS** (cycle 2) | 2026-09-12 | Re-run against the guardian's unchanged diff. Every G1 checklist item green, #40–#43 now `0` as intended. One non-checklist scope command (#52) blocked by an environmental cause outside the task — see below. |
+| G2 build | **PASS** | 2026-09-12 | All 52 acceptance commands re-run by the orchestrator. 35 fixtures, `578 passed` repo-wide. Every one of the 28 named fixtures opened and confirmed to assert its titled rule — the residual risk recorded at G0 cycle 2 is discharged, not carried. |
+| G3 adversarial | **ACCEPT_WITH_NITS** | 2026-09-12 | 30 hypotheses, 24 refuted, 6 nits, 0 blocking, 0 scope violations. 4 INCONCLUSIVE items all run by the orchestrator; all resolved in the diff's favour. See NITS.md. |
+| G4 integration | **PASS** | 2026-09-12 | Full suite `578 passed (33 files)`, `tsc exit=0`, `build exit=0`, `npm ci exit=0`, lint unchanged, migrate up/down/up `0,0,0` on a throwaway, scope `0`/`0`. One nit corrected here because it was the orchestrator's own deviation. |
 
 **Cycle count:** 0 / 3
 <!-- G0 spec-writer revisions are not implementer↔reviewer cycles and do not consume the §11 budget. -->
@@ -419,3 +422,127 @@ includes `.claude/hooks/**/*.test.mts`, so they run in `npm test` from the next 
 
 Once applied, the implementer can be dispatched with the lease closed, as §7.2 requires, and G2
 becomes reachable without any change to the frozen spec or the passed contract diff.
+
+
+---
+
+## G2 cycle 1 — PASS
+
+**The guard amendment was committed first, as its own change** (`463e4b6`), which is what #51/#52
+were waiting on. The implementer correctly refused to commit or stash files it had not written, and
+correctly declined to treat the failure as its own. Both commands return `0` with no change to its
+work — exactly as this log predicted when it assigned the amendment to the owner.
+
+**All 52 commands re-run by the orchestrator, not read from the report.**
+
+| Group | Result |
+|---|---|
+| #1 `tsc` | `exit=0` |
+| #2 suite | `1` — `578 passed (578)`, up from 543 |
+| #3 lint | `✖ 1 problem (0 errors, 1 warning)` — the pre-existing `seed-demo.mjs:457` warning, unchanged |
+| #4 build / #5 `npm ci` | `exit=0`, `exit=0` |
+| #6 fixture count | `OK` — 35 checkmarks against a floor of 28 |
+| #7–#34 the 28 named titles | every one returns exactly `1`, checked by extracting each title from SPEC.md's own table and counting it in the reporter output |
+| #35–#39 toolchain + dependency | `1`, `0`, `true`, `1`, `1` |
+| #40–#43 layering (AST) | `0`, `0`, `0`, `0` — and they now walk the five new test files too, which import `vitest`, `zod`, `node:fs`, `node:url`, `typescript` and siblings |
+| #44–#50 scope | `0`, `0`, `OK`, `OK`, `OK`, `0`, `0` |
+| #51–#52 scope incl. untracked | `0`, `0` |
+
+**The vacuity commitment is discharged.** At G0 cycle 2 I recorded that a title grep cannot see
+whether a fixture asserts anything, and committed to opening all 28 rather than trusting the match.
+Done. What they actually assert:
+
+- **Negative row fixtures assert the issue PATH, not `success === false`.** `issuePathsOf(schema,
+  row)` must equal `['control_mode']` — so a row refused for some other field fails the fixture.
+  This is stronger than the spec required and it closes the exact gap I named.
+- **F11b pins all twelve indices** (`monthly_amounts.0` … `.11`), so the array-of-strings rejection
+  is demonstrably about the elements rather than about the field being absent or the wrong length.
+- **F2 carries both halves of the flagship claim**: `'1200.00'` parses and round-trips unchanged,
+  *and* `annual_budget: 1200` is refused. Either half alone would have been satisfiable by a wrong
+  schema.
+- **F1 guards its own parse against vacuity** — it asserts the AST actually yielded exports before
+  comparing sets, because a refactor returning nothing would otherwise compare two empty sets and
+  pass while checking nothing. The implementer found that risk itself.
+- **F12 asserts on the declared field set and on a `RETURNING *`-shaped payload being stripped**,
+  never on a rejection, per CONTRACT.md — because `POST /api/categories` really does return the two
+  extra columns and a strict schema would refuse a live response today.
+- **F4 is one `it` looping three modes** rather than `it.each`, which would have emitted three
+  interpolated titles and matched none.
+
+**Two structural decisions in the tests worth recording**, both defensible and both explained in
+place: F1 and F12 share `index.test.ts` because they need the same AST parse, and the ten-field row
+is written out a second time there rather than imported, since importing one test file from another
+re-registers its suites and would make every title grep count `2`.
+
+**Seven fixtures beyond the 28 are disclosed** in EVIDENCE §9, each naming the CONTRACT.md decision
+it pins (NaN handling, numeric scale, `Date`-vs-string, a canonical `Account`, and three envelope
+cases). #6's floor is `-ge 28`, so extras are in bounds.
+
+**One finding stayed untouched, correctly.** `app/accounts/page.tsx` selects 11 of `Account`'s 12
+fields while casting to the full type. The guardian declined to weaken the schema; the implementer
+declined to fix the query, write a fixture around it, or soften the rule. It remains route work for
+the task that first validates an `Account` payload.
+
+## Adjudications — G2 cycle 1
+| Claim in dispute | Discriminating command | Output | Decision |
+|---|---|---|---|
+| Whether #51/#52's failure belonged to the implementer's diff | committed the guard amendment as its own change, then re-ran both commands against the unchanged test files | `0`, `0` | Not the implementer's. Its refusal to absorb the failure was right |
+| Whether the 28 named fixtures assert their titles or merely bear them | read all five test files; for each named fixture, checked the subject of its assertion against the rule its title claims | every one asserts its titled rule; negatives assert the issue path | Vacuity risk discharged |
+
+
+---
+
+## G3 cycle 1 — ACCEPT_WITH_NITS
+
+30 hypotheses, 24 refuted by reading, 6 confirmed as nits, no CONFIRMED defect and no scope
+violation. No implementer cycle consumed. The falsification log is substantive rather than a
+formality — three examples of what it actually did:
+
+- **It went to the parser source to check the spec's central premise.** `pg-types/lib/textParsers.js`
+  registers `parseFloatArray` for OID 1231 (`_numeric`) and registers nothing for 1700, so the
+  measured scalar/array asymmetry is a property of the installed library rather than an artifact of
+  the fixture I measured it with. That is a stronger check than the measurement it verified.
+- **It enumerated every NUMERIC-backed field in the schema against every `number` field in the type**,
+  in both directions — rule applied where required, and nowhere else. Eight fields, all
+  `numericString`; the five SERIAL/INT ids all `serialId`.
+- **It read every `success:` site under `app/api/**`** (~30) to test whether the envelope's
+  `strictObject` would refuse a shape some route produces today. None does.
+
+## The four INCONCLUSIVE items, all run
+
+The reviewer holds Read/Grep/Glob and named the command for each. I ran all four.
+
+| # | Question | Command | Result |
+|---|---|---|---|
+| 1a | Does `Assert<Equals<…>>` actually fail compilation, or is it decorative? | a probe file asserting `Equals<"a"\|"b","a">` | `error TS2344: Type 'false' does not satisfy the constraint 'true'` — the mechanism is real |
+| 1b | Does it catch the drift that matters? | on a scratch copy of `shared/`: deleted `cost_basis` from the Property schema; separately added a fourth `ControlMode` value | `shapes.ts(75,3)` and `enums.ts(69,41)` — errors at exactly the predicted assertions. Real tree clean afterwards |
+| 2 | Are the five test files inside the `tsc` program, or only checked by vitest? | `tsc --noEmit --listFiles \| grep -c 'shared/contracts/.*\.test\.ts'` | `5` — a type error in a fixture is caught by #1 |
+| 3 | Did the zod range change what other packages resolve? | `npm ls zod --all` | one hoisted `zod@4.6.2`, `@anthropic-ai/sdk` and `eslint-config-next` deduped onto it. Confirms N1's side effect |
+| 4 | Do real `db.query` rows fail on a timestamp, as N4 claims? | both page queries run verbatim through `pg` against `b8_demo` | **N4 confirmed.** Accounts: 11 keys, `property_id` absent, `last_synced_at` a `Date`. Categories: `created_at` a `Date`, `annual_budget` a string |
+
+Item 4 is the one that changed something. The guardian's disclosure says a real accounts row fails
+`AccountSchema` "on a missing key," singular. It fails on two, and an entire second shape has the
+same problem undisclosed. That is now the first thing NITS.md tells the route-migration task.
+
+## G4 — PASS
+
+| Check | Result |
+|---|---|
+| Full suite | `578 passed (33 files)` — 540 at task start |
+| `npx tsc --noEmit` | `exit=0` |
+| `npm run build` | `exit=0` |
+| `npm ci` | `exit=0` — zod resolves at 4.6.2 from a clean install, not transitively |
+| Lint | `✖ 1 problem (0 errors, 1 warning)` — the pre-existing `seed-demo.mjs:457` warning |
+| Migrate up/down/up on a throwaway | `0`, `0`, `0` — vacuous, no migration in this task, run per §14 |
+| Scope #51 / #52 | `0`, `0` |
+| INCONCLUSIVE items converted to commands | all 4 run, above |
+
+**One nit was fixed at G4 rather than deferred, because it was mine.** `package.json` carried
+`"zod": "^4.6.2"`; the frozen spec asks for a range compatible with 4.4.3, and `^4.6.2` excludes it.
+I had run the install and let npm write the resolved version as the floor. Corrected to `^4.4.3`,
+lock regenerated, `npm ci` clean, #37/#38/#39 still green. Acceptance #38 matches the major only, so
+it never could have caught this — recorded in N1 as another instance of the class that failed G0
+twice.
+
+The remaining five nits are follow-ups, not blockers. **N4 is the one that matters** and is written
+as a warning to the successor task rather than a tidy-up.
