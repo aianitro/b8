@@ -93,6 +93,27 @@ describe('contract surface', () => {
     expect(bash('echo "ALTER TABLE accounts;" >> db/schema.sql')).toBe(2);
   });
 
+  // §13.2 requires both a true positive and a false positive for every rule. The pair below is
+  // the test-file carve-out: a test under the contract surface is implementation, not contract.
+  // The false-positive half is the one that matters — without it the lease, closed for
+  // implementation exactly as §7.2 demands, made the natural home for a contract's tests
+  // unwritable by the only role allowed to write tests, and G2 was unreachable.
+  it('still blocks a contract MODULE under the surface with no lease (true positive)', () => {
+    expect(edit('shared/contracts/shapes.ts')).toBe(2);
+    expect(bash('printf x >> shared/contracts/shapes.ts')).toBe(2);
+  });
+
+  it('allows a contract TEST under the surface with no lease (false positive fixed)', () => {
+    expect(edit('shared/contracts/shapes.test.ts')).toBe(0);
+    expect(bash('printf x >> shared/contracts/shapes.test.ts')).toBe(0);
+  });
+
+  // The carve-out is a lookahead on the path, not a licence for the whole command: writing a real
+  // contract file stays blocked even when the same command also names a test path.
+  it('blocks a real contract write that merely mentions a test path alongside it', () => {
+    expect(bash('printf x >> shared/contracts/shapes.ts; echo shared/contracts/ok.test.ts')).toBe(2);
+  });
+
   it('blocks creating a migration outside the G1 window', () => {
     expect(bash('npm run migrate:create add-column')).toBe(2);
   });

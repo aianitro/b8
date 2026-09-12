@@ -63,6 +63,30 @@ const GENERATED_FILES = [
 const CONTRACT_PREFIXES = ['shared/contracts/', 'migrations/'];
 const CONTRACT_FILES = ['shared/types.ts', 'db/schema.sql'];
 
+// A test file under the contract surface is NOT contract, and the lease must not cover it.
+//
+// The surface is single-writer because a shape every route, component and query agrees on must
+// not fork. A test that validates one of those shapes cannot fork it — it has no consumers — and
+// its writer is the implementer, per the roster. `vitest.config.mts` already expects tests beside
+// the module they check (`shared/**/*.test.ts`), which is this repo's convention without
+// exception: every test in lib/ and lib/domain/ sits next to its module.
+//
+// Without this carve-out the guard produced a false positive that deadlocked the documented
+// workflow. §7.2 requires the lease CLOSED before the implementer is dispatched, so the natural
+// home for a contract's tests was unwritable by the only role permitted to write tests, and G2
+// was unreachable — with nothing wrong with either the contract diff or the spec. Found at
+// P1-10's G1. §13.2's warning applies to the guard itself here: a false positive that blocks
+// honest work is worse than no guard, because it fails mid-run rather than at review.
+const isTestFile = (rel) => /\.test\.m?tsx?$/.test(rel);
+
+// The Bash route sees a command string rather than a resolved path, so the same carve-out is a
+// negative lookahead appended to the protected path: match `shared/contracts` only when what
+// follows is not a `*.test.ts`. The character class stops at whitespace and at shell operators,
+// so a later unrelated test path in the same command cannot excuse a write to a real contract
+// file. Both routes need it: `mutates()` strips the trailing slash before building its pattern,
+// which is why the shell route protects any path merely BEGINNING `shared/contracts`.
+const TEST_EXEMPT_LOOKAHEAD = String.raw`(?![^\s;&|>]*\.test\.m?tsx?\b)`;
+
 // The blessed producers of the generated set. Recognised so the hook does not block the very
 // commands that are supposed to write there.
 const SANCTIONED_GENERATORS = [
@@ -126,8 +150,8 @@ function stripHeredocs(command) {
 }
 
 /** True only if `command` writes to something under `protectedPath`. */
-function mutates(command, protectedPath, { includeDeletion = true } = {}) {
-  const p = escapeRe(protectedPath.replace(/\/$/, ''));
+function mutates(command, protectedPath, { includeDeletion = true, exceptTests = false } = {}) {
+  const p = escapeRe(protectedPath.replace(/\/$/, '')) + (exceptTests ? TEST_EXEMPT_LOOKAHEAD : '');
   const templates = includeDeletion
     ? [...MUTATION_TEMPLATES, ...DELETION_TEMPLATES]
     : MUTATION_TEMPLATES;
@@ -203,7 +227,8 @@ const isGenerated = (rel) =>
   GENERATED_PREFIXES.some((p) => rel.startsWith(p)) || GENERATED_FILES.includes(rel);
 
 const isContract = (rel) =>
-  CONTRACT_PREFIXES.some((p) => rel.startsWith(p)) || CONTRACT_FILES.includes(rel);
+  !isTestFile(rel) &&
+  (CONTRACT_PREFIXES.some((p) => rel.startsWith(p)) || CONTRACT_FILES.includes(rel));
 
 const LEASE_CLOSED_MESSAGE = `The contract surface has a single writer: contract-guardian, and only while a contract
 lease is open (BUILD.md I2, §6 contract freeze).
@@ -287,7 +312,7 @@ function checkBash(rawCommand, root) {
   if (leaseHolder(root) !== null) return; // G1 window open — the guardian may write
 
   for (const target of [...CONTRACT_PREFIXES, ...CONTRACT_FILES]) {
-    if (mutates(command, target)) {
+    if (mutates(command, target, { exceptTests: true })) {
       deny(
         'BLOCKED by scope-guard: shell write to the contract surface\n' +
           `  ${command.trim().slice(0, 200)}\n` +
