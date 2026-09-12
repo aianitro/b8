@@ -326,7 +326,9 @@ function UncategorizedRow({
         <div className="flex items-center gap-1.5">
           <div className="w-4 shrink-0" />
           <div className="w-0.5 h-5 rounded-full shrink-0 bg-amber-400" />
-          <div className="text-xs font-medium text-amber-700 whitespace-nowrap">Uncategorized</div>
+          <div className="text-xs font-medium text-amber-700 whitespace-nowrap">
+            Uncategorized <span className="font-normal text-amber-600/70">· not counted</span>
+          </div>
         </div>
       </td>
       {months.map((amount, i) => {
@@ -431,11 +433,18 @@ export default function BudgetMonthlyGridClient({ rows, currentMonth, beginningB
     return Math.max(amt, r.months_budget[i]);
   });
 
-  const incomeMonthTotals  = Array.from({ length: 12 }, (_, i) => incomeOrder.reduce((s, r) => s + combined(r)[i], 0) + uncategorizedIncome[i]);
-  const expenseMonthTotals = Array.from({ length: 12 }, (_, i) => expenseOrder.reduce((s, r) => s + combined(r)[i], 0) + uncategorizedExpense[i]);
+  // Uncategorized rows are SHOWN and not counted, matching the P/L card and chart on /dashboard.
+  //
+  // They used to be added in here. An uncategorized transaction is one the app cannot classify, so
+  // totalling it as income or spend is a guess — and it went wrong by $2,175 when a credit-card
+  // payment posted while its bank was down: the matching debit never arrived, transfer detection
+  // had nothing to pair it with, and half a transfer landed in Total Income. The row stays on
+  // screen, labelled, because it is a thing to act on; it just no longer moves the totals under it.
+  const incomeMonthTotals  = Array.from({ length: 12 }, (_, i) => incomeOrder.reduce((s, r) => s + combined(r)[i], 0));
+  const expenseMonthTotals = Array.from({ length: 12 }, (_, i) => expenseOrder.reduce((s, r) => s + combined(r)[i], 0));
   const netMonthTotals     = Array.from({ length: 12 }, (_, i) => incomeMonthTotals[i] - expenseMonthTotals[i]);
-  const incomeYtd          = incomeOrder.reduce((s, r) => s + r.ytd, 0) + uncategorizedIncome.reduce((s, n) => s + n, 0);
-  const expenseYtd         = expenseOrder.reduce((s, r) => s + r.ytd, 0) + uncategorizedExpense.reduce((s, n) => s + n, 0);
+  const incomeYtd          = incomeOrder.reduce((s, r) => s + r.ytd, 0);
+  const expenseYtd         = expenseOrder.reduce((s, r) => s + r.ytd, 0);
   const netYtd             = incomeYtd - expenseYtd;
 
   // Running balance: opening[i] = beginningBalance + sum of net for months 0..i-1

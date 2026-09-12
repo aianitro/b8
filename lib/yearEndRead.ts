@@ -22,6 +22,21 @@ export interface YearEndRead {
   profitLoss: number;
   /** Income less spend so far this year — fact, not forecast. */
   netToDate: number;
+  /**
+   * Unfiled money, reported and NOT counted in any figure above.
+   *
+   * An uncategorized transaction is one the app cannot classify, so calling it income or spend is
+   * a guess — and on 2026-09-11 that guess was wrong by $2,175 in the flattering direction. A
+   * credit-card payment posted to the card while Chase was down, so the matching debit from
+   * checking never arrived, transfer detection had nothing to pair it with, and half a transfer
+   * read as income. The year's P/L jumped by the full amount.
+   *
+   * It self-heals: when the feed returns, the other leg lands, the pair nets to zero and both are
+   * excluded as a transfer. Until then, excluding is the conservative reading and disclosing the
+   * amount is what keeps it honest — the figure is stated so a reader can see what is being held
+   * back rather than wondering why the total moved.
+   */
+  uncategorized: { income: number; expense: number; net: number };
   /** Cumulative P/L, Jan–Dec, settled then forecast. The last value is `profitLoss`. */
   monthly: MonthPoint[];
 }
@@ -62,7 +77,7 @@ export async function loadYearEnd(
     `, [asOf.year, landscape, asOf.month + 1]),
 
     // Unfiled rows, scoped by the ACCOUNT's landscape because they have no category to carry one.
-    // They have no schedule and nothing to project, so they enter as the actual they already are.
+    // Reported separately and counted nowhere — see `uncategorized` above for why.
     db.query<{ total_out: string; total_in: string }>(`
       SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text       AS total_out,
              COALESCE(ABS(SUM(t.amount) FILTER (WHERE t.amount < 0)), 0)::text  AS total_in
@@ -91,24 +106,19 @@ export async function loadYearEnd(
   const expenseMapped = expenseRows.map(toRow);
 
   const projected = projectYearEnd(incomeMapped, expenseMapped, asOf.month);
-  const income  = projected.income + uncatIn;
-  const expense = projected.expense + uncatOut;
+  const income  = projected.income;
+  const expense = projected.expense;
 
-  // Uncategorized money has no month to sit in that this reader can defend — it is a year-to-date
-  // total, not a series — so it is folded into the CURRENT month's cumulative rather than smeared
-  // across twelve. That keeps December equal to `profitLoss`, which a test pins, and puts the
-  // unfiled money where the reader can still act on it.
-  const uncatNet = uncatIn - uncatOut;
-  const monthly = projectYearEndByMonth(incomeMapped, expenseMapped, asOf.month)
-    .map((p, m) => (m >= asOf.month ? { ...p, cumulative: p.cumulative + uncatNet } : p));
+  const monthly = projectYearEndByMonth(incomeMapped, expenseMapped, asOf.month);
 
-  const receivedToDate = -incomeRows.reduce((s, r) => s + Number(r.ytd), 0) + uncatIn;
-  const spentToDate    =  expenseRows.reduce((s, r) => s + Number(r.ytd), 0) + uncatOut;
+  const receivedToDate = -incomeRows.reduce((s, r) => s + Number(r.ytd), 0);
+  const spentToDate    =  expenseRows.reduce((s, r) => s + Number(r.ytd), 0);
 
   return {
     income, expense,
     profitLoss: income - expense,
     netToDate: receivedToDate - spentToDate,
     monthly,
+    uncategorized: { income: uncatIn, expense: uncatOut, net: uncatIn - uncatOut },
   };
 }
