@@ -153,7 +153,11 @@ async function getTodayStats(): Promise<TodayStats> {
       LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
       WHERE t.date = CURRENT_DATE
         AND t.hidden = FALSE
-        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
+        -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
+        -- whether an unfiled row is income, spend or half a transfer, and the last one to
+        -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
+        -- them, because a row with no category row fails it.
+        AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
     `),
     // Average of the same weekday's total spend over the trailing 30 days (excluding today) —
     // "is today unusual" without building full anomaly detection.
@@ -168,7 +172,11 @@ async function getTodayStats(): Promise<TodayStats> {
           AND t.date < CURRENT_DATE
           AND EXTRACT(DOW FROM t.date) = EXTRACT(DOW FROM CURRENT_DATE)
           AND t.hidden = FALSE
-          AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
+          -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
+        -- whether an unfiled row is income, spend or half a transfer, and the last one to
+        -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
+        -- them, because a row with no category row fails it.
+        AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
         GROUP BY t.date
       ) daily
     `),
@@ -209,7 +217,11 @@ async function getWeekStats(): Promise<WeekStats> {
       LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
       WHERE t.date >= date_trunc('week', CURRENT_DATE)
         AND t.hidden = FALSE
-        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
+        -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
+        -- whether an unfiled row is income, spend or half a transfer, and the last one to
+        -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
+        -- them, because a row with no category row fails it.
+        AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
     `),
     // Same portion of the week, shifted back exactly 7 days — a fair week-over-week comparison
     // regardless of which day of the week "today" is.
@@ -221,7 +233,11 @@ async function getWeekStats(): Promise<WeekStats> {
       WHERE t.date >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 days'
         AND t.date <= CURRENT_DATE - INTERVAL '7 days'
         AND t.hidden = FALSE
-        AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
+        -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
+        -- whether an unfiled row is income, spend or half a transfer, and the last one to
+        -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
+        -- them, because a row with no category row fails it.
+        AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
     `),
     db.query<{ weekly_budget: string }>(`
       SELECT COALESCE(SUM(annual_budget) / 52, 0)::text AS weekly_budget
@@ -249,7 +265,11 @@ async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpend[]> 
     JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
     LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
     WHERE EXTRACT(YEAR FROM t.date) = $1
-      AND (t.mapped_category IS NULL OR (bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'))
+      -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
+      -- whether an unfiled row is income, spend or half a transfer, and the last one to
+      -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
+      -- them, because a row with no category row fails it.
+      AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
       AND t.hidden = FALSE
     GROUP BY month_num
   `, [asOf.year]);
