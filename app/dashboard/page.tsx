@@ -871,15 +871,14 @@ export default async function DashboardPage() {
           value={fmt(stats.remaining)}
           highlight={stats.remaining < 0 ? 'red' : 'green'}
         />
-        {/* The count, not the share. A percentage of 1,476 transactions rounds to 0% at one row and
-            at six, so the card read "0%" while there was something to do — and the work is per
-            transaction anyway: the number IS the size of the job. */}
+        {/* The count alone. A percentage of 1,476 transactions rounds to 0% at one unfiled row and
+            still at six, so the card used to read "0%" in amber while there was work waiting.
+            
+            No denominator either: the total is context nobody acts on. Filing is per transaction,
+            so the count IS the size of the job, and "1" says it without a ratio to interpret. */}
         <KpiCard
           label="Uncategorized"
           value={stats.uncategorized.toLocaleString()}
-          sub={stats.uncategorized > 0
-            ? `of ${stats.totalTxns.toLocaleString()} need review`
-            : 'all categorized'}
           highlight={stats.uncategorized > 0 ? 'amber' : 'green'}
           href="/transactions?filter=uncategorized"
         />
