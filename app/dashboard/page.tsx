@@ -53,18 +53,31 @@ interface DashboardAsOf {
 async function getStats(asOf: DashboardAsOf) {
   const result = await db.query<{ total_budget: string; ytd_spent: string; uncategorized: string; total_txns: string }>(`
     SELECT
-      -- is_income excluded on both halves, matching app/budget/page.tsx's expenseRows filter. A
-      -- salary category carries an annual_budget too, and counting it here made "Annual Budget"
-      -- the sum of what is planned to be spent AND what is expected to come in — so the KPI
-      -- overstated the budget by the whole income side while "Spent" (positive amounts only)
-      -- never included a cent of it.
+      -- OPERATIONAL only, and expenses only.
+      --
+      -- is_income was already excluded on both halves: a salary category carries an annual_budget
+      -- too, and counting it made "Annual Budget" the sum of what is planned to be spent AND what
+      -- is expected to come in.
+      --
+      -- The landscape predicate is newer and fixes the same shape of error one level up. These two
+      -- cards were summing both books while everything around them — the hero, the bubbles, the
+      -- P/L chart and card — reads operational, so "Annual Budget" was $309,946 against an
+      -- operational plan of $139,237, and "Remaining" was −$58,312, a figure driven almost entirely
+      -- by a bathroom remodel overrunning its capital allocation rather than by anything in the
+      -- monthly budget beneath it.
+      --
+      -- Net of refunds, not gross, matching app/budget/page.tsx. Those two disagreed by $11,169
+      -- across 2026, which was enough for the same year to read over pace on one page and on track
+      -- on the other.
       (SELECT COALESCE(SUM(annual_budget), 0) FROM budget_categories
-        WHERE exclude_from_budget = FALSE AND is_income = FALSE)::text AS total_budget,
-      (SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)
+        WHERE exclude_from_budget = FALSE AND is_income = FALSE
+          AND landscape = 'operational')::text AS total_budget,
+      (SELECT COALESCE(SUM(t.amount), 0)
          FROM transactions t
          JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          JOIN budget_categories bc ON bc.name = t.mapped_category
               AND bc.exclude_from_budget = FALSE AND bc.is_income = FALSE
+              AND bc.landscape = 'operational'
          WHERE EXTRACT(YEAR FROM t.date) = $1 AND t.hidden = FALSE)::text AS ytd_spent,
       (SELECT COUNT(*) FROM transactions t JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          WHERE t.mapped_category IS NULL AND t.hidden = FALSE)::text AS uncategorized,
