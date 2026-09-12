@@ -537,6 +537,29 @@ export default async function DashboardPage() {
     ? drillHref(outlook.sayingNo.map((c) => c.category), asOf.month)
     : null;
 
+  // What the verdict is worth, and how much of the month it governs.
+  //
+  // The card said "Projected to close over" with no figure and "2 of 9 categories" with no sense
+  // of scale, so a $40 education line and a $1,900 grocery line read as the same sentence. It also
+  // said "computed over 100% of this month's spend", which is 100% of what it could ATTRIBUTE and
+  // about a third of what the month actually spent — the caveat under it was true and lost.
+  const projectedOver = outlook.sayingNo.reduce(
+    (sum, c) => sum + Math.max(0, c.projectedVariance ?? 0), 0);
+  const scoredBudget = [...outlook.sayingNo, ...outlook.holding, ...outlook.withheld]
+    .reduce((sum, c) => sum + c.budgeted, 0);
+  // Every tracked operational category this month, scored or not — the denominator that makes the
+  // scored set's share of the month legible instead of implied.
+  const thisMonthPaces = monthRead.allPaces.filter((p) => p.month === asOf.month);
+  const monthBudget = thisMonthPaces.reduce((sum, p) => sum + p.budgeted, 0);
+  // Named rather than implied. "Spend in categories this hero never scores" is a true phrase that
+  // gives no sense of how much is being set aside; seventeen is a number the reader can weigh.
+  const unscoredCategoryCount = thisMonthPaces.length - outlook.scoredCategoryCount;
+  // The figure belongs in the headline, not a scroll away: "projected to close over" is a
+  // direction, and the amount is what a reader weighs against the rest of the page.
+  const heroTitle = projectedOver > 0 && outlook.state === 'projected-breach'
+    ? `Projected to close ${fmt(projectedOver)} over`
+    : copy.title;
+
   const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
   const todayVsAvgRatio = todayStats.avgSameWeekday > 0 ? todayStats.spent / todayStats.avgSameWeekday : 0;
 
@@ -630,10 +653,10 @@ export default async function DashboardPage() {
         {heroHref ? (
           <Link
             href={heroHref}
-            aria-label={`${copy.title} — see this month's transactions in ${outlook.sayingNo.map((c) => c.category).join(', ')}`}
+            aria-label={`${heroTitle} — see this month's transactions in ${outlook.sayingNo.map((c) => c.category).join(', ')}`}
             className={`group inline-flex flex-wrap items-center gap-x-2.5 gap-y-2 text-4xl font-bold mt-3 ${copy.tone}`}
           >
-            <span className="group-hover:underline decoration-2 underline-offset-4">{copy.title}</span>
+            <span className="group-hover:underline decoration-2 underline-offset-4">{heroTitle}</span>
             {/* The affordance. Not a decoration: on a dark hero the underline only appears on
                 hover, so without a resting-state marker the headline looks like every other
                 heading and nobody discovers it opens anything. The pill stays short and the
@@ -644,7 +667,7 @@ export default async function DashboardPage() {
             </span>
           </Link>
         ) : (
-          <p className={`text-4xl font-bold mt-3 ${copy.tone}`}>{copy.title}</p>
+          <p className={`text-4xl font-bold mt-3 ${copy.tone}`}>{heroTitle}</p>
         )}
 
         {outlook.state === 'nothing-to-score' ? (
@@ -657,11 +680,16 @@ export default async function DashboardPage() {
             to give this month a verdict.
           </p>
         ) : outlook.sayingNo.length > 0 ? (
+          // States the SCOPE in money, which the count alone never did. "2 of 9 categories" is
+          // true of a $40 line and a $1,900 one alike; "$1,300 of September's $4,563" says which
+          // part of the month this verdict is about, and leaves the rest visibly unclaimed.
           <p className="text-sm text-slate-400 mt-3">
-            {outlook.sayingNo.length} of {outlook.scoredCategoryCount}{' '}
-            {outlook.sayingNo.length === 1 ? 'category says' : 'categories say'} no as of day {asOf.day} of{' '}
-            {monthLength}; {outlook.holding.length}{' '}
-            {outlook.holding.length === 1 ? 'is holding' : 'are holding'}.
+            {/* One expression per clause: JSX turns the newline between adjacent expressions into
+                a space, which put one in front of the comma. */}
+            {`${outlook.sayingNo.length} of ${outlook.scoredCategoryCount} discretionary `}
+            {`${outlook.sayingNo.length === 1 ? 'category' : 'categories'}, day ${asOf.day} of ${monthLength}`}
+            {scoredBudget > 0 && monthBudget > 0 &&
+              ` · covers ${fmt(scoredBudget)} of ${MONTHS[asOf.month]}’s ${fmt(monthBudget)} budget`}
           </p>
         ) : (
           // The all-clear sentence, and it is NOT unconditional ([[N40]]). "No scored category is
@@ -736,7 +764,7 @@ export default async function DashboardPage() {
             )
           ) : (
             <>
-              Computed over {outlook.coveragePercent}% of this month&apos;s spend —{' '}
+              Computed over {outlook.coveragePercent}% of discretionary spend —{' '}
               {fmtCents(outlook.coverage.scoredSpend)} the scored categories account for, against{' '}
               {fmtCents(outlook.coverage.unattributedSpend)} across{' '}
               {outlook.coverage.unattributedCount}{' '}
@@ -749,7 +777,7 @@ export default async function DashboardPage() {
                   that no longer exists — most likely a rename.{' '}
                 </>
               )}
-              Spend in categories this hero never scores is in neither figure.{' '}
+              The other {unscoredCategoryCount} tracked categories are in neither figure.{' '}
               <Link href="/transactions?filter=uncategorized" className="underline text-slate-400">Review them</Link>.
             </>
           )}
