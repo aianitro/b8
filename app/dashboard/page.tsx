@@ -18,7 +18,7 @@ import { loadFeedHealth } from '@/lib/feedHealthRead';
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
 // this one replaces was already in tension with it.
-import { asOfFromDate, type MonthOutlook, type OutlookCategory, type OutlookState } from '@/lib/domain/monthOutlook';
+import { asOfFromDate, type MonthOutlook, type OutlookCategory } from '@/lib/domain/monthOutlook';
 // The SQL behind that verdict now lives in `lib/`, shared with the daily job's breach alert, so the
 // page and the email can never drift on what this month's outlook is. It moved for the same reason
 // `lib/` already holds a shared reader for the scheduler's other daily computation: a scheduler
@@ -337,71 +337,7 @@ function paceColor(ratio: number): StatusColor {
   return 'green';
 }
 
-/**
- * The seven states, each as a sentence rather than a score.
- *
- * `nothing-to-score` gets a named cause and a route out — never a dash beside a green tick, and
- * never "on track". "The budget was followed perfectly" and "there is nothing to score" are
- * different statements, and this is the surface where confusing them would be visible.
- */
-const STATE_COPY: Record<OutlookState, { title: string; tone: string; pill: string }> = {
-  'nothing-to-score': {
-    title: 'Nothing to score yet',
-    tone: 'text-slate-300',
-    pill: 'bg-slate-800 text-slate-300',
-  },
-  'off-cycle': {
-    title: 'Off-cycle spend this month',
-    tone: 'text-red-400',
-    pill: 'bg-red-500/10 text-red-300',
-  },
-  breach: {
-    title: 'Over budget this month',
-    tone: 'text-red-400',
-    pill: 'bg-red-500/10 text-red-300',
-  },
-  'projected-breach': {
-    title: 'Projected to close over',
-    tone: 'text-amber-300',
-    pill: 'bg-amber-500/10 text-amber-200',
-  },
-  'too-early': {
-    title: 'Too early to call',
-    tone: 'text-slate-300',
-    pill: 'bg-slate-800 text-slate-300',
-  },
-  'no-budget-basis': {
-    title: 'No budget to measure against',
-    tone: 'text-slate-300',
-    pill: 'bg-slate-800 text-slate-300',
-  },
-  'on-track': {
-    title: 'On track to close inside your limits',
-    tone: 'text-emerald-400',
-    pill: 'bg-emerald-500/10 text-emerald-300',
-  },
-};
 
-/**
- * The hero's presentation, chosen by the state AND the authority — never by the state alone.
- *
- * DEMOTE, NEVER SUPPRESS. §5's exit is that the headline number always ships with the share of
- * spend it actually saw, and a suppressed hero ships nothing, so it cannot ship with its share.
- * What a low bound withdraws is the CONFIDENCE, not the information: the state's own sentence is
- * still a true statement about the rows that were seen, and a category already $400 over its month
- * is over it whatever the coverage is. So the sentence survives, and everything that presents it as
- * a settled verdict does not — the emerald, the red, the amber, and the coloured pill.
- *
- * This is the failure the ungated renderer makes most likely: a refusal banner rendered faithfully
- * underneath an emerald "On track to close inside your limits", which reads as a verdict with a
- * footnote rather than a figure that has not earned one. Colour is the part of this hero people
- * actually read, so colour is the part the bound has to reach.
- */
-function heroCopy(state: OutlookState, authoritative: boolean): { title: string; tone: string; pill: string } {
-  const stated = STATE_COPY[state];
-  if (authoritative) return stated;
-  return { title: stated.title, tone: 'text-slate-300', pill: 'bg-slate-800 text-slate-400' };
-}
 
 /**
  * The transactions behind one verdict: the named categories, in the month the verdict is about.
@@ -524,50 +460,7 @@ export default async function DashboardPage() {
   // concurrently with everything else above — `loadMonthOutlook` issues them together and is itself
   // one entry in this `Promise.all`, so nothing became serial in the move.
   const outlook: MonthOutlook = monthRead.outlook;
-  // Both, never the state alone: a confident colour over a figure computed on a tenth of the
-  // month's spend is the exact defect this phase exists to end.
-  const copy = heroCopy(outlook.state, outlook.authoritative);
 
-  // The headline is a claim about specific transactions, so it opens them — but only where such a
-  // set exists. `on-track`, `too-early`, `no-budget-basis` and `nothing-to-score` name no category,
-  // and a link from those lands on an empty list, which reads as a bug rather than as a state. The
-  // three states that DO name categories are exactly the three that fill `sayingNo`, so the list
-  // itself is the test, not a second enumeration of the states.
-  const heroHref = outlook.sayingNo.length > 0
-    ? drillHref(outlook.sayingNo.map((c) => c.category), asOf.month)
-    : null;
-
-  // What the verdict is worth, and how much of the month it governs.
-  //
-  // The card said "Projected to close over" with no figure and "2 of 9 categories" with no sense
-  // of scale, so a $40 education line and a $1,900 grocery line read as the same sentence. It also
-  // said "computed over 100% of this month's spend", which is 100% of what it could ATTRIBUTE and
-  // about a third of what the month actually spent — the caveat under it was true and lost.
-  const projectedOver = outlook.sayingNo.reduce(
-    (sum, c) => sum + Math.max(0, c.projectedVariance ?? 0), 0);
-  // The SET's position, which is not the same claim and was being left unsaid. The two breaching
-  // categories are $219 over between them while the nine together project $904 against $1,300 —
-  // $396 UNDER. Printing only the over side as "projected to close over" made a headline that was
-  // the opposite of what the month is doing.
-  const scoredProjected = [...outlook.sayingNo, ...outlook.holding]
-    .reduce((sum, c) => sum + (c.projected ?? 0), 0);
-  const scoredBudget = [...outlook.sayingNo, ...outlook.holding, ...outlook.withheld]
-    .reduce((sum, c) => sum + c.budgeted, 0);
-  // Every tracked operational category this month, scored or not — the denominator that makes the
-  // scored set's share of the month legible instead of implied.
-  const thisMonthPaces = monthRead.allPaces.filter((p) => p.month === asOf.month);
-  const monthBudget = thisMonthPaces.reduce((sum, p) => sum + p.budgeted, 0);
-  // Named rather than implied. "Spend in categories this hero never scores" is a true phrase that
-  // gives no sense of how much is being set aside; seventeen is a number the reader can weigh.
-  const unscoredCategoryCount = thisMonthPaces.length - outlook.scoredCategoryCount;
-  // The subject is the CATEGORIES, not the month. Per-category adherence is the whole thesis here
-  // — an averaged figure is diluted by construction, which is why a mortgage and a dinner are not
-  // scored together — so the headline says how many lines are heading over and by how much
-  // between them. What it must not do is attach that sum to the word "close", which is a claim
-  // about the set, and false: the set closes under.
-  const heroTitle = projectedOver > 0 && outlook.state === 'projected-breach'
-    ? `${outlook.sayingNo.length} ${outlook.sayingNo.length === 1 ? 'category' : 'categories'} heading ${fmt(projectedOver)} over`
-    : copy.title;
 
   const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
   const todayVsAvgRatio = todayStats.avgSameWeekday > 0 ? todayStats.spent / todayStats.avgSameWeekday : 0;
@@ -649,202 +542,10 @@ export default async function DashboardPage() {
         </AlertBell>
       </div>
 
-      {/* The hero, and it answers a budget question: will this month close inside its limits, and
-          which categories say no. A state from a closed set of seven and a named list — never a
-          vanity percentage, and never a total. */}
-      <div data-testid="month-outlook-hero" className="bg-slate-900 rounded-2xl shadow-sm p-8 mb-6">
-        <div className="flex items-center gap-3">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">This month</p>
-          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${copy.pill}`}>
-            {outlook.scoredCategoryCount} scored {outlook.scoredCategoryCount === 1 ? 'category' : 'categories'}
-          </span>
-        </div>
-        {heroHref ? (
-          <Link
-            href={heroHref}
-            aria-label={`${heroTitle} — see this month's transactions in ${outlook.sayingNo.map((c) => c.category).join(', ')}`}
-            className={`group inline-flex flex-wrap items-center gap-x-2.5 gap-y-2 text-4xl font-bold mt-3 ${copy.tone}`}
-          >
-            <span className="group-hover:underline decoration-2 underline-offset-4">{heroTitle}</span>
-            {/* The affordance. Not a decoration: on a dark hero the underline only appears on
-                hover, so without a resting-state marker the headline looks like every other
-                heading and nobody discovers it opens anything. The pill stays short and the
-                scope — which categories, which month — rides in the accessible name, because a
-                label long enough to state it would compete with the headline it sits beside. */}
-            <span className="text-xs font-medium text-slate-400 shrink-0 rounded-full border border-slate-700 px-2.5 py-1 group-hover:border-slate-500 group-hover:text-slate-300 transition-colors">
-              See transactions
-            </span>
-          </Link>
-        ) : (
-          <p className={`text-4xl font-bold mt-3 ${copy.tone}`}>{heroTitle}</p>
-        )}
-
-        {outlook.state === 'nothing-to-score' ? (
-          // A named cause and a route out. Never a zero, never a dash beside a green tick, and
-          // never "on track" — a category nobody has classified is not a category behaving well.
-          <p className="text-sm text-slate-400 mt-3">
-            No category is classified as discretionary yet, so there is nothing behaviour can be
-            scored on.{' '}
-            <Link href="/categories" className="underline text-slate-300">Classify your categories</Link>{' '}
-            to give this month a verdict.
-          </p>
-        ) : outlook.sayingNo.length > 0 ? (
-          // States the SCOPE in money, which the count alone never did. "2 of 9 categories" is
-          // true of a $40 line and a $1,900 one alike; "$1,300 of September's $4,563" says which
-          // part of the month this verdict is about, and leaves the rest visibly unclaimed.
-          <p className="text-sm text-slate-400 mt-3">
-            {/* One expression per clause: JSX turns the newline between adjacent expressions into
-                a space, which put one in front of the comma. */}
-            {`of ${outlook.scoredCategoryCount} discretionary categories, day ${asOf.day} of ${monthLength}`}
-            {scoredBudget > 0 &&
-              ` · together they project ${fmt(scoredProjected)} of ${fmt(scoredBudget)}, ` +
-              `${fmt(Math.abs(scoredProjected - scoredBudget))} ${scoredProjected > scoredBudget ? 'over' : 'under'}`}
-            {monthBudget > 0 && ` · ${fmt(monthBudget)} budgeted this month in all`}
-          </p>
-        ) : (
-          // The all-clear sentence, and it is NOT unconditional ([[N40]]). "No scored category is
-          // over" is a statement about the whole scored set; when categories are withheld it is
-          // only true of the budgeted part of it, and rendering the wider claim under an emerald
-          // title while five unbudgeted discretionary categories sit in `withheld` having drawn
-          // $3,000 is a true sentence doing the work of a false one. In `no-budget-basis` the
-          // wider claim is VACUOUSLY true and was still being rendered as a finding.
-          <p className="text-sm text-slate-400 mt-3">
-            {outlook.withheld.length === outlook.scoredCategoryCount && outlook.withheld.length > 0 ? (
-              // Every scored category is withheld, so there is no "none of them is over" to say at
-              // all: the set the claim would range over is empty, and "None of the 0 categories
-              // with a budget is over" is the vacuous sentence [[N40]] is about, one shape along.
-              <>
-                No scored category has a verdict this month yet — all{' '}
-                {outlook.withheld.length} are withheld, most often for having nothing budgeted.
-              </>
-            ) : outlook.withheld.length > 0 ? (
-              <>
-                None of the {outlook.scoredCategoryCount - outlook.withheld.length}{' '}
-                {outlook.scoredCategoryCount - outlook.withheld.length === 1 ? 'category' : 'categories'} with a
-                budget this month is over or projecting over as of day {asOf.day} of {monthLength}; the other{' '}
-                {outlook.withheld.length} {outlook.withheld.length === 1 ? 'has' : 'have'} no verdict,
-                most often for having nothing budgeted this month.
-              </>
-            ) : (
-              <>
-                Every scored category has a budget this month and none of them is over or projecting
-                over, as of day {asOf.day} of {monthLength}.
-              </>
-            )}
-          </p>
-        )}
-
-        {/* The bound, rendered in EVERY state and in BOTH authority modes — §5's "the headline
-            number always ships with the share of spend it actually saw". Including the healthiest
-            state, which is where a caveat is most likely to be dropped, and including the refused
-            one, where it is the explanation.
-
-            A SHARE OF DOLLARS, and the counts beside it are supporting detail that is never
-            divided: one uncategorized $4,000 row against forty categorized $12 coffees is 97.6% by
-            count and 10% by dollars, and only one of those two numbers is about this hero.
-
-            The percentage is the domain's floored integer, printed verbatim. `pct()` is NOT used
-            here: it rounds, and a rounded 99.6% renders "100% of this month's spend" beside spend
-            nobody has categorized — a confidently wrong number generated by a display convention. */}
-        <p data-testid="coverage-caveat" className="text-xs text-slate-500 mt-4 pt-4 border-t border-slate-800">
-          {outlook.coveragePercent === null ? (
-            // Never 0%, never 100%. An empty population is not perfect attribution, and it is not
-            // total failure either; it is no evidence, and this app renders "—" rather than a
-            // wrong zero.
-            //
-            // But an empty POPULATION is not an empty MONTH, and conflating the two states a
-            // falsehood about the owner's money. `scoredSpend + unattributedSpend === 0` is also
-            // true of a month in which every recorded transaction is mapped to a category this
-            // hero never scores — rent, utilities, groceries — which is the ordinary shape of the
-            // first days of a month, before the first discretionary charge, on data whose
-            // unattributed count is normally zero. "No spend is recorded" is false there, with
-            // thousands of dollars posted. So the two cases are separated and each says only what
-            // is true of it; the honest statement in the second is about THIS HERO'S REACH, not
-            // about the month. `coverageGroupCount` counts the unfiltered aggregation, so it —
-            // unlike the coverage record, which by design drops known-unscored spend from both
-            // halves — can still tell "nothing happened" from "nothing this hero scores happened".
-            monthRead.coverageGroupCount === 0 ? (
-              <>No spend is recorded this month yet, so there is no share to compute one over.</>
-            ) : (
-              <>
-                None of this month&apos;s spend is in reach of this hero — every transaction
-                recorded so far is mapped to a category it never scores, and none is unattributed —
-                so there is no share to compute one over.
-              </>
-            )
-          ) : (
-            <>
-              Computed over {outlook.coveragePercent}% of discretionary spend —{' '}
-              {fmtCents(outlook.coverage.scoredSpend)} the scored categories account for, against{' '}
-              {fmtCents(outlook.coverage.unattributedSpend)} across{' '}
-              {outlook.coverage.unattributedCount}{' '}
-              {outlook.coverage.unattributedCount === 1 ? 'transaction' : 'transactions'} they could
-              not.{' '}
-              {outlook.coverage.orphanedCount > 0 && (
-                <>
-                  {outlook.coverage.orphanedCount} of those{' '}
-                  {outlook.coverage.orphanedCount === 1 ? 'carries a category' : 'carry a category'}{' '}
-                  that no longer exists — most likely a rename.{' '}
-                </>
-              )}
-              The other {unscoredCategoryCount} tracked categories are in neither figure.{' '}
-              <Link href="/transactions?filter=uncategorized" className="underline text-slate-400">Review them</Link>.
-            </>
-          )}
-        </p>
-
-        {/* The refusal, and it is a DEMOTION rather than a suppression: everything above still
-            renders, because the state and the three named lists are true statements about the rows
-            that were seen. What this region withdraws is the claim that they add up to a verdict.
-
-            It renders if and only if the domain says so. The threshold is not restated here — the
-            page consults `outlook.authoritative` and never carries a second copy of the number,
-            because a constant duplicated at the point of display is a constant that gets moved in
-            one place. */}
-        {!outlook.authoritative && (
-          <div data-testid="coverage-refusal" className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-amber-300/90">Not a verdict yet</p>
-            <p className="text-xs text-slate-400 mt-1.5">
-              {outlook.coveragePercent === null ? (
-                // The whole sentence is conditional, not just its tail. "Too much of this month's
-                // spend is unaccounted for" is itself FALSE when the population is empty —
-                // `unattributedSpend` is 0 there and nothing is unaccounted for; the reason the
-                // bound refuses is that it has nothing to range over, which is a different fact.
-                // A refusal that misstates its own cause is the same defect as a caveat that
-                // misstates the month.
-                monthRead.coverageGroupCount === 0 ? (
-                  <>
-                    Nothing is recorded this month yet, so the bound has nothing to range over and
-                    the figures above are not yet a judgement on the month.
-                  </>
-                ) : (
-                  <>
-                    Nothing recorded this month falls in the scored set or outside it unattributed,
-                    so the bound has nothing to range over and the figures above are not a
-                    judgement on the month.
-                  </>
-                )
-              ) : (
-                <>
-                  Too much of this month&apos;s spend is unaccounted for to read the figures above
-                  as a judgement on the month. They are accurate about what was seen and silent
-                  about the rest, so treat them as a partial reading —{' '}
-                  {outlook.state === 'nothing-to-score'
-                    // Stacked with the "classify your categories" message above rather than
-                    // arguing with it: in this state both are true and they are different halves
-                    // of the same route out. Sending the owner to the transactions list alone
-                    // would be advice that cannot work until the categories are classified.
-                    ? 'classifying your categories is the first half of settling it, and categorizing these transactions is the second.'
-                    : 'categorizing the transactions above will settle it.'}
-                </>
-              )}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Directly under the month's verdict: the same set of categories the hero summarised into
-          one sentence, spread out so the reader can see which of them carry the money. */}
+      {/* The month, category by category. It leads the page now that the verdict card is gone:
+          the card said "2 categories heading $219 over" and these bubbles say which two, how big
+          each is, and what everything around them is doing — the same finding with the evidence
+          attached. */}
       <CategoryBubbles categories={bubbleCategories} />
 
       {/* Under the bubbles: they say which categories carry the money, this says what is new
