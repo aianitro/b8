@@ -26,6 +26,48 @@ const BAR_WIDTH = 40;
 const fmt = (v: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v);
 
+interface TooltipEntry { dataKey?: string | number; name?: string | number; value?: number | string; color?: string }
+
+/**
+ * Custom because the default lists every series with a value at that x, and one month is in two of
+ * them on purpose.
+ *
+ * The settled and forecast P/L lines OVERLAP on the last settled month — August is the end of one
+ * and the start of the other — so that the solid line and the dashed one share a point and join
+ * without a gap. That is right on the canvas and wrong in a tooltip, where it printed the same
+ * figure twice under two labels and read as a contradiction. The forecast entry is dropped
+ * wherever the settled one is present: on the boundary the month IS settled, and the dashed line
+ * starting there is a drawing convenience rather than a second claim about it.
+ *
+ * Money out is stored negative so its bar hangs below the axis, and it is put back here. Only that
+ * series — the P/L line's sign is the whole verdict, and stripping it would turn a loss into a
+ * gain on the way to the screen.
+ */
+function FlowTooltip({ active, payload, label }: {
+  active?: boolean; payload?: TooltipEntry[]; label?: string;
+}) {
+  if (!active || !payload?.length) return null;
+
+  const hasSettled = payload.some((e) => e.dataKey === 'pl' && e.value != null);
+  const rows = payload.filter((e) =>
+    e.value != null && !(e.dataKey === 'plProjected' && hasSettled));
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="rounded-[10px] border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
+      <p className="font-medium text-slate-700 mb-1">{label}</p>
+      {rows.map((e) => (
+        <p key={String(e.dataKey)} className="flex items-center justify-between gap-4">
+          <span style={{ color: e.color }}>{String(e.name)}</span>
+          <span className="font-mono text-slate-700">
+            {fmt(String(e.name).startsWith('Money out') ? Math.abs(Number(e.value)) : Number(e.value))}
+          </span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /**
  * The year in one frame: what each month cost, and where that leaves the running total.
  *
@@ -71,13 +113,7 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
           <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} />
-          <Tooltip
-            // Money out is stored negative to make the bar hang downward, so it is put back
-            // before anyone reads it. Only that series: the P/L line's sign is the whole verdict
-            // and stripping it would turn a loss into a gain on the way to the screen.
-            formatter={(v, name) => fmt(String(name).startsWith('Money out') ? Math.abs(Number(v)) : Number(v))}
-            contentStyle={{ border: '1px solid #e2e8f0', borderRadius: '10px', fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }}
-          />
+          <Tooltip content={<FlowTooltip />} />
           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: '#64748b' }} />
           {/* Break-even. On a P/L the zero line is the whole verdict — above it the year is up,
               below it the year is down — so it is drawn darker than the grid behind it. */}
