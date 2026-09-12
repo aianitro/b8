@@ -239,8 +239,12 @@ async function getWeekStats(): Promise<WeekStats> {
         AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
     `),
     db.query<{ weekly_budget: string }>(`
+      -- Operational only, matching the spend it is compared against. It was summing both books,
+      -- so a week of operational spending was measured against $5,960.50 when the operational
+      -- reference is $2,677.63 — the week read twice as comfortable as it is.
       SELECT COALESCE(SUM(annual_budget) / 52, 0)::text AS weekly_budget
-      FROM budget_categories WHERE exclude_from_budget = FALSE AND is_income = FALSE
+      FROM budget_categories
+      WHERE exclude_from_budget = FALSE AND is_income = FALSE AND landscape = 'operational'
     `),
   ]);
   return {
@@ -473,6 +477,10 @@ export default async function DashboardPage() {
   const yearElapsed =
     (Date.UTC(asOf.year, asOf.month, asOf.day) - startOfYear) / (Date.UTC(asOf.year + 1, 0, 1) - startOfYear);
 
+  // One name for the condition, used by both short-horizon cards. Their figures are the most
+  // sensitive on the page to a feed that has stopped: a day is one data point and a week is five.
+  const staleFeed = feedFindings.length > 0;
+
   const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
   const todayVsAvgRatio = todayStats.avgSameWeekday > 0 ? todayStats.spent / todayStats.avgSameWeekday : 0;
 
@@ -588,7 +596,15 @@ export default async function DashboardPage() {
           subColor={todayStats.avgSameWeekday > 0 ? paceColor(todayVsAvgRatio) : undefined}
           footer={
             todayStats.transactions.length === 0 ? (
-              <p className="text-xs text-slate-300">No spending yet today</p>
+              // "No spending yet today" is a claim about behaviour, and while a feed is behind it
+              // is a claim about the pipe wearing behaviour's clothes. Chase last reported on the
+              // 8th, so a $0 today and a flattering delta against the weekday average are both
+              // artefacts. Said here rather than left for the reader to remember.
+              <p className="text-xs text-slate-300">
+                {staleFeed
+                  ? <span className="text-amber-600">A bank feed is behind — nothing recorded today may be the connection, not a quiet day.</span>
+                  : 'No spending yet today'}
+              </p>
             ) : (
               <div className="space-y-1">
                 {todayStats.transactions.map((t, i) => (
@@ -609,7 +625,16 @@ export default async function DashboardPage() {
           value={fmt(weekStats.spent)}
           sub={`${weekDelta >= 0 ? '+' : ''}${fmt(weekDelta)} vs same point last week`}
           subColor={expectedWeekSpend > 0 ? paceColor(weekPaceRatio) : undefined}
-          footer={<p className="text-xs text-slate-400">{fmt(weekStats.weeklyBudgetReference)}/wk reference</p>}
+          footer={
+            <p className="text-xs text-slate-400">
+              {fmt(weekStats.weeklyBudgetReference)}/wk reference
+              {staleFeed && (
+                <span className="block text-amber-600 mt-0.5">
+                  A bank feed is behind, so recent days may be short.
+                </span>
+              )}
+            </p>
+          }
         />
       </div>
 
