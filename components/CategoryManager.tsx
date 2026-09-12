@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import MonthlyAmountsEditor from './MonthlyAmountsEditor';
-import type { BudgetCategory, Landscape } from '@/shared/types';
+import type { BudgetCategory, ControlMode, Landscape } from '@/shared/types';
+import { CONTROL_MODES, CONTROL_MODE_LABELS } from '@/lib/categoryControl';
 
 type AccountOption = { id: string; name: string; landscape: string };
 
@@ -46,10 +47,45 @@ function AccountSelect({
   );
 }
 
+// Only 'discretionary' is ever scored, so this control is the difference between a category the
+// dashboard can hold you to and one it merely reports. It is offered on exactly the rows where
+// the value is live — operational, budgeted, outgoing — because control_mode is physically
+// present on every row and INERT everywhere else, and an editable control on an inert value
+// invites a change that changes nothing.
+function ControlModeSelect({
+  category, onSaveControlMode, error,
+}: {
+  category: BudgetCategory;
+  onSaveControlMode: (id: number, mode: ControlMode) => void;
+  error: string | null;
+}) {
+  const scored = category.control_mode === 'discretionary';
+  return (
+    <div className="inline-flex flex-col gap-1">
+      <select
+        value={category.control_mode}
+        onChange={(e) => onSaveControlMode(category.id, e.target.value as ControlMode)}
+        title={scored ? 'Scored: this month gets a verdict on it' : 'Tracked and reported, never scored'}
+        className={`text-xs rounded-full px-2 py-0.5 border font-medium cursor-pointer appearance-none outline-none ${
+          scored
+            ? 'bg-amber-50 text-amber-700 border-amber-100'
+            : 'bg-slate-50 text-slate-400 border-slate-100 hover:text-slate-600'
+        }`}
+      >
+        {CONTROL_MODES.map((m) => (
+          <option key={m} value={m} className="text-slate-700">{CONTROL_MODE_LABELS[m]}</option>
+        ))}
+      </select>
+      {error && <span className="text-[10px] text-red-500 max-w-[160px]">{error}</span>}
+    </div>
+  );
+}
+
 function CategoryTable({
   rows, label, accounts, editingBudgetId, editingBudgetValue, budgetError,
   onEditingBudgetValueChange, onSaveBudget, onCancelEditBudget, onStartEditBudget,
   onToggleIncome, onDelete, onSaveMonthlyAmounts, onSetDedicatedAccount,
+  onSaveControlMode, controlModeErrorId, controlModeError,
 }: {
   rows: BudgetCategory[];
   label: string;
@@ -65,6 +101,9 @@ function CategoryTable({
   onDelete: (id: number) => void;
   onSaveMonthlyAmounts: (id: number, amounts: number[] | null) => Promise<void>;
   onSetDedicatedAccount: (id: number, accountId: string | null) => void;
+  onSaveControlMode: (id: number, mode: ControlMode) => void;
+  controlModeErrorId: number | null;
+  controlModeError: string | null;
 }) {
   if (rows.length === 0) return null;
   return (
@@ -76,6 +115,7 @@ function CategoryTable({
             <tr className="bg-slate-50 border-b border-slate-100">
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Category</th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Landscape</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Control</th>
               <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Account</th>
               <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Annual</th>
               <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Monthly ref</th>
@@ -110,6 +150,22 @@ function CategoryTable({
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${LANDSCAPE_BADGE[c.landscape]}`}>
                       {c.landscape}
                     </span>
+                  )}
+                </td>
+                <td className="px-4 py-4">
+                  {c.exclude_from_budget || c.is_income || c.landscape !== 'operational' ? (
+                    <span
+                      className="text-xs text-slate-300"
+                      title="Inert here — behaviour is scored only on operational, budgeted, outgoing categories"
+                    >
+                      —
+                    </span>
+                  ) : (
+                    <ControlModeSelect
+                      category={c}
+                      onSaveControlMode={onSaveControlMode}
+                      error={controlModeErrorId === c.id ? controlModeError : null}
+                    />
                   )}
                 </td>
                 <td className="px-4 py-4">
@@ -215,6 +271,9 @@ export default function CategoryManager({ categories, accounts }: Props) {
   const [editingBudgetId, setEditingBudgetId] = useState<number | null>(null);
   const [editingBudgetValue, setEditingBudgetValue] = useState('');
   const [budgetError, setBudgetError] = useState<string | null>(null);
+  const [controlMode, setControlMode] = useState<ControlMode>('fixed');
+  const [controlModeErrorId, setControlModeErrorId] = useState<number | null>(null);
+  const [controlModeError, setControlModeError] = useState<string | null>(null);
 
   useEffect(() => {
     // Deliberately in an effect, not a lazy useState initializer: localStorage isn't available
@@ -256,13 +315,14 @@ export default function CategoryManager({ categories, accounts }: Props) {
         annual_budget,
         landscape,
         is_income: isIncome,
+        control_mode: controlMode,
         dedicated_account_id: dedicatedAccountId || null,
         monthly_amounts: monthlyAmounts,
       }),
     });
     const data = await res.json();
     if (data.success) {
-      setName(''); setBudget(''); setMonthlyAmounts(null); setIsIncome(false); setDedicatedAccountId('');
+      setName(''); setBudget(''); setMonthlyAmounts(null); setIsIncome(false); setDedicatedAccountId(''); setControlMode('fixed');
       router.refresh();
     } else {
       setError(data.error?.message ?? 'Failed to save');
@@ -308,6 +368,26 @@ export default function CategoryManager({ categories, accounts }: Props) {
       router.refresh();
     } else {
       setBudgetError(data.error?.message ?? 'Failed to save');
+    }
+  }
+
+  // The one write path that did not exist until now. A failed write is reported against the row
+  // that failed rather than as a page-level message: the only way to fail here is the
+  // debt-service coupling, and that answer is only meaningful beside the category it is about.
+  async function saveControlMode(id: number, mode: ControlMode) {
+    setControlModeErrorId(null);
+    setControlModeError(null);
+    const res = await fetch('/api/categories', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, control_mode: mode }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      router.refresh();
+    } else {
+      setControlModeErrorId(id);
+      setControlModeError(data.error?.message ?? 'Failed to save');
     }
   }
 
@@ -409,6 +489,21 @@ export default function CategoryManager({ categories, accounts }: Props) {
               </button>
             </div>
           </div>
+          {tab === 'operational' && !isIncome && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-slate-500">Control</label>
+              <select
+                value={controlMode}
+                onChange={(e) => setControlMode(e.target.value as ControlMode)}
+                title="Only Discretionary categories are scored for adherence"
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-700"
+              >
+                {CONTROL_MODES.map((m) => (
+                  <option key={m} value={m}>{CONTROL_MODE_LABELS[m]}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {tabAccounts.length > 0 && (
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-slate-500">Dedicated Account</label>
@@ -454,6 +549,9 @@ export default function CategoryManager({ categories, accounts }: Props) {
             onDelete={handleDelete}
             onSaveMonthlyAmounts={saveMonthlyAmounts}
             onSetDedicatedAccount={setDedicatedAccount}
+            onSaveControlMode={saveControlMode}
+            controlModeErrorId={controlModeErrorId}
+            controlModeError={controlModeError}
           />
           <CategoryTable
             rows={expenses}
@@ -470,6 +568,9 @@ export default function CategoryManager({ categories, accounts }: Props) {
             onDelete={handleDelete}
             onSaveMonthlyAmounts={saveMonthlyAmounts}
             onSetDedicatedAccount={setDedicatedAccount}
+            onSaveControlMode={saveControlMode}
+            controlModeErrorId={controlModeErrorId}
+            controlModeError={controlModeError}
           />
         </>
       )}

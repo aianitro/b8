@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import type { ApiResponse, BudgetCategory } from '@/shared/types';
 import { normalizeMonthlyAmounts, resolveAnnualBudget } from '@/lib/budgetMath';
+import { CONTROL_MODES, parseControlMode, conflictsWithDebtService } from '@/lib/categoryControl';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('categories');
@@ -16,10 +17,21 @@ export async function GET() {
 // Exactly 12 values (Jan-Dec), each a non-negative amount. An invalid length or all-zero
 // array is treated the same as "no custom schedule" (falls back to the flat annual/12 split).
 export async function POST(req: NextRequest) {
-  const { name, annual_budget, landscape, is_income, dedicated_account_id, monthly_amounts } = await req.json();
+  const { name, annual_budget, landscape, is_income, dedicated_account_id, monthly_amounts, control_mode } = await req.json();
   if (!name || typeof annual_budget !== 'number' || !landscape) {
     return Response.json(
       { success: false, error: { code: 'INVALID_INPUT', message: 'name, annual_budget, and landscape required' } } satisfies ApiResponse<never>,
+      { status: 400 }
+    );
+  }
+  // Optional, and absent means 'fixed' — the column's own default, chosen so an unreviewed
+  // category stays out of the scored set rather than being counted as a behavioural choice
+  // nobody made. Present-but-invalid is refused rather than coerced to that default, which
+  // would look like success while silently doing the opposite of what was asked.
+  const controlMode = control_mode === undefined ? 'fixed' : parseControlMode(control_mode);
+  if (controlMode === null) {
+    return Response.json(
+      { success: false, error: { code: 'INVALID_INPUT', message: `control_mode must be one of ${CONTROL_MODES.join(', ')}` } } satisfies ApiResponse<never>,
       { status: 400 }
     );
   }
@@ -29,8 +41,8 @@ export async function POST(req: NextRequest) {
     // annual_budget and the schedule can never drift apart, even if a caller passes both.
     const resolvedAnnualBudget = resolveAnnualBudget(amounts, annual_budget);
     const result = await db.query<BudgetCategory>(
-      'INSERT INTO budget_categories (name, annual_budget, landscape, is_income, dedicated_account_id, monthly_amounts) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [name.trim(), resolvedAnnualBudget, landscape, Boolean(is_income), dedicated_account_id ?? null, amounts]
+      'INSERT INTO budget_categories (name, annual_budget, landscape, is_income, dedicated_account_id, monthly_amounts, control_mode) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
+      [name.trim(), resolvedAnnualBudget, landscape, Boolean(is_income), dedicated_account_id ?? null, amounts, controlMode]
     );
     return Response.json({ success: true, data: result.rows[0] } satisfies ApiResponse<BudgetCategory>, { status: 201 });
   } catch (err: unknown) {
@@ -55,6 +67,33 @@ export async function PATCH(req: NextRequest) {
   }
   if ('is_income' in body) {
     await db.query('UPDATE budget_categories SET is_income = $1 WHERE id = $2', [Boolean(body.is_income), id]);
+  } else if ('control_mode' in body) {
+    const mode = parseControlMode(body.control_mode);
+    if (mode === null) {
+      return Response.json(
+        { success: false, error: { code: 'INVALID_INPUT', message: `control_mode must be one of ${CONTROL_MODES.join(', ')}` } } satisfies ApiResponse<never>,
+        { status: 400 }
+      );
+    }
+    // Read is_debt_service first so the coupling constraint comes back as a stated 409 rather
+    // than as a raw 23514 through a handler that has no try/catch — the CHECK would refuse this
+    // either way, and the only question is whether the caller learns why.
+    const existing = await db.query<{ is_debt_service: boolean }>(
+      'SELECT is_debt_service FROM budget_categories WHERE id = $1', [id]
+    );
+    if (!existing.rows[0]) {
+      return Response.json(
+        { success: false, error: { code: 'NOT_FOUND', message: 'No such category' } } satisfies ApiResponse<never>,
+        { status: 404 }
+      );
+    }
+    if (conflictsWithDebtService(mode, existing.rows[0].is_debt_service)) {
+      return Response.json(
+        { success: false, error: { code: 'DEBT_SERVICE_FIXED', message: 'A debt-service category is the fixed case — its payment is not a monthly decision' } } satisfies ApiResponse<never>,
+        { status: 409 }
+      );
+    }
+    await db.query('UPDATE budget_categories SET control_mode = $1 WHERE id = $2', [mode, id]);
   } else if ('annual_budget' in body) {
     const amount = Number(body.annual_budget);
     if (!Number.isFinite(amount) || amount < 0) {
@@ -99,7 +138,7 @@ export async function PATCH(req: NextRequest) {
     await db.query('UPDATE budget_categories SET name = $1 WHERE id = $2', [trimmed, id]);
   } else {
     return Response.json(
-      { success: false, error: { code: 'INVALID_INPUT', message: 'is_income, annual_budget, dedicated_account_id, monthly_amounts, or name required' } } satisfies ApiResponse<never>,
+      { success: false, error: { code: 'INVALID_INPUT', message: 'is_income, control_mode, annual_budget, dedicated_account_id, monthly_amounts, or name required' } } satisfies ApiResponse<never>,
       { status: 400 }
     );
   }

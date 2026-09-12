@@ -1302,6 +1302,28 @@ screenshot, and I never ran `npm run seed:demo` against `.env.local`.**
 The seed half of the screenshot work **is** in this diff and is verified to produce a renderable
 dashboard (§11), so the capture is a photograph, not a debugging session.
 
+**DISCHARGED 2026-09-11.** `docs/screenshots/dashboard.jpg` and `net-worth.jpg` are recaptured and
+show the re-pointed product: the dashboard opens on "where the month sits" per category, and the
+net-worth figure appears only on `/net-worth`.
+
+**The destructive sequence was never performed.** A1 escalated because README §77's procedure backs
+up, truncates and restores the database holding real financial data. README §79 already documents
+the alternative that avoids it, and that is the one used: a scratch `b8_demo`, migrated and seeded
+with `DATABASE_URL` overridden in the environment, which both `seed-demo.mjs` and Next honour over
+`.env.local`. `b8_finance` was read twice, for row counts, and never written. The served data was
+confirmed to be the demo set before capture — 21 categories against the real database's 36 — and
+the captured net worth reads $1,462,864, not the real figure.
+
+The pages were served from a production build of a copy of the repo, because a `next dev` server was
+already running against the real database and Next 16 refuses a second dev server from the same
+directory. A production build also keeps the dev indicator out of the images.
+
+**One thing changed that A1 did not anticipate:** the new images are 1568×641, where the five
+untouched ones are 1568×745. This display cannot produce a 745px viewport — `screen.availHeight` is
+818 and browser chrome takes the rest. The README lays the images out in a table that scales them to
+the column width, so the cost is a slightly shorter first row. Recorded rather than hidden, since
+the alternative was upscaling a 641px capture into a 745px frame and calling it a photograph.
+
 ---
 
 ## 15. The diff
