@@ -545,6 +545,12 @@ export default async function DashboardPage() {
   // about a third of what the month actually spent — the caveat under it was true and lost.
   const projectedOver = outlook.sayingNo.reduce(
     (sum, c) => sum + Math.max(0, c.projectedVariance ?? 0), 0);
+  // The SET's position, which is not the same claim and was being left unsaid. The two breaching
+  // categories are $219 over between them while the nine together project $904 against $1,300 —
+  // $396 UNDER. Printing only the over side as "projected to close over" made a headline that was
+  // the opposite of what the month is doing.
+  const scoredProjected = [...outlook.sayingNo, ...outlook.holding]
+    .reduce((sum, c) => sum + (c.projected ?? 0), 0);
   const scoredBudget = [...outlook.sayingNo, ...outlook.holding, ...outlook.withheld]
     .reduce((sum, c) => sum + c.budgeted, 0);
   // Every tracked operational category this month, scored or not — the denominator that makes the
@@ -554,10 +560,13 @@ export default async function DashboardPage() {
   // Named rather than implied. "Spend in categories this hero never scores" is a true phrase that
   // gives no sense of how much is being set aside; seventeen is a number the reader can weigh.
   const unscoredCategoryCount = thisMonthPaces.length - outlook.scoredCategoryCount;
-  // The figure belongs in the headline, not a scroll away: "projected to close over" is a
-  // direction, and the amount is what a reader weighs against the rest of the page.
+  // The subject is the CATEGORIES, not the month. Per-category adherence is the whole thesis here
+  // — an averaged figure is diluted by construction, which is why a mortgage and a dinner are not
+  // scored together — so the headline says how many lines are heading over and by how much
+  // between them. What it must not do is attach that sum to the word "close", which is a claim
+  // about the set, and false: the set closes under.
   const heroTitle = projectedOver > 0 && outlook.state === 'projected-breach'
-    ? `Projected to close ${fmt(projectedOver)} over`
+    ? `${outlook.sayingNo.length} ${outlook.sayingNo.length === 1 ? 'category' : 'categories'} heading ${fmt(projectedOver)} over`
     : copy.title;
 
   const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
@@ -686,10 +695,11 @@ export default async function DashboardPage() {
           <p className="text-sm text-slate-400 mt-3">
             {/* One expression per clause: JSX turns the newline between adjacent expressions into
                 a space, which put one in front of the comma. */}
-            {`${outlook.sayingNo.length} of ${outlook.scoredCategoryCount} discretionary `}
-            {`${outlook.sayingNo.length === 1 ? 'category' : 'categories'}, day ${asOf.day} of ${monthLength}`}
-            {scoredBudget > 0 && monthBudget > 0 &&
-              ` · covers ${fmt(scoredBudget)} of ${MONTHS[asOf.month]}’s ${fmt(monthBudget)} budget`}
+            {`of ${outlook.scoredCategoryCount} discretionary categories, day ${asOf.day} of ${monthLength}`}
+            {scoredBudget > 0 &&
+              ` · together they project ${fmt(scoredProjected)} of ${fmt(scoredBudget)}, ` +
+              `${fmt(Math.abs(scoredProjected - scoredBudget))} ${scoredProjected > scoredBudget ? 'over' : 'under'}`}
+            {monthBudget > 0 && ` · ${fmt(monthBudget)} budgeted this month in all`}
           </p>
         ) : (
           // The all-clear sentence, and it is NOT unconditional ([[N40]]). "No scored category is
