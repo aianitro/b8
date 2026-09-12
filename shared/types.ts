@@ -1,3 +1,26 @@
+// The shared TypeScript surface. Its runtime counterpart is shared/contracts/ (zod, added by
+// P1-10): one schema per export below, validating the JSON these shapes actually have on the wire.
+//
+// Read the pair with one divergence in mind, because it is measured rather than theoretical. Every
+// field below typed `number` that is backed by a scalar Postgres NUMERIC column — Property
+// .purchase_price/.cost_basis, BudgetCategory.annual_budget, Transaction.amount and all of
+// BudgetSummary's money fields — actually arrives as a numeric STRING ("8400.00"): `pg` returns
+// OID 1700 as text so an arbitrary-precision decimal cannot lose digits to a float, and lib/db.ts
+// registers no type parser to change that. The contracts say string; these declarations say number;
+// the contracts are the truthful ones.
+//
+// The types are left as `number` deliberately, not by oversight. 61 files import this module and
+// several do arithmetic directly on those fields, so correcting them is a breaking change
+// (BUILD.md §9.2) that has to land with the consumers it breaks — that is the /api/v1 route
+// migration's job, not the job of the task that introduced the validator. Until then the
+// `Number(...)` wrappers already dotted through components/CategoryManager.tsx and
+// app/budget/page.tsx are what bridges the two, and they are there because the type is wrong.
+//
+// NUMERIC[] is NOT the same case and must not be "fixed" to match: `pg` registers the array parser
+// separately and it does convert elements, so BudgetCategory.monthly_amounts really is number[] at
+// runtime. Local row types annotating it `string[]` (app/budget/page.tsx, the categories route) are
+// the mirror-image mistake.
+
 export type Landscape = 'operational' | 'capital';
 
 // 'ledger': balance is flow-derived (beginning_balance + Σ transactions) — right for cash.
