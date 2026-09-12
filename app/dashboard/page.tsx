@@ -78,7 +78,6 @@ async function getStats(asOf: DashboardAsOf) {
   const totalTxns = Number(r.total_txns);
   return {
     budget, spent, remaining: budget - spent, uncategorized, totalTxns,
-    uncategorizedPct: totalTxns > 0 ? Math.round((uncategorized / totalTxns) * 100) : 0,
   };
 }
 
@@ -872,10 +871,15 @@ export default async function DashboardPage() {
           value={fmt(stats.remaining)}
           highlight={stats.remaining < 0 ? 'red' : 'green'}
         />
+        {/* The count, not the share. A percentage of 1,476 transactions rounds to 0% at one row and
+            at six, so the card read "0%" while there was something to do — and the work is per
+            transaction anyway: the number IS the size of the job. */}
         <KpiCard
           label="Uncategorized"
-          value={`${stats.uncategorizedPct}%`}
-          sub={stats.uncategorized > 0 ? `${stats.uncategorized} of ${stats.totalTxns} need review` : 'all categorized'}
+          value={stats.uncategorized.toLocaleString()}
+          sub={stats.uncategorized > 0
+            ? `of ${stats.totalTxns.toLocaleString()} need review`
+            : 'all categorized'}
           highlight={stats.uncategorized > 0 ? 'amber' : 'green'}
           href="/transactions?filter=uncategorized"
         />
