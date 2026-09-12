@@ -10,6 +10,7 @@ import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
+import AlertBell from '@/components/AlertBell';
 import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbles';
 import RecentArrivals from '@/components/RecentArrivals';
 import { loadFeedHealth } from '@/lib/feedHealthRead';
@@ -581,16 +582,13 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
-      {/* Header, with the warnings docked to its right rather than stacked across the page.
+      {/* Header, with the warnings behind a counter in the corner.
           
-          Both of these can legitimately sit here for days — a degraded bank feed clears on Plaid's
-          schedule, and a drift needs a missing transaction found — so as full-width amber bars they
-          cost the top of the first screen every day to repeat something already known. In the
-          corner they stay visible and stop being the first thing the page says.
-          
-          `items-start`, not `items-baseline`: the stack is taller than the heading and baseline
-          alignment would hang it off the title's text line. Feed health leads, because a stale feed
-          is the thing that explains the drift beneath it. */}
+          They can legitimately sit here for days — a degraded bank feed clears on Plaid's
+          schedule, a drift needs a missing transaction found — so anything permanently on screen
+          permanently repeats what the owner already knows. A count says it in one glyph. Feed
+          health leads inside the popover, because a stale feed is what explains the drift under
+          it. */}
       <div className="flex items-start justify-between gap-6 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
@@ -598,10 +596,13 @@ export default async function DashboardPage() {
             {MONTHS[asOf.month]} {asOf.year} · day {asOf.day} of {monthLength}
           </p>
         </div>
-        <div className="w-full max-w-sm shrink-0 space-y-2">
+        {/* Counted by CARD, not by finding: two institutions behind is one message about the
+            feed, and five drifting accounts is one message about the ledger. The number is how
+            many things there are to read, which is the only sense in which a reader counts them. */}
+        <AlertBell count={(feedFindings.length > 0 ? 1 : 0) + (driftFindings.length > 0 ? 1 : 0)}>
           <FeedHealthCard findings={feedFindings} />
           <DriftAlertCard findings={driftFindings} />
-        </div>
+        </AlertBell>
       </div>
 
       {/* The hero, and it answers a budget question: will this month close inside its limits, and
