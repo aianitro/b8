@@ -159,10 +159,10 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
           // Rounded for the same reason the coordinates are: an unrounded font size is a second
           // float whose server and client spellings differ.
           const nameSize = Math.round(Math.min(15, Math.max(10, c.r / 3.2)) * 10) / 10;
-          // White reads on the solid inner disc and disappears on the pale outer one. The
-          // threshold is on the RADIUS the disc now takes, so it tracks the scale above: at 0.78
-          // the disc clears the two lines of text at the centre.
-          const labelOnSolid = spentRatio >= 0.78;
+          // White reads on the solid inner disc and disappears on the pale outer one. 0.6 of the
+          // budget puts the disc's radius at 0.77 of the outer, which is where it clears the two
+          // lines of text at the centre.
+          const labelOnSolid = spentRatio >= 0.6;
           const inside = fitLabel(cat.category, c.r, nameSize);
           // Over means SPENT past the line, not projected to pass it. Those are different claims
           // and only one of them is money that has left: a category at $110 of $150 is heading
@@ -188,17 +188,15 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
               >
                 {/* Outer disc is the BUDGET, inner disc is what has been spent against it.
                     
-                    RADIUS is proportional to the ratio, not area — deliberately, and against the
-                    rule the bubble sizes themselves follow. This inner disc is read as a gauge
-                    against the ring around it, the way a progress dial is: Grocery at $594 of
-                    $1,800 should look a third of the way out. On an area scale a third of the
-                    budget puts the radius at 0.58 of the outer, which reads as well over half.
+                    AREA carries the ratio, so the radius is its square root. Grocery at $594 of
+                    $1,800 fills a third of its circle: radius 0.57 of the outer, not 0.33.
                     
-                    The cost is stated rather than hidden: the inner disc's AREA is then 11% of the
-                    outer at 33% spent, so comparing two inner discs to each other understates the
-                    difference. They are not meant to be compared to each other — each is read
-                    against its own ring, and the cross-category comparison is the outer circles,
-                    which do scale by area.
+                    Scaling the radius directly is the tempting reading of "a third of the circle"
+                    and it is wrong by a factor of three — at 0.33 of the radius the inner disc
+                    covers 11% of the area, so a third of the budget looks like a tenth of it. It
+                    is also inconsistent: the outer circles size by the square root of the budget
+                    for exactly this reason, and two encodings on one shape is how a chart stops
+                    being readable.
                     
                     Capped at the outer radius. Past its line a category cannot overflow its own
                     circle, and it does not need to — the colour has already said so. */}
@@ -206,7 +204,7 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
                         stroke={color} strokeOpacity={hover === c.key ? 0.9 : 0.45}
                         strokeWidth={hover === c.key ? 2 : 1} />
                 {spentRatio > 0 && (
-                  <circle cx={c.x} cy={c.y} r={c.r * spentRatio} fill={color}
+                  <circle cx={c.x} cy={c.y} r={c.r * Math.sqrt(spentRatio)} fill={color}
                           fillOpacity={0.95} style={{ pointerEvents: 'none' }} />
                 )}
                 {inside !== null ? (
