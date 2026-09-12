@@ -159,10 +159,10 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
           // Rounded for the same reason the coordinates are: an unrounded font size is a second
           // float whose server and client spellings differ.
           const nameSize = Math.round(Math.min(15, Math.max(10, c.r / 3.2)) * 10) / 10;
-          // White reads on the solid inner disc and disappears on the pale outer one. 0.55 of the
-          // budget is where the inner disc's radius (0.74 of the outer) clears the two lines of
-          // text sitting at the centre.
-          const labelOnSolid = spentRatio >= 0.55;
+          // White reads on the solid inner disc and disappears on the pale outer one. The
+          // threshold is on the RADIUS the disc now takes, so it tracks the scale above: at 0.78
+          // the disc clears the two lines of text at the centre.
+          const labelOnSolid = spentRatio >= 0.78;
           const inside = fitLabel(cat.category, c.r, nameSize);
           // Over means SPENT past the line, not projected to pass it. Those are different claims
           // and only one of them is money that has left: a category at $110 of $150 is heading
@@ -188,10 +188,17 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
               >
                 {/* Outer disc is the BUDGET, inner disc is what has been spent against it.
                     
-                    Radius scales with the square root of the ratio, because area is what the eye
-                    reads: at half the budget the inner disc must be half the ink, which is 0.71 of
-                    the radius, not 0.5. Scaling radius directly would draw a quarter-full bubble as
-                    half-full. Same reason the bubbles themselves size by sqrt of budget.
+                    RADIUS is proportional to the ratio, not area — deliberately, and against the
+                    rule the bubble sizes themselves follow. This inner disc is read as a gauge
+                    against the ring around it, the way a progress dial is: Grocery at $594 of
+                    $1,800 should look a third of the way out. On an area scale a third of the
+                    budget puts the radius at 0.58 of the outer, which reads as well over half.
+                    
+                    The cost is stated rather than hidden: the inner disc's AREA is then 11% of the
+                    outer at 33% spent, so comparing two inner discs to each other understates the
+                    difference. They are not meant to be compared to each other — each is read
+                    against its own ring, and the cross-category comparison is the outer circles,
+                    which do scale by area.
                     
                     Capped at the outer radius. Past its line a category cannot overflow its own
                     circle, and it does not need to — the colour has already said so. */}
@@ -199,7 +206,7 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
                         stroke={color} strokeOpacity={hover === c.key ? 0.9 : 0.45}
                         strokeWidth={hover === c.key ? 2 : 1} />
                 {spentRatio > 0 && (
-                  <circle cx={c.x} cy={c.y} r={c.r * Math.sqrt(spentRatio)} fill={color}
+                  <circle cx={c.x} cy={c.y} r={c.r * spentRatio} fill={color}
                           fillOpacity={0.95} style={{ pointerEvents: 'none' }} />
                 )}
                 {inside !== null ? (
