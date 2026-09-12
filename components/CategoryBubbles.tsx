@@ -114,7 +114,9 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">
       <div className="flex items-baseline justify-between mb-1">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Where the month sits</p>
-        <p className="text-[10px] text-slate-400">size = this month&apos;s budget · colour = spent or heading over</p>
+        <p className="text-[10px] text-slate-400">
+          outer = this month&apos;s budget · inner = spent so far · colour = spent or heading over
+        </p>
       </div>
 
       {/* One line, reserved whether or not anything is hovered, so the chart never jumps. */}
@@ -143,6 +145,11 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
         {circles.map((c) => {
           const cat = byKey.get(c.key)!;
           const color = bubbleColor(cat);
+          // Clamped to [0, 1]: a refund month has spent nothing to draw, and an over-budget one
+          // fills its circle rather than bursting it.
+          const spentRatio = cat.budgeted > 0
+            ? Math.min(1, Math.max(0, cat.actual / cat.budgeted))
+            : 0;
           const dim = hover !== null && hover !== c.key;
           // A label only where it fits. Cramming 10px text into a 14px circle produces a smear
           // that is neither readable nor decorative; those categories are reached by hover.
@@ -152,6 +159,10 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
           // Rounded for the same reason the coordinates are: an unrounded font size is a second
           // float whose server and client spellings differ.
           const nameSize = Math.round(Math.min(15, Math.max(10, c.r / 3.2)) * 10) / 10;
+          // White reads on the solid inner disc and disappears on the pale outer one. 0.55 of the
+          // budget is where the inner disc's radius (0.74 of the outer) clears the two lines of
+          // text sitting at the centre.
+          const labelOnSolid = spentRatio >= 0.55;
           const inside = fitLabel(cat.category, c.r, nameSize);
           // Over means SPENT past the line, not projected to pass it. Those are different claims
           // and only one of them is money that has left: a category at $110 of $150 is heading
@@ -175,11 +186,25 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
                 onMouseLeave={() => setHover(null)}
                 style={{ cursor: 'pointer', opacity: dim ? 0.35 : 1, transition: 'opacity 120ms' }}
               >
-                <circle cx={c.x} cy={c.y} r={c.r} fill={color} fillOpacity={0.85}
-                        stroke={color} strokeWidth={hover === c.key ? 2 : 0} />
+                {/* Outer disc is the BUDGET, inner disc is what has been spent against it.
+                    
+                    Radius scales with the square root of the ratio, because area is what the eye
+                    reads: at half the budget the inner disc must be half the ink, which is 0.71 of
+                    the radius, not 0.5. Scaling radius directly would draw a quarter-full bubble as
+                    half-full. Same reason the bubbles themselves size by sqrt of budget.
+                    
+                    Capped at the outer radius. Past its line a category cannot overflow its own
+                    circle, and it does not need to — the colour has already said so. */}
+                <circle cx={c.x} cy={c.y} r={c.r} fill={color} fillOpacity={0.28}
+                        stroke={color} strokeOpacity={hover === c.key ? 0.9 : 0.45}
+                        strokeWidth={hover === c.key ? 2 : 1} />
+                {spentRatio > 0 && (
+                  <circle cx={c.x} cy={c.y} r={c.r * Math.sqrt(spentRatio)} fill={color}
+                          fillOpacity={0.95} style={{ pointerEvents: 'none' }} />
+                )}
                 {inside !== null ? (
                   <text x={c.x} y={showAmount ? c.y - 1 : c.y + nameSize / 3} textAnchor="middle"
-                        fontSize={nameSize} fill="#fff" fontWeight={600}
+                        fontSize={nameSize} fill={labelOnSolid ? '#fff' : '#334155'} fontWeight={600}
                         style={{ pointerEvents: 'none' }}>
                     {inside}
                   </text>
@@ -191,7 +216,7 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
                 )}
                 {showAmount && (
                   <text x={c.x} y={c.y + nameSize + 3} textAnchor="middle" fontSize={11}
-                        fill="#fff" fillOpacity={over ? 1 : 0.85}
+                        fill={labelOnSolid ? '#fff' : '#475569'} fillOpacity={over ? 1 : 0.9}
                         fontWeight={over ? 600 : 400} style={{ pointerEvents: 'none' }}>
                     {secondLine}
                   </text>
