@@ -576,3 +576,69 @@ Fix: the handler calls the existing composer. The reviewer's scenario becomes an
 | A7 | **When a spec's acceptance commands cannot reach the production wiring (no database, pure-function tests only), it must pin that wiring with a static check.** A grep asserting the literal the wiring depends on is cheap, mechanical, and discriminates — the alternative is a gate that passes while the feature is wired to the wrong thing | §7.1 checklist · §7.5 | P0-09a G3/G4: the reviewer noticed by reading that `lib/netWorth.ts:95`'s kind filter was covered by nothing. Mutation-tested: changing it to `'last_month_rent'` — making last month's rent reduce net worth and deposits stop counting, contradicting the owner's decision — left all 11 acceptance commands and all 298 tests green |
 
 **A2 has the widest blast radius and the weakest natural defence.** It is the rule most likely to be quietly skipped, because skipping it always *feels* like efficiency: the conclusion is usually right, and only the reason is wrong. The cost lands one or two tasks later, on someone re-deriving a fix aimed at the wrong object.
+
+---
+
+### First measurement — 2026-09-13, ten merged tasks
+
+§15 has defined these metrics since it was written and nobody had computed them. Doing so changes
+what this document should ask for. Derived from every `plan/tasks/*/GATES.md`.
+
+**Gate-catch distribution.**
+
+| Gate | Failures across 10 tasks |
+|---|---|
+| G0 spec | 2 |
+| G1 contract | 1 |
+| G2 build | 0 |
+| G3 adversarial | 5 BLOCKs across 11 recorded gates |
+| G4 integration | 0 |
+
+**Eight of ten tasks passed every gate on the first attempt.** The full five-agent ceremony ran at
+full cost on work that never needed it. That is the headline, and it is not what §15 predicted it
+would find.
+
+**Cost, for the two tasks measured directly.**
+
+| | Subagent tokens | Spec | Gate log | Evidence | Shipped code |
+|---|---|---|---|---|---|
+| P1-10 | 719,000 | 224 | 548 | 468 | 2,090 |
+| P1-11 | 1,080,000 | 239 | 705 | 1,094 | 1,126 |
+
+P1-11 produced **2,038 lines of process record against 1,126 lines of shipped code**, and its spec
+carried 44 acceptance commands of which **8 assert only that a file exists** — a property `tsc` and
+the suite already prove, and which no plausible broken implementation could fail while passing the
+rest.
+
+**Where the cost actually sits, and it is not the handoffs.** The spec-writer burned ~240,000 tokens
+on each task, matching or exceeding the implementer. G2 and G4 have never failed. The agent-to-agent
+choreography that *feels* expensive is cheap; the specification is not.
+
+**The second cost is this system auditing its own instruments.** Six findings across P1-10 and P1-11
+were one defect class: *a control that measures a proxy rather than the rule it stands for.* A
+substring search standing in for an import. A path prefix standing in for the contract surface. A
+version pattern standing in for a range. A file walk standing in for a module graph. None was a
+defect in the feature. Two G0 cycles and one G1 cycle were spent on them at full review price.
+
+**What earned its cost, plainly.** The adversarial reviewer found two independent live paths by
+which the integration suite would have truncated the owner's real financial database, and **no other
+gate caught either**. G0 caught the third. That is the whole justification for the ceremony, and it
+is enough of one — but it argues for aiming the ceremony, not for applying it uniformly.
+
+| # | Amendment | Where it lives now | What produced it |
+|---|---|---|---|
+| A8 | **Risk-tier the pipeline.** A task that touches no contract surface, no migration, no outbound surface and no money arithmetic runs G0 → G2 → G4, with G3 advisory rather than blocking. The orchestrator records the tier and the four-part reason in `GATES.md` before dispatch, so the choice is auditable rather than a mood. G1 already skips on the same principle; this extends it | §6 lifecycle · §7 | The first measurement: 8 of 10 tasks passed every gate first time. Uniform ceremony on non-uniform risk is the cost with no defect behind it |
+| A9 | **Acceptance-command budget.** A command that asserts only that a file exists is not an acceptance command and is refused at G0 — `tsc`, the suite and the build already prove existence, and a stub satisfies it. Every command must name the broken implementation it would catch, and the orchestrator rejects any it cannot name one for | §7.1 checklist · SPEC template | P1-11's 44 commands, 8 of them `test -f`. The vacuity rule existed and was applied to fixtures but never to the command list itself |
+| A10 | **The proxy question, asked of every command at G0:** *what does this measure, and is that the rule or a stand-in for it?* Where a structural property can be checked by parsing or by the type system, a text search is refused | §7.1 checklist | Six instances across P1-10 and P1-11, listed above. Every one passed G0 as written and failed later, at G1, G2 or G3, costing a full cycle each time |
+
+**A8 is the one to watch, and it cuts against this document's instincts.** Every previous amendment
+added a check; this one removes one, and the failure mode is obvious — a task tiered down that
+turns out to touch money after all. The four-part test is deliberately mechanical and the recorded
+reason is deliberately public, so a wrong tiering is visible in the log rather than inferred from a
+bad outcome. **Re-measure after ten more tasks.** If the escape rate moves at all, A8 is the first
+thing to revert.
+
+**A9 and A10 are the same insight at two scales**, and A10 is the general case: a gate is only as
+good as the agreement between what its commands measure and what its prose claims. This system found
+six such disagreements in two tasks by running the commands rather than reading them, which is the
+practice worth keeping whatever happens to the tiering.
