@@ -272,7 +272,7 @@ CREATE INDEX IF NOT EXISTS idx_sync_log_ran_at ON sync_log(ran_at);
 CREATE TABLE IF NOT EXISTS alert_sends (
   id             SERIAL PRIMARY KEY,
   attempted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  kind           TEXT NOT NULL CHECK (kind IN ('projected-breach', 'coverage')),  -- the *message* kind, not the transport; a second destination re-triggers the BUILD.md §5.1 escalation
+  kind           TEXT NOT NULL CHECK (kind IN ('projected-breach', 'coverage', 'digest')),  -- the *message* kind, not the transport; a second destination re-triggers the BUILD.md §5.1 escalation
   fingerprint    TEXT NOT NULL CHECK (fingerprint ~ '^[0-9a-f]{16,}$'),           -- opaque digest computed in lib/; the CHECK is what makes "opaque" enforceable
   delivered      BOOLEAN NOT NULL,                                                -- no DEFAULT: the shell knows the outcome, and either default would assert one it did not observe
   failure_reason TEXT CHECK (failure_reason IN ('config', 'transport', 'rejected')),  -- classified, never transcribed: a provider's rejection quotes the message back, subject line included

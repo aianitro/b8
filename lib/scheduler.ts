@@ -1,6 +1,6 @@
 import { runSync } from './sync';
 import { writeNetWorthSnapshot } from './netWorth';
-import { runBreachAlert } from './breachAlert';
+import { runDailyDigest } from './dailyDigest';
 import { createLogger } from './logger';
 
 const log = createLogger('scheduler');
@@ -44,15 +44,19 @@ async function runAndLog() {
   // just pulled rather than yesterday's — an alert about a month the job has not finished loading
   // is an alert about the wrong month.
   //
-  // No try here, and that is not an oversight: `runBreachAlert` resolves rather than rejects, by
+  // No try here, and that is not an oversight: `runDailyDigest` resolves rather than rejects, by
   // construction, because a mail outage must never cost the sync or the snapshot above it. Its own
-  // catch is in `lib/breachAlert.ts` where the failure can also be classified and recorded.
+  // catch is in `lib/dailyDigest.ts` where the failure can also be classified and recorded.
   //
-  // No new timer, deliberately. The alert rides this job rather than scheduling itself: two timers
+  // No new timer, deliberately. The mail rides this job rather than scheduling itself: two timers
   // would be two ideas of "daily" and two things for Phase 2 step 20's OS cron to find and retire.
-  // `runBreachAlert` is exported and contains no timer of its own, so step 20's work is to point
+  // `runDailyDigest` is exported and contains no timer of its own, so step 20's work is to point
   // cron at it and delete the in-process timer below — in a file step 20 is already rewriting.
-  await runBreachAlert();
+  //
+  // THIS REPLACED `runBreachAlert`, which the owner read and called "not informative, not
+  // actionable". The guardrail modules are still in the tree and still tested; nothing schedules
+  // them. Two emails a day from one app is one email a day that gets filtered.
+  await runDailyDigest();
 }
 
 // Runs inside the Next.js server process — only active while the server is up.

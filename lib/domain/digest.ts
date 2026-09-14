@@ -30,6 +30,8 @@
  * the renderer is never even handed them.
  */
 
+import { createHash } from 'node:crypto';
+
 /** One transaction, in the only shape this module will render. Note what is absent: no account. */
 export interface DigestTxn {
   /** ISO `YYYY-MM-DD`, already resolved by the caller — this module does not touch a clock. */
@@ -91,6 +93,31 @@ export interface DigestMessage {
   subject: string;
   html: string;
   text: string;
+  /** The opaque key answering "have I already sent today's?" — see `digestFingerprint`. */
+  fingerprint: string;
+}
+
+/**
+ * The opaque key that makes this a DAILY digest rather than a message that can go twice.
+ *
+ * `(kind, year, month, day)` and NOTHING ELSE — deliberately not the content. A fingerprint over
+ * the figures would send a second digest the moment a transaction landed or a category was filed,
+ * which on the owner's own Monday means several: the whole point of filing the backlog is that the
+ * numbers move. Over the date, the answer to "has today's gone?" is yes exactly once.
+ *
+ * The cost, stated because it is real: a digest delivered at 06:49 and a change at noon produce no
+ * second message, and the owner will not hear about today's news until tomorrow. That is the right
+ * trade for a daily report and it would be the wrong one for an alert — which is most of why the
+ * guardrail alert fingerprints its content instead, and why the two remain different messages
+ * rather than one with a flag.
+ *
+ * Hex, and at least sixteen of it, because `alert_sends.fingerprint` CHECKs that shape. The CHECK
+ * is what makes "opaque" enforceable: a readable fingerprint would put the send date into a column
+ * that table goes out of its way to keep meaningless.
+ */
+export function digestFingerprint(asOf: DigestData['asOf']): string {
+  const material = ['digest', String(asOf.year), String(asOf.month), String(asOf.day)].join('\u0001');
+  return createHash('sha256').update(material, 'utf8').digest('hex');
 }
 
 // ─── Palette ──────────────────────────────────────────────────────────────────────────────────
@@ -638,5 +665,5 @@ export function renderDigest(data: DigestData): DigestMessage {
     `Sent by b8 on this machine. Figures exclude uncategorized money.`,
   ].join('\n');
 
-  return { subject: subjectFor(data), html, text };
+  return { subject: subjectFor(data), html, text, fingerprint: digestFingerprint(data.asOf) };
 }
