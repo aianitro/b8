@@ -85,8 +85,76 @@ describe('the digest carries what the owner asked for', () => {
     expect(text).toMatch(/Sep.*░/);
   });
 
-  it('puts the actionable count first in the subject, where truncation cannot reach it', () => {
-    expect(renderDigest(data()).subject).toMatch(/^b8 — 14 to file/);
+  it('draws the P/L track in the dashboard\'s green, solid for settled and pale for forecast', () => {
+    const html = renderDigest(data()).html;
+    expect(html).toContain('#16a34a');
+    expect(html).toContain('#86efac');
+  });
+
+  it('keeps break-even in frame even when the whole year is under water', () => {
+    // A plot scaled to the values alone would put zero off the canvas, and zero is the only level
+    // on a P/L chart that means something on its own.
+    const d = data();
+    d.yearEnd.points = d.yearEnd.points.map((p) => ({ ...p, cumulative: -Math.abs(p.cumulative) - 5000 }));
+    const html = renderDigest(d).html;
+    // The zero rule is drawn in the border grey; it is present because zero is inside the range.
+    expect(html).toContain('#e5e7eb');
+    expect(() => renderDigest(d)).not.toThrow();
+  });
+
+  it('leads the subject with the label, then the actionable count, ahead of the date', () => {
+    // A label earns its keep by being matchable — a Gmail filter on the subject, or an eye running
+    // down a list — and a prefix is the only position that survives truncation on every client.
+    expect(renderDigest(data()).subject).toMatch(/^🤖-b8 · 14 to file/);
+  });
+
+  it('counts both headline numbers before any of the detail that explains them', () => {
+    const { html, text } = renderDigest(data());
+    for (const surface of [html, text]) {
+      expect(surface).toContain('14');
+      expect(surface).toMatch(/need a category|records need a category/);
+      expect(surface).toMatch(/new transactions? yesterday/);
+    }
+    // Both counters must sit above the lists. An email read on a phone is read from the top, and
+    // the whole reason these exist is to be the part that does not need scrolling to.
+    const { html: h } = renderDigest(data());
+    expect(h.indexOf('need a category')).toBeLessThan(h.indexOf('Lemonade Insurance'));
+  });
+
+  it('agrees with itself about how many records need a category', () => {
+    // The counter, the widget rail, the amber totals line and the subject all state this number.
+    // Four copies of one fact is four chances to state it differently.
+    const d = data();
+    d.uncategorized.totalCount = 7;
+    const { html, text, subject } = renderDigest(d);
+    expect(subject).toContain('7 to file');
+    expect(html).toContain('7 record');
+    expect(text).toContain('7 records need a category');
+    // The counter card states it as a bare number in its own element, which a substring search for
+    // "7" cannot distinguish from a pixel height or a date. Matched on the element instead.
+    expect(html).toMatch(/font-size:32px;font-weight:600;line-height:1;color:#92400e">7<\/div>/);
+  });
+
+  it('carries the label in the body as well as the subject, spelled the same way', () => {
+    const { html, text, subject } = renderDigest(data());
+    expect(subject).toContain('🤖-b8');
+    expect(text).toContain('🤖-b8');
+    // HTML gets the numeric entity, because everything else this renderer emits is ASCII and a
+    // raw astral-plane character is the one most likely to survive a charset mishandling as
+    // garbage rather than as a missing glyph.
+    expect(html).toContain('&#129302;-b8');
+  });
+
+  it('warns in amber only when there is something to do', () => {
+    // A zero in a warning colour trains the reader to ignore the colour, which costs the one day
+    // it actually means something.
+    // Asserted on the amber BORDER, not the amber ink: the ink is also how an unfiled row is
+    // flagged inside yesterday's list, which is a different statement and legitimately survives a
+    // clear month. The border belongs only to the counter card and the totals box.
+    const busy = renderDigest(data()).html;
+    const clear = renderDigest({ ...data(), uncategorized: { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 } }).html;
+    expect(busy).toContain('#fde68a');
+    expect(clear).not.toContain('#fde68a');
   });
 });
 
