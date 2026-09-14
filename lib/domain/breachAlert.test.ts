@@ -201,39 +201,15 @@ describe('planAlert — the message, its allowlist, and the coverage refusal', (
 
     expect(m.kind).toBe('coverage');
     expect(m.body).toContain('7%');
+    expect(m.body).toContain('2');
     expect(m.body).toContain('open the app');
 
-    // WHAT THIS TEST USED TO ASSERT, AND WHY IT WAS INVERTED.
-    //
-    // It required the coverage message to contain no category name and no `$` at all, on the
-    // stated ground that printing them "asserts exactly what the dashboard has just declined to
-    // assert". That premise was measured and is false: nothing under `app/` or `components/`
-    // reads `authoritative`. Below the threshold the dashboard still renders every bubble — each
-    // category's budgeted, actual and projected ratio, colour-coded — and declines only the
-    // headline VERDICT. So the email was STRICTER than the surface it was written to agree with.
-    //
-    // On the owner's real 2026-09 the old rule produced: 3% categorized, 2 lines flagged, figures
-    // withheld, open the app. True in every clause and useless as a whole — it named a problem,
-    // withheld its content, and delegated. The rule §5 step 32 actually asked for is that no figure
-    // is presented AS A JUDGEMENT below the threshold. Withholding the verdict and withholding the
-    // figures are different acts; only the first was ever required.
-    expect(m.body).toContain('Dining Out');
-    expect(m.body).toContain('$284.00');
-    expect(m.body).toContain('ahead of pace');
-
-    // The verdict is still withheld, and this is the assertion that keeps the change honest. The
-    // authoritative branch says a line is "saying no"; this branch may never say it, and must mark
-    // what it does say as provisional.
-    expect(m.body).not.toContain('saying no');
-    expect(m.body).toContain('provisional');
-
-    // Coverage as a COUNT, leading, with the share second. `7%` alone is not checkable by the
-    // reader and, on a signed sum, not stable — one large uncategorized deposit moves it further
-    // than a month of real spending does.
-    expect(m.body).toMatch(/\d+ records? this month (is|are) not categorized/);
-    // No denominator: `scoredCount + unattributedCount` is the budget math's population, not the
-    // month's records, and a reader takes it for the latter.
-    expect(m.body).not.toMatch(/of \d+ records/);
+    // Same [[N60]] hole, and it matters more here: `2026-09` supplies the '2' above, so that line
+    // passes with the count paragraph deleted outright — and this is the ONLY message that will
+    // send on the owner's real data today (EVIDENCE §5 measured authoritative: false). The count is
+    // the whole of what the coverage message says beyond a percentage, so it gets an assertion the
+    // month cannot satisfy, plus the singular, so the clause is read rather than merely present.
+    expect(m.body).toContain('2 budget lines are currently flagged');
 
     const singular = message(outlook({
       coverage: { ...COVERAGE, coverageShare: 0.077, coveragePercent: 7, authoritative: false },
@@ -242,17 +218,21 @@ describe('planAlert — the message, its allowlist, and the coverage refusal', (
       authoritative: false,
       sayingNo: [DINING],
     }));
-    expect(singular.body).toContain('One budget line is ahead of pace');
+    expect(singular.body).toContain('1 budget line is currently flagged');
     expect(singular.body).not.toContain('budget lines are');
 
-    // THE SUBJECT KEEPS ITS OLD PROPERTY, UNCHANGED AND FOR THE ORIGINAL REASON: a subject is what
-    // a lock screen shows to whoever is holding the phone, and it is behind no deliberate action.
-    // The body is behind at least one. So names and figures ship in the body and never in the
-    // subject — which is the line the original test drew in the right place, one level too high.
-    expect(m.subject).not.toContain('Dining Out');
-    expect(m.subject).not.toContain('Travel');
-    expect(m.subject).not.toContain('$');
-    expect(m.subject).toContain('provisional');
+    // The discriminator between a real withholding and a caveat sentence written above the same
+    // figures. A refusal implemented as prose reads as compliant and asserts exactly what the
+    // dashboard has just declined to assert.
+    for (const surface of [m.body, m.subject]) {
+      expect(surface).not.toContain('Dining Out');
+      expect(surface).not.toContain('Travel');
+      expect(surface).not.toContain('$284.00');
+      expect(surface).not.toContain('$400.00');
+      expect(surface).not.toContain('266');
+      expect(surface).not.toContain('488');
+      expect(surface).not.toContain('$');
+    }
   });
 
   it('a month with nothing scored produces no message at all, because there is no guardrail to report the state of', () => {
