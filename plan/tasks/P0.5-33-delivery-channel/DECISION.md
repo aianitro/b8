@@ -54,3 +54,39 @@ further than intended:
   authority below 95% coverage, and the owner's real August sat at **7.7%**. A guardrail that emails
   a figure the dashboard itself will not stand behind is incoherent — the spec must decide what is
   sent, or whether anything is, when coverage is low.
+
+---
+
+## AMENDMENT — 2026-09-14: transaction-level detail, including merchant names
+
+**Decided by:** the owner, 2026-09-14, in response to an escalation raised before any of the code
+below was written.
+
+**What changed.** The original allowlist above reads *"not merchant names, not account identifiers,
+not balances, not transaction-level detail."* Merchant names and transaction-level rows are now
+**inside** the allowlist. Account identifiers and balances remain **outside** it, unchanged.
+
+**Why it was reopened.** Two redesigns of the guardrail email were rejected by the owner as "not
+informative, not actionable" and then "still useless". Both stayed inside the original allowlist,
+and that is most of why they failed: an email restricted to category names and ratios can report
+that something is wrong and can never say which record to go and fix. The owner asked for three
+widgets — uncategorized transactions, yesterday's transactions, and the year-end projection — and
+the first two are transaction lists that are worthless without the merchant name.
+
+**What the owner was told before deciding.** That the rows go to Gmail, which holds the content in
+transit and at rest; that this is the exact exclusion the 2026-09-03 decision wrote down; and that
+the alternative — dates and amounts with merchants withheld — stays inside the current policy and is
+much weaker as a to-do list. Both options were shown rendered, side by side, before the choice.
+
+**What this amendment still does NOT authorise:**
+
+- **Not account identifiers, and not balances.** `DigestTxn` in `lib/domain/digest.ts` has four
+  fields — date, label, amount, category — and `digest.test.ts` pins that field set, so widening it
+  is a visible change to the outbound surface rather than a quiet one.
+- **Not a second destination.** The §5.1 escalation still recurs every time the destination changes.
+  This amendment changes the payload only; the provider is the one chosen on 2026-09-03.
+- **Not a remote resource in the message.** The email is HTML now, which the alert it replaces
+  deliberately was not. The rule that motivated text-only — a remote image is a second outbound
+  surface with a different destination, and it reports back that the message was opened — is kept by
+  a stronger means: the renderer emits no URL of any kind, and `digest.test.ts` asserts that against
+  the rendered output rather than trusting a comment.
