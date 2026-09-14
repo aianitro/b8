@@ -31,6 +31,7 @@
     "react-dom": "19.2.4",
     "react-plaid-link": "^4.1.1",
     "recharts": "^3.9.0",
+    "sharp": "^0.35.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
