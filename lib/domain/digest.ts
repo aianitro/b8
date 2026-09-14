@@ -119,15 +119,26 @@ const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /**
- * Total drawing height for the chart, split between the two sides of the zero line.
+ * What this mail calls itself, in the subject and at the top of the body.
  *
- * Split in PROPORTION rather than evenly. An even split fixes the zero line at the middle, and the
- * owner's operational year runs from +$10.5k to −$32.7k — so half the chart would be a band of
- * empty white above a line sitting two thirds of the way up, and the bars that carry the
- * information would get a third of the space. Both sides still share ONE scale, which is the
- * property that matters: a dollar is the same number of pixels above the line as below it.
+ * One constant, used in both, so a Gmail filter written against the subject and a human scanning
+ * the body are matching the same string — the point of a label is that it is exactly stable, and
+ * two copies of it drift the first time one is edited. The HTML form is a numeric entity because
+ * everything else this renderer emits is ASCII for charset reasons; `&#129302;` is U+1F916.
  */
-const CHART_HEIGHT = 128;
+const LABEL_TEXT = '\u{1F916}-b8';
+const LABEL_HTML = '&#129302;-b8';
+
+/**
+ * Drawing height of the plot, top of the range to bottom of it.
+ *
+ * One scale across the whole plot rather than a separate one per side of zero, so a dollar is the
+ * same number of pixels wherever it falls. The range always includes zero — see `chart` for why.
+ */
+const PLOT_HEIGHT = 128;
+
+/** How thick the line is. Thin enough to read as a line, thick enough to survive a step. */
+const LINE_WEIGHT = 3;
 
 // ─── Formatting ───────────────────────────────────────────────────────────────────────────────
 
@@ -199,48 +210,103 @@ export function esc(value: string): string {
 // ─── Chart ────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Twelve cumulative-P/L columns around a zero line, built from table cells.
+ * The cumulative P/L line, in the form the dashboard already draws it.
  *
- * Two rows, not one: the positive half sits in a row whose cells are bottom-aligned, the negative
- * half in a row whose cells are top-aligned, and the zero line is the border between them. A single
- * row cannot do this — a bar for −$4,000 and a bar for +$4,000 would both grow from the same edge
- * and read as the same value. The app's operational year is tuned near break-even, so the track
- * crosses zero routinely and the sign is most of the information.
+ * Green, solid where settled and pale where forecast — the same series and the same reading as
+ * `components/charts/ProfitLossChart.tsx`, so the email and the screen do not develop two pictures
+ * of one number. This replaced a red-and-green bar chart of the identical data: a bar per month
+ * invites the reader to compare twelve independent quantities, when the whole point of a running
+ * total is that each value carries the one before it. A line says that and bars fight it.
  *
- * Scaled to the largest ABSOLUTE cumulative value, so both halves share one scale. Scaling each
- * half independently would make a −$500 dip as tall as a +$9,000 peak.
+ * WHAT THE DASHBOARD HAS THAT THIS DOES NOT: the per-month money-in and money-out bars behind the
+ * line. Drawing a line ON TOP of bars needs absolute positioning, which Gmail strips, so the two
+ * would have to be separate charts — two pictures of the same year, which is the thing above this
+ * paragraph. The line is the series the dashboard's own caption calls the point.
  *
- * Settled months are solid, forecast months are the soft tint of the same hue. That distinction is
- * carried again in the text fallback, because colour alone is not a channel every reader has.
+ * Settled versus forecast is carried again in the text fallback, because colour alone is not a
+ * channel every reader has.
  */
 function chart(points: YearEndPoint[]): string {
-  const peaks = points.map((p) => p.cumulative);
-  const up = Math.max(0, ...peaks);
-  const down = Math.abs(Math.min(0, ...peaks));
-  const span = Math.max(up + down, 1);
+  const values = points.map((p) => p.cumulative);
+  // Zero is always in frame. A P/L chart whose axis starts at the lowest value drawn would put
+  // break-even off the canvas, and break-even is the only level on this chart that means anything
+  // on its own — above it the year is up, below it the year is down.
+  const top = Math.max(0, ...values);
+  const bottom = Math.min(0, ...values);
+  const span = Math.max(top - bottom, 1);
 
-  // One scale, two row heights. `pixels` is the shared conversion; the halves differ only in how
-  // much of the shared budget each side's own peak claims.
-  const pixels = (value: number) => Math.round((Math.abs(value) / span) * CHART_HEIGHT);
-  const upBand = Math.max(up > 0 ? 4 : 0, pixels(up));
-  const downBand = Math.max(down > 0 ? 4 : 0, pixels(down));
+  /** Pixels from the top of the plot. Inverted, because a bigger number is a higher line. */
+  const y = (value: number) => Math.round(((top - value) / span) * PLOT_HEIGHT);
+  const zeroY = y(0);
 
-  const fill = (p: YearEndPoint) =>
-    p.cumulative < 0 ? (p.projected ? RED_SOFT : RED) : p.projected ? GREEN_SOFT : GREEN;
+  /**
+   * One column of the line, as a vertical stack of blocks.
+   *
+   * There is no way to draw a diagonal in an email — Gmail strips <svg> and rewrites transforms —
+   * so the line is a STEP line: each column carries a segment spanning from the previous month's
+   * level to this one's, which renders as a connected path rather than twelve loose dots. The
+   * shape of the trend survives; the exact slope between two months does not, and the figure under
+   * the chart is where an exact value was always going to come from.
+   */
+  const column = (p: YearEndPoint, i: number): string => {
+    const here = y(p.cumulative);
+    const prior = i === 0 ? here : y(points[i - 1].cumulative);
+    const colour = p.projected ? GREEN_SOFT : GREEN;
 
-  const bar = (p: YearEndPoint, side: 'up' | 'down'): string => {
-    const drawn = side === 'up' ? p.cumulative >= 0 : p.cumulative < 0;
-    if (!drawn) return `<td style="width:8.33%;padding:0 2px;font-size:0;line-height:0">&nbsp;</td>`;
-    // Floor of 2px: a month that lands within a rounding error of break-even still gets a mark,
-    // because "no bar" and "a bar of zero height" are the same picture and they are not the same
-    // fact. December sits at $1 on the owner's current plan and must not vanish.
-    const height = Math.max(2, pixels(p.cumulative));
-    return (
-      `<td valign="${side === 'up' ? 'bottom' : 'top'}" style="width:8.33%;padding:0 2px;font-size:0;line-height:0">` +
-      `<div style="height:${height}px;background-color:${fill(p)};` +
-      `border-radius:${side === 'up' ? '2px 2px 0 0' : '0 0 2px 2px'};font-size:0;line-height:0">&nbsp;</div>` +
-      `</td>`
-    );
+    /**
+     * The marks in this column, each at a depth, stacked in order.
+     *
+     * Nothing here can be positioned absolutely — Gmail strips it — so the column is a vertical
+     * stack of blocks and every mark has to be emitted top-down with plain spacers between. That
+     * constraint is also why the marks must not overlap: two blocks at the same depth stack, they
+     * do not superimpose, and the second one would push everything below it down by its height.
+     */
+    const marks: Array<{ at: number; height: number; html: string }> = [];
+
+    // The horizontal run, at this month's level, full column width.
+    const run = {
+      at: here,
+      height: LINE_WEIGHT,
+      html: `<div style="height:${LINE_WEIGHT}px;background-color:${colour};font-size:0;line-height:0">&nbsp;</div>`,
+    };
+
+    // The riser joining the previous month's level to this one, LINE_WEIGHT wide rather than the
+    // full column: drawn full width it is a filled block, and twelve filled blocks are a bar chart
+    // of a running total — the exact picture replacing the bars was meant to get rid of.
+    const rise = Math.abs(here - prior);
+    const riser = rise === 0 ? null : {
+      at: here <= prior ? here + LINE_WEIGHT : prior,
+      height: rise,
+      html: `<div style="width:${LINE_WEIGHT}px;height:${rise}px;background-color:${colour};font-size:0;line-height:0">&nbsp;</div>`,
+    };
+
+    marks.push(run);
+    if (riser) marks.push(riser);
+
+    // Break-even, behind everything. Suppressed where the line is already occupying that depth:
+    // the line is the subject of the chart and the rule is scenery, and they cannot share a row.
+    const lo = Math.min(run.at, riser?.at ?? run.at);
+    const hi = Math.max(run.at + run.height, riser ? riser.at + riser.height : 0);
+    if (zeroY < lo - 1 || zeroY > hi + 1) {
+      marks.push({
+        at: zeroY,
+        height: 1,
+        html: `<div style="height:1px;background-color:${RULE};font-size:0;line-height:0">&nbsp;</div>`,
+      });
+    }
+
+    marks.sort((a, b) => a.at - b.at);
+
+    let cursor = 0;
+    let stack = '';
+    for (const mark of marks) {
+      const gap = Math.max(0, mark.at - cursor);
+      if (gap > 0) stack += `<div style="height:${gap}px;font-size:0;line-height:0">&nbsp;</div>`;
+      stack += mark.html;
+      cursor = mark.at + mark.height;
+    }
+
+    return `<td valign="top" style="width:8.33%;padding:0;font-size:0;line-height:0">${stack}</td>`;
   };
 
   const label = (p: YearEndPoint): string => {
@@ -248,16 +314,14 @@ function chart(points: YearEndPoint[]): string {
     // "today" sits without a legend entry explaining a marker.
     const isCurrent = p.projected && (p.month === 1 || !points[p.month - 2]?.projected);
     return (
-      `<td align="center" style="width:8.33%;padding:5px 0 0;font-family:${FONT};font-size:10px;` +
+      `<td align="center" style="width:8.33%;padding:6px 0 0;font-family:${FONT};font-size:10px;` +
       `color:${isCurrent ? INK : FAINT};font-weight:${isCurrent ? 600 : 400}">${MONTH_LABELS[p.month - 1]}</td>`
     );
   };
 
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="table-layout:fixed">` +
-    `<tr style="height:${upBand}px">${points.map((p) => bar(p, 'up')).join('')}</tr>` +
-    `<tr><td colspan="12" style="height:1px;background-color:${INK};font-size:0;line-height:0">&nbsp;</td></tr>` +
-    `<tr style="height:${downBand}px">${points.map((p) => bar(p, 'down')).join('')}</tr>` +
+    `<tr style="height:${PLOT_HEIGHT + LINE_WEIGHT}px">${points.map(column).join('')}</tr>` +
     `<tr>${points.map(label).join('')}</tr>` +
     `</table>`
   );
@@ -348,6 +412,45 @@ function txnTableText(rows: DigestTxn[], showCategory: boolean, showDate = true)
 /** An empty widget still says something. Which nothing it is matters, so each caller supplies it. */
 function emptyState(message: string): string {
   return `<div style="font-family:${FONT};font-size:13px;color:${MUTED};padding:4px 0 2px">${message}</div>`;
+}
+
+/**
+ * The two numbers the whole email is about, before any of the detail that explains them.
+ *
+ * Counts, not dollars. "14 to file" is a to-do list with a length and "$4,083 unfiled" is a
+ * statistic — and this email already has a history here: its first version led on "3% of spend
+ * categorized" and the owner's verdict was that it was not actionable. A count answers how much
+ * work; a share answers nothing a person can act on.
+ *
+ * Side by side in one table row rather than stacked, so both are above the fold on a phone. Two
+ * 50% cells is the one two-column layout that survives every mail client without a media query —
+ * Gmail's mobile app ignores those, so a layout that depends on one is a layout that breaks
+ * exactly where this email is read.
+ */
+function counters(data: DigestData): string {
+  const unfiled = data.uncategorized.totalCount;
+  const posted = data.yesterday.rows.length;
+
+  const card = (value: number, caption: string, alarming: boolean): string =>
+    `<td width="50%" valign="top" style="padding:0">` +
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ` +
+    `style="background-color:${PAPER};border:1px solid ${alarming ? AMBER_RULE : RULE};border-radius:10px">` +
+    `<tr><td style="padding:16px 18px">` +
+    `<div style="font-family:${FONT};font-size:32px;font-weight:600;line-height:1;` +
+    `color:${alarming ? AMBER_INK : INK}">${value}</div>` +
+    `<div style="font-family:${FONT};font-size:12px;color:${MUTED};padding:6px 0 0">${caption}</div>` +
+    `</td></tr></table></td>`;
+
+  return (
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px">` +
+    `<tr>` +
+    // Amber only when there is something to do. A zero in a warning colour trains the reader to
+    // ignore the colour, which costs the one day it actually means something.
+    card(unfiled, unfiled === 1 ? 'needs a category' : 'need a category', unfiled > 0) +
+    `<td width="12" style="font-size:0;line-height:0">&nbsp;</td>` +
+    card(posted, posted === 1 ? 'new transaction yesterday' : 'new transactions yesterday', false) +
+    `</tr></table>`
+  );
 }
 
 // ─── The three widgets ────────────────────────────────────────────────────────────────────────
@@ -459,8 +562,9 @@ function yearEndWidget(d: DigestData['yearEnd']): string {
 function subjectFor(data: DigestData): string {
   const date = shortDate(`${data.asOf.year}-${String(data.asOf.month).padStart(2, '0')}-${String(data.asOf.day).padStart(2, '0')}`);
   const { totalCount } = data.uncategorized;
-  if (totalCount > 0) return `b8 — ${totalCount} to file · ${round(data.yearEnd.profitLoss)} year end · ${date}`;
-  return `b8 — all filed · ${round(data.yearEnd.profitLoss)} year end · ${date}`;
+  const tail = `${round(data.yearEnd.profitLoss)} year end · ${date}`;
+  if (totalCount > 0) return `${LABEL_TEXT} · ${totalCount} to file · ${tail}`;
+  return `${LABEL_TEXT} · all filed · ${tail}`;
 }
 
 /**
@@ -477,7 +581,7 @@ export function renderDigest(data: DigestData): DigestMessage {
 
   const header =
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px">` +
-    `<tr><td style="font-family:${FONT};font-size:13px;font-weight:600;color:${INK}">b8</td>` +
+    `<tr><td style="font-family:${FONT};font-size:13px;font-weight:600;color:${INK}">${LABEL_HTML}</td>` +
     `<td align="right" style="font-family:${FONT};font-size:12px;color:${FAINT}">` +
     `${esc(shortDate(`${data.asOf.year}-${String(data.asOf.month).padStart(2, '0')}-${String(data.asOf.day).padStart(2, '0')}`))}, ${data.asOf.year}` +
     `</td></tr></table>`;
@@ -491,6 +595,7 @@ export function renderDigest(data: DigestData): DigestMessage {
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px">` +
     `<tr><td>` +
     header +
+    counters(data) +
     uncategorizedWidget(data.uncategorized) +
     yesterdayWidget(data.yesterday) +
     yearEndWidget(data.yearEnd) +
@@ -503,6 +608,11 @@ export function renderDigest(data: DigestData): DigestMessage {
   const ye = data.yearEnd;
 
   const text = [
+    `${LABEL_TEXT}`,
+    '',
+    `  ${u.totalCount} ${u.totalCount === 1 ? 'record needs' : 'records need'} a category`,
+    `  ${y.rows.length} new transaction${y.rows.length === 1 ? '' : 's'} yesterday`,
+    '',
     `NEEDS A CATEGORY`,
     u.totalCount === 0
       ? '  Nothing outstanding — every record this month is filed.'
