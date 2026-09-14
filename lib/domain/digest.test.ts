@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderDigest, esc, shortDate, type DigestData, type DigestTxn } from './digest';
+import { renderDigest, digestFingerprint, esc, shortDate, type DigestData, type DigestTxn } from './digest';
 
 /** A complete, unremarkable digest. Each fixture below changes one thing about it. */
 function data(overrides: Partial<DigestData> = {}): DigestData {
@@ -274,5 +274,42 @@ describe('the empty cases still say something', () => {
     d.yearEnd.profitLoss = 0;
     expect(() => renderDigest(d)).not.toThrow();
     expect(renderDigest(d).html).toContain('Dec');
+  });
+});
+
+describe('the fingerprint is what makes this a daily digest', () => {
+  it('is the same for two renders of the same day, however much the figures moved', () => {
+    // The point of filing the backlog is that the numbers move. A fingerprint over the CONTENT
+    // would send a second digest on every filed transaction, which on a Monday is several.
+    const morning = renderDigest(data());
+    const afternoon = renderDigest({
+      ...data(),
+      uncategorized: { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 },
+      yearEnd: { ...data().yearEnd, profitLoss: -9999 },
+    });
+    expect(afternoon.fingerprint).toBe(morning.fingerprint);
+    expect(afternoon.text).not.toBe(morning.text);
+  });
+
+  it('differs the next day, so tomorrow is never suppressed by today', () => {
+    const today = digestFingerprint({ year: 2026, month: 9, day: 14 });
+    const tomorrow = digestFingerprint({ year: 2026, month: 9, day: 15 });
+    const nextMonth = digestFingerprint({ year: 2026, month: 10, day: 14 });
+    const nextYear = digestFingerprint({ year: 2027, month: 9, day: 14 });
+    expect(new Set([today, tomorrow, nextMonth, nextYear]).size).toBe(4);
+  });
+
+  it('satisfies the shape alert_sends CHECKs on insert', () => {
+    // `^[0-9a-f]{16,}$` — the CHECK is what makes "opaque" enforceable rather than intended. A
+    // readable fingerprint would put the send date in a column that table keeps meaningless.
+    expect(renderDigest(data()).fingerprint).toMatch(/^[0-9a-f]{16,}$/);
+  });
+
+  it('is a whole sha256, which is what "opaque" means here', () => {
+    // Asserted as a length, NOT as "does not contain 2026" — a two- or four-character decimal
+    // string turns up in a 64-character hex digest by chance often enough that such a test passes
+    // for no reason and fails for no reason. What actually makes the value opaque is that it is
+    // the full digest of material this module never puts in the row.
+    expect(renderDigest(data()).fingerprint).toHaveLength(64);
   });
 });
