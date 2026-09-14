@@ -12,11 +12,11 @@ import { createLogger } from '@/lib/logger';
 import { consumeChallenge } from '@/lib/webauthnChallenge';
 import { selectCredential, verifyAuthenticationCeremony } from '@/lib/webauthnVerify';
 import { AuthenticationCeremonyResponseSchema } from '@/shared/contracts/auth';
-import { authError, ceremonyCompleted } from '../../shared';
+import { authError, ceremonyCompleted, withEnvelope } from '../../shared';
 
 const log = createLogger('auth');
 
-export async function POST(request: NextRequest) {
+export const POST = withEnvelope(async (request: NextRequest) => {
   let body: unknown;
   try {
     body = await request.json();
@@ -62,4 +62,4 @@ export async function POST(request: NextRequest) {
   const sessionToken = await createSession(credential.credentialId);
   log.info('session opened');
   return ceremonyCompleted(sessionToken);
-}
+});

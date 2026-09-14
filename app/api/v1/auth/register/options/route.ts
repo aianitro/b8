@@ -24,9 +24,9 @@ import {
 } from '@/lib/webauthnOrigins';
 import { RegistrationCeremonyOptionsSchema } from '@/shared/contracts/auth';
 import type { ApiResponse } from '@/shared/types';
-import { authError, sessionFrom } from '../../shared';
+import { authError, sessionFrom, withEnvelope } from '../../shared';
 
-export async function POST(request: NextRequest) {
+export const POST = withEnvelope(async (request: NextRequest) => {
   const session = await sessionFrom(request);
   const decision = registrationDecision({
     hasValidSession: session !== null,
@@ -76,4 +76,4 @@ export async function POST(request: NextRequest) {
   // instead of letting the browser infer the relying party from the page it happens to be on.
   const data = RegistrationCeremonyOptionsSchema.parse(options);
   return NextResponse.json({ success: true, data } satisfies ApiResponse<typeof data>);
-}
+});
