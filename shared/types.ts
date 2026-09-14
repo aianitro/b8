@@ -110,6 +110,19 @@ export interface Transaction {
   rule_applied: boolean;
   account_id: string;
   hidden: boolean;
+  /**
+   * When the owner flagged this to come back to, or `null`. NOT NULL *is* the flag — there is no
+   * separate boolean, because two columns for one fact can disagree and every reader would then
+   * have to decide which wins. The timestamp is what lets an entry age, which is the question the
+   * flag is for: "Zara, $120.17" is on the page already; "flagged eleven days ago" is what makes
+   * somebody chase the refund.
+   */
+  watched_at: string | null;
+  /**
+   * Why, in the owner's words — "returning to Zara", "double charged". Null on a flag whose reason
+   * has not been written, and refused by the database on a row that is not flagged at all.
+   */
+  watch_note: string | null;
   created_at: string;
 }
 

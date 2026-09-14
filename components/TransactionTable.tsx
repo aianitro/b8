@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, Eye, EyeOff, Copy } from 'lucide-react';
+import { Trash2, Eye, EyeOff, Copy, Flag } from 'lucide-react';
 import CategorySelect from './CategorySelect';
 import TransferLinkButton from './TransferLinkButton';
 
@@ -23,6 +23,10 @@ type TxRow = {
   account_name: string;
   account_landscape: string;
   hidden: boolean;
+  /** ISO timestamp of when this was flagged to keep an eye on; null means it is not flagged. */
+  watched_at: string | null;
+  /** Why it was flagged, in the owner's words. Null is a flag with no reason written yet. */
+  watch_note: string | null;
   /** Explicit per-transaction tag; null means it inherits from the account. */
   property_id: number | null;
   /** Nickname of the property this actually lands on, tag or inherited — null if neither. */
@@ -298,6 +302,70 @@ function DuplicateButton({ transaction, accounts, categories }: {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Flag a transaction to come back to, with a reason.
+ *
+ * The reason is the whole value of the flag a week later, when the merchant and the amount no
+ * longer recall why anyone cared — so flagging PROMPTS for one rather than offering an edit step
+ * afterwards that nobody would take. It is still optional: an empty prompt flags without a note,
+ * which is a normal way to use a list like this.
+ *
+ * `prompt()` rather than an inline editor, deliberately. The alternative is a popover with its own
+ * open state, outside-click handling and focus management inside a 729-line table that already has
+ * a modal and a bulk bar — and this is one short string typed a few times a month. The uiux skill's
+ * own rule is that a component over ~150 lines should be extracted, not that every input must be
+ * bespoke.
+ */
+function WatchToggleButton({ transactionId, watchedAt, note }: {
+  transactionId: number; watchedAt: string | null; note: string | null;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const watched = watchedAt !== null;
+
+  async function send(watched: boolean, watch_note: string | null) {
+    setBusy(true);
+    await fetch(`/api/transactions/${transactionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ watched, watch_note }),
+    });
+    router.refresh();
+    setBusy(false);
+  }
+
+  function toggle() {
+    if (watched) {
+      void send(false, null);
+      return;
+    }
+    // `null` is the cancel case and must not flag anything; `''` is "flag it, no reason".
+    const reason = window.prompt('Keeping an eye on this one. Why? (optional)', '');
+    if (reason === null) return;
+    void send(true, reason);
+  }
+
+  function editNote() {
+    const reason = window.prompt('Why are you watching this one?', note ?? '');
+    if (reason === null) return;
+    void send(true, reason);
+  }
+
+  return (
+    <button
+      onClick={watched ? editNote : toggle}
+      onDoubleClick={watched ? toggle : undefined}
+      disabled={busy}
+      className={`disabled:opacity-30 transition-colors ${watched ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-slate-600'}`}
+      title={watched
+        ? `Keeping an eye on this${note ? `: ${note}` : ''} — click to edit the note, double-click to stop watching`
+        : 'Keep an eye on this one'}
+    >
+      <Flag size={14} fill={watched ? 'currentColor' : 'none'} />
+    </button>
   );
 }
 
@@ -620,6 +688,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-2">
                       <DuplicateButton transaction={t} accounts={accounts} categories={categories} />
+                      <WatchToggleButton transactionId={t.id} watchedAt={t.watched_at} note={t.watch_note} />
                       <HideToggleButton transactionId={t.id} hidden={t.hidden} />
                       <DeleteButton transactionId={t.id} />
                     </div>

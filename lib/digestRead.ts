@@ -74,7 +74,7 @@ export async function loadDigest(now: Date): Promise<DigestData> {
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayIso = localIso(yesterday);
 
-  const [unfiled, unfiledTotals, posted, yearEnd] = await Promise.all([
+  const [unfiled, unfiledTotals, posted, watching, yearEnd] = await Promise.all([
     // Largest first — filing the biggest row moves every other figure in the email the most.
     // `ABS`, because a large uncategorized DEPOSIT distorts the year-end projection exactly as
     // hard as a large uncategorized payment does, and 2026-09-11 is the entry in this repo's
@@ -108,6 +108,22 @@ export async function loadDigest(now: Date): Promise<DigestData> {
        ORDER BY ABS(t.amount) DESC, t.id
     `, [yesterdayIso]),
 
+    // NOT scoped to the month, unlike every other query here. A return pending since June is the
+    // entry that most needs chasing; a month-scoped list would drop it on the first of July.
+    // Oldest flag first, which is the partial index's own order — and the order that puts the
+    // forgotten thing at the top rather than the thing flagged an hour ago.
+    db.query<TxnRow & { watch_note: string | null; days_open: string }>(`
+      SELECT t.date::text, ${LABEL} AS label, t.amount::text, t.mapped_category AS category,
+             t.watch_note,
+             -- Whole days, computed by POSTGRES against ITS clock. In JS this would be a second
+             -- calendar and a subtraction across a DST boundary; here it is one clock, the same one
+             -- that wrote watched_at.
+             FLOOR(EXTRACT(EPOCH FROM (NOW() - t.watched_at)) / 86400)::text AS days_open
+        FROM transactions t ${VISIBLE}
+       WHERE t.watched_at IS NOT NULL
+       ORDER BY t.watched_at ASC, t.id
+    `, []),
+
     // Operational, matching the dashboard's own headline. Capital is a different question with a
     // different cadence and it is not what a daily digest is for.
     loadYearEnd('operational', { year, month }),
@@ -132,6 +148,14 @@ export async function loadDigest(now: Date): Promise<DigestData> {
       totalOut: yesterdayRows.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0),
       totalIn: yesterdayRows.filter((t) => t.amount < 0).reduce((s, t) => s - t.amount, 0),
     },
+
+    watchlist: watching.rows.map((r) => ({
+      date: r.date,
+      label: r.label,
+      amount: Number(r.amount),
+      note: r.watch_note,
+      daysOpen: Math.max(0, Number(r.days_open)),
+    })),
 
     yearEnd: {
       profitLoss: yearEnd.profitLoss,

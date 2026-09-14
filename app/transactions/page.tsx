@@ -26,6 +26,7 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 
 async function getData(
   uncategorizedOnly: boolean,
+  watchedOnly: boolean,
   accountId: string | null,
   categories: string[],
   month: number | null,
@@ -44,6 +45,11 @@ async function getData(
     conds.push(`t.account_id = $${args.length}`);
   }
   if (uncategorizedOnly) conds.push('t.mapped_category IS NULL AND t.hidden = FALSE');
+  // No `hidden = FALSE` here, unlike the uncategorized filter above. Hiding a transaction says
+  // "do not count this"; watching one says "I am not finished with this". Both can be true of the
+  // same row — a charge excluded from the budget while its refund is chased is exactly that — and
+  // dropping hidden rows from this filter would lose the entry that most needs chasing.
+  if (watchedOnly) conds.push('t.watched_at IS NOT NULL');
   // One branch for one category and for many: `= ANY($n)` over a text[] is the same plan as `=`
   // for a single element, and a second branch would be a second place for the predicate to drift.
   if (categories.length > 0) {
@@ -95,6 +101,7 @@ async function getData(
       `SELECT t.id, t.plaid_transaction_id, t.account_id, t.date::text AS date,
               t.amount, t.name, t.merchant_name, t.plaid_category, t.mapped_category,
               t.rule_applied, t.created_at, t.transfer_group_id, t.hidden,
+              t.watched_at::text AS watched_at, t.watch_note,
               a.name AS account_name, a.landscape AS account_landscape,
               t.property_id,
               (SELECT p.nickname FROM properties p
@@ -111,9 +118,14 @@ async function getData(
     db.query<Pick<BudgetCategory, 'name' | 'landscape' | 'exclude_from_budget'>>(
       'SELECT name, landscape, exclude_from_budget FROM budget_categories ORDER BY name'
     ),
-    db.query<{ total: string; uncategorized: string; sum: string; sum_budgeted: string }>(
+    db.query<{ total: string; uncategorized: string; watched: string; sum: string; sum_budgeted: string }>(
       `SELECT COUNT(*)::text AS total,
               COUNT(*) FILTER (WHERE mapped_category IS NULL AND t.hidden = FALSE)::text AS uncategorized,
+              -- Counted over the SAME filtered set as the uncategorized count above, not over the
+              -- whole table. That is this page's existing convention for a chip count, and one chip
+              -- counting the world while its neighbour counts the current view would be two
+              -- meanings for the same-looking number.
+              COUNT(*) FILTER (WHERE t.watched_at IS NOT NULL)::text AS watched,
               COALESCE(SUM(t.amount), 0)::text AS sum,
               -- The total the budget grid computes, over the same rows: a hidden transaction is
               -- listed here (greyed) but counted nowhere in budget math, so a drilldown summing
@@ -140,6 +152,7 @@ async function getData(
     categories: cats.rows,
     total: Number(counts.rows[0].total),
     uncategorized: Number(counts.rows[0].uncategorized),
+    watched: Number(counts.rows[0].watched),
     sum: Number(counts.rows[0].sum),
     sumBudgeted: Number(counts.rows[0].sum_budgeted),
     accounts: accounts.rows,
@@ -209,6 +222,7 @@ export default async function TransactionsPage({
   } = await searchParams;
 
   const uncategorizedOnly = filter === 'uncategorized';
+  const watchedOnly = filter === 'watched';
   const accountId = account ?? null;
   const drillCategories = (Array.isArray(category) ? category : category ? [category] : [])
     .map((c) => c.trim())
@@ -221,8 +235,8 @@ export default async function TransactionsPage({
   const amountMaxValue = amountMax ? parseFloat(amountMax) : null;
   const transferGroupValue = transferGroup ? parseInt(transferGroup, 10) : null;
 
-  const { transactions, categories, total, uncategorized, sum, sumBudgeted, accounts, properties } = await getData(
-    uncategorizedOnly, accountId, drillCategories, drillMonth, searchQuery,
+  const { transactions, categories, total, uncategorized, watched, sum, sumBudgeted, accounts, properties } = await getData(
+    uncategorizedOnly, watchedOnly, accountId, drillCategories, drillMonth, searchQuery,
     dateFromValue, dateToValue,
     amountMinValue !== null && !isNaN(amountMinValue) ? amountMinValue : null,
     amountMaxValue !== null && !isNaN(amountMaxValue) ? amountMaxValue : null,
@@ -359,6 +373,7 @@ export default async function TransactionsPage({
           <TransactionFilter
             total={total}
             uncategorized={uncategorized}
+            watched={watched}
             accounts={accounts}
             activeAccount={accountId}
           />

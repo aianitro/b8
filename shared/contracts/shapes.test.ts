@@ -227,6 +227,10 @@ const transactionWireRow = {
   rule_applied: true,
   account_id: 'manual_7f1c',
   hidden: false,
+  // The ordinary row: nothing is being kept an eye on. Both fields are present and null rather
+  // than absent, because the columns exist on every row and no query in this app omits them.
+  watched_at: null,
+  watch_note: null,
   created_at: '2026-02-04T02:15:00.000Z',
 };
 
@@ -254,6 +258,22 @@ describe('TransactionSchema', () => {
 
     const { merchant_name: _merchantName, ...withoutMerchantName } = transactionWireRow;
     expect(issuePathsOf(TransactionSchema, withoutMerchantName)).toEqual(['merchant_name']);
+  });
+
+  it('accepts a flagged row and refuses a note the column could not hold', () => {
+    const flagged = {
+      ...transactionWireRow,
+      watched_at: '2026-09-11T18:04:00.000Z',
+      watch_note: 'returning to Zara',
+    };
+    expect(TransactionSchema.parse(flagged).watch_note).toBe('returning to Zara');
+
+    // The schema states the same bounds the CHECK constraint enforces. Were it looser, a payload
+    // this app can never store would validate, and the contract would describe a wider world than
+    // the database allows.
+    expect(issuePathsOf(TransactionSchema, { ...flagged, watch_note: '' })).toEqual(['watch_note']);
+    expect(issuePathsOf(TransactionSchema, { ...flagged, watch_note: 'x'.repeat(201) })).toEqual(['watch_note']);
+    expect(TransactionSchema.parse({ ...flagged, watch_note: 'x'.repeat(200) }).watch_note).toHaveLength(200);
   });
 });
 
