@@ -377,3 +377,45 @@ today — which trips the quoted-path flaw recorded as P1-11's N3. Quarantined; 
 real platform authenticator completes registration and login in a real browser. The live run against
 fabricated payloads is a different claim and is recorded as one. It must run on **port 3000**, since
 `PRIMARY_RP_ID` is `localhost` and `EXPECTED_ORIGINS` contains `http://localhost:3000`.
+
+---
+
+## Evidence #3 — 2026-09-14, partially discharged
+
+**Registration on a real platform authenticator: CONFIRMED.** The owner enrolled a passkey against
+the running dev server on port 3000 and the database holds the result:
+
+```
+webauthn_credentials  kf4u1_t6rtq6Derk7_2Xig  enrolled_via=bootstrap  2026-09-14 12:23:31.823267-07
+auth_sessions         credential_id=kf4u1…    revoked_at=NULL         2026-09-14 12:23:31.823267-07
+```
+
+The bootstrap path is the one that was reasoned about hardest and it behaved as specified: the
+window was open because the credential count was zero, and it closed on the same statement — a
+second `POST /api/v1/auth/register/options` now returns **403 `REGISTRATION_CLOSED`**, measured.
+
+**Login with an existing passkey: STILL OUTSTANDING.** The single session row carries the same
+timestamp as the credential to the microsecond, so it is the one registration issues, not a
+separate sign-in. Nothing has yet proved that an enrolled authenticator can complete the
+authentication ceremony — which is a different code path with a different verifier call, and it is
+the path the owner will use every day thereafter. No role in this pipeline can discharge it: the
+ceremony requires the owner's biometric.
+
+**To discharge it:** sign out, then sign in again at `http://localhost:3000/login` with
+**Sign in with a passkey**. A second `auth_sessions` row with a later `created_at` is the evidence.
+It must be `localhost` and not `127.0.0.1` — WebAuthn treats them as different origins and a
+ceremony started on the wrong one fails with an opaque `SecurityError`.
+
+### What this attempt found on the way, and what was done about it
+
+The first attempt failed. The migration had never been applied to `b8_finance`, so the handler threw
+on a missing relation, Next turned the throw into a **500 with an empty body**, and the login page's
+`.json()` reported `Unexpected end of JSON input` — a message that names the parser rather than the
+problem. `npm run migrate:up` applied the one pending migration.
+
+**That is a gap in this task's own delivery, not only in its operation.** SPEC.md's rollback section
+reasons carefully about applying the code and the migration together, and nothing in the gate log
+checked that the migration had in fact been applied to the database the app runs against. The
+merge was green because every suite runs against a scratch database that the harness migrates
+itself. Recorded as a finding; the envelope fix that makes the next such failure legible is
+`8e07eb4`.
