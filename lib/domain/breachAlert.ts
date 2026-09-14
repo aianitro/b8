@@ -268,22 +268,76 @@ function breachMessage(outlook: MonthOutlook, coveragePercent: number): AlertMes
  * indistinguishable from a good month.
  */
 function coverageMessage(outlook: MonthOutlook, coveragePercent: number): AlertMessage {
-  const count = outlook.sayingNo.length;
   const month = yearMonth(outlook.asOf.year, outlook.asOf.month);
-  const noun = count === 1 ? 'budget line is' : 'budget lines are';
+  const flagged = outlook.sayingNo;
+  const { unattributedCount } = outlook.coverage;
 
-  const body = [
-    `Only ${coveragePercent}% of the spend recorded so far in ${month} has been categorized, so no figure about any single budget line can be stated as a verdict yet.`,
-    '',
-    `${count} ${noun} currently flagged. The figures are withheld here on purpose: the dashboard will not present them as a judgement at this coverage, and neither will this message.`,
-    '',
-    'To categorize what is left, open the app.',
-  ].join('\n');
+  // WHAT CHANGED HERE, AND WHY THE WITHHOLDING SURVIVED IT.
+  //
+  // This branch used to print the coverage sentence, the COUNT of flagged lines, and a refusal to
+  // say which ones — then "open the app". On the owner's real 2026-09 that rendered as: 3% of spend
+  // categorized, 2 lines flagged, figures withheld, go elsewhere. Every word true and the whole
+  // message useless: it names a problem, withholds its content, and delegates.
+  //
+  // The rule it was enforcing is right and is kept: §5 step 32's exit is that no figure is
+  // PRESENTED AS A JUDGEMENT below the threshold. But withholding a verdict and withholding the
+  // figures are different acts, and only the first is what step 32 asked for. On the dashboard the
+  // coverage caveat sits BESIDE the bubbles — it qualifies data the reader can see. In an email
+  // there is nothing else on the surface, so the same caveat REPLACES the content instead of
+  // qualifying it. Same rule, opposite effect, because the surface changed.
+  //
+  // So: the figures ship, the verdict does not. `categoryLines` is the same renderer the
+  // authoritative branch uses — one description of a category, read twice, rather than a second
+  // wording that drifts from it. What differs is the frame around them.
+  const lines: string[] = flagged.length > 0
+    ? [
+        `${flagged.length === 1 ? 'One budget line is' : `${flagged.length} budget lines are`} ahead of pace in ${month}, on day ${flagged[0].elapsedDays} of ${flagged[0].daysInMonth}.`,
+        '',
+      ]
+    : [`Nothing is ahead of pace in ${month} so far.`, ''];
+
+  for (const c of flagged) lines.push(...categoryLines(c), '');
+
+  // COVERAGE AS A COUNT, NOT ONLY A SHARE — and the count leads.
+  //
+  // "3% of spend" is not checkable by the reader and, on a signed sum, not even stable: one large
+  // uncategorized deposit moves it further than a month of real spending. "14 of 61 records" is
+  // checkable, is the number the app's own UNCATEGORIZED tile shows, and is the number that tells
+  // the owner how much work the fix actually is. The percent stays, second, because step 32's exit
+  // says the figure arrives with the share it saw — but it stops being the whole message.
+  // NO DENOMINATOR, DELIBERATELY. `scoredCount + unattributedCount` is the population the BUDGET
+  // MATH looked at, not the month's transactions — on the owner's real 2026-09 it is 23 against 61
+  // records actually recorded. "13 of 23" is true of a population the reader cannot see and will
+  // read as a share of everything, which is a more confident-sounding wrong number than the bare
+  // count. The count alone is checkable: filter transactions to the month and to no category.
+  lines.push(
+    unattributedCount === 1
+      ? `1 record this month is not categorized yet (${coveragePercent}% of spend accounted for), so the figures above are provisional — what the month looks like so far, not a verdict on it.`
+      : `${unattributedCount} records this month are not categorized yet (${coveragePercent}% of spend accounted for), so the figures above are provisional — what the month looks like so far, not a verdict on it.`,
+    ''
+  );
+
+  // WHY THERE IS NO FEED-STALENESS LINE HERE, THOUGH IT WOULD BE THE MOST USEFUL ONE.
+  //
+  // The outbound allowlist (P0.5-33 DECISION.md) is category names, amounts and ratios — and
+  // explicitly NOT account identifiers. "Chase has not refreshed since the 9th" would be the more
+  // actionable sentence and is outside what the owner authorised to leave the process, so it is not
+  // written. Naming an institution here would be a new destination-side disclosure, which re-opens
+  // the §5.1 escalation rather than being added quietly. The closest thing inside the allowlist is
+  // the count of uncategorized records above: a month that has stopped receiving records shows it
+  // there, without saying which feed stopped.
+  lines.push('To categorize what is left, open the app.');
 
   return {
     kind: 'coverage',
-    subject: `Budget guardrail — ${month} is not categorized enough to judge`,
-    body,
+    // The subject says what is true and what is not yet decided, in that order. The old one —
+    // "not categorized enough to judge" — led with the app's own limitation, which is the least
+    // interesting fact in the message to the person holding the phone.
+    subject:
+      flagged.length > 0
+        ? `Budget guardrail — ${flagged.length} ahead of pace in ${month} (provisional)`
+        : `Budget guardrail — ${month} so far (provisional)`,
+    body: lines.join('\n'),
     fingerprint: computeFingerprint('coverage', outlook),
   };
 }
