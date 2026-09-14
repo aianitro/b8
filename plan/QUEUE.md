@@ -12,12 +12,12 @@ the item that justified it.
 
 ## Queue
 
-> **Ordering note, 2026-09-13.** `ROADMAP.md` §5 gained **Phase 0.6** (steps 40–44) ahead of
-> Phase 1's tail. Steps 10–11 are merged and stay merged; **steps 12–13 wait**. The reason is recorded in
-> the phase itself: 12–13 widen who can reach the headline figure, and Phase 5 narrates and mails it, while
-> four measurable defects in its inputs remain unfixed. Three of the four are XS-to-S. `P1-10a`, `P1-10b`
-> and `P1-11a` are unblocked and may run in parallel where contract- and file-disjoint — record the check
-> in the parallelism ledger before dispatching.
+> **Ordering note, 2026-09-13 — superseded the same day.** A Phase 0.6 was proposed ahead of
+> Phase 1's tail and **withdrawn before any task was dispatched**: four of its five steps did not survive
+> being checked against the database, and the fifth (budget versioning) went to `ROADMAP.md`'s backlog at
+> low priority. The withdrawal and what killed each step are recorded there. **Phase 1's tail — steps 12
+> and 13 — is next**, with `P1-10a`, `P1-10b` and `P1-11a` unblocked and runnable in parallel where
+> contract- and file-disjoint; record the check in the parallelism ledger before dispatching.
 
 > **Ordering note, 2026-09-01.** `ROADMAP.md` §5 gained **Phase 0.5** (the budget turn, steps
 > 28–33) ahead of Phase 1 on the same day. This queue had `P1-10-zod-contracts` as next; that
@@ -40,11 +40,6 @@ the item that justified it.
 | P1-10-zod-contracts | 10 ([ITEM.md](tasks/P1-10-zod-contracts/ITEM.md)) | **MERGED** 2026-09-12 (G0 ✅ 3 spec cycles · G1 ✅ 2 cycles · G2 ✅ · G3 ACCEPT_WITH_NITS · G4 ✅, **0 implementer cycles**). Scoped to the zod schemas only — the workspaces conversion and the `/api/v1/*` migration were non-goals with their own scope commands and are now successors. 6 nits in [NITS.md](tasks/P1-10-zod-contracts/NITS.md); **N4 must be read before step 11** — a real `db.query` row fails `AccountSchema` on two keys, not the one disclosed, and two of the seven shapes have no `Response.json` producer at all | — | `shared/contracts/**` (new), `shared/types.ts` (comment-only), `package.json` |
 | P1-11-api-v1-overview | 11 ([ITEM.md](tasks/P1-11-api-v1-overview/ITEM.md)) | **MERGED** 2026-09-13 (G0 ✅ 2 spec cycles · G1 ✅ · G2 ✅ · G3 ACCEPT_WITH_NITS after 2 BLOCKs · G4 ✅, **2/3 implementer cycles**). Endpoint only — the dashboard's adoption is [P1-11a](#), split by the spec. Both G3 blocks were the same defect class: the scratch-database guard reading a connection-string field differently from the client that would connect through it. 8 nits in [NITS.md](tasks/P1-11-api-v1-overview/NITS.md); **N1 must be read before P1-11a** — `allPaces` is absent from the payload, so the dashboard's lead widget cannot be fed without a twelfth section and a contract amendment | P1-10 (merged) | `shared/contracts/overview.ts` (new), additive |
 | P1-11a-dashboard-adopts-overview | Phase 1, split from step 11 | QUEUED — rewrite `app/dashboard/page.tsx` (691 lines, ten queries) to consume `GET /api/v1/overview`. **Read NITS.md N1 first**: the payload is missing `allPaces`, which the lead widget needs. Also N7 (`today.totalCount` ranges wider than `today.spent` in the running code) | P1-11 (merged) | likely `shared/contracts/overview.ts` |
-| P0.6-40-unbudgeted-categories | Phase 0.6, step 40 | QUEUED — **next**. A category with operational actuals and `annual_budget = 0` appears in no adherence figure; ~$33k of 2026 spend is invisible to the headline. One query, one dashboard row, plus a decision on scored-vs-disclosed | — | likely none |
-| P0.6-41-capital-breach-alert | Phase 0.6, step 41 | QUEUED | P0.6-40 | expected none |
-| P0.6-42-one-sided-transfers | Phase 0.6, step 42 | QUEUED — ~$13.9k of card payments inflating Grocery and One time. **Proposed for confirmation, never auto-applied** — a false positive here deletes real spend | P0.6-41 | likely `shared/types.ts`, possibly a migration |
-| P0.6-43-exclude-from-baseline | Phase 0.6, step 43 | QUEUED — distinct from `hidden`; step 30's pacing is built on the run-rates this repairs | P0.6-42 | `migrations/**`, `db/schema.sql`, `shared/types.ts` |
-| P0.6-44-budget-versions | Phase 0.6, step 44 | QUEUED — (L). **Last on purpose**: versioning a plan built over inflated actuals versions the inflation | P0.6-40..43 | `migrations/**`, `db/schema.sql`, `shared/types.ts` |
 | P1-10a-workspaces | Phase 1, split from step 10 ([ITEM.md](tasks/P1-10-zod-contracts/ITEM.md) §sizing) | QUEUED — the npm workspaces conversion (`apps/web`, `apps/mobile`, `packages/contracts`), a non-goal of P1-10. Semantically null, structurally total: changes no behaviour and every import path | P1-10 (merged) | every contract path moves |
 | P1-10b-api-v1-routes | Phase 1, split from step 10 | QUEUED — migrate 27 handlers to `/api/v1/*` with the old paths proxying. **Read NITS.md N4 and N6 first**: the row schemas describe the JSON wire value, so a page calling `.parse()` on a `db.query` row fails on timestamps, and they are not request validators | P1-10 (merged) | none expected |
 
