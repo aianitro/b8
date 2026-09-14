@@ -90,3 +90,31 @@ much weaker as a to-do list. Both options were shown rendered, side by side, bef
   surface with a different destination, and it reports back that the message was opened — is kept by
   a stronger means: the renderer emits no URL of any kind, and `digest.test.ts` asserts that against
   the rendered output rather than trusting a comment.
+
+---
+
+## AMENDMENT — 2026-09-14: the owner's own watchlist notes
+
+**Decided by:** the owner, 2026-09-14, choosing "flag, note, and digest widget" from three scoped
+options presented with their disclosure costs.
+
+**What changed.** The digest's "Keeping an eye" widget renders `transactions.watch_note` — free text
+the owner types, such as *"returning to Zara"* or *"double charged"*. That is a new KIND of content
+leaving the machine. The 2026-09-14 amendment above covers transaction-level detail as the bank
+reports it: merchant, date, amount, category. A note is none of those. It is the owner writing a
+sentence, and it goes to Gmail like everything else in this message.
+
+**Why it was allowed rather than withheld.** The note is the entire value of the flag. A widget
+listing "Zara, $120.17, 31 days" without it says something is outstanding and cannot say what, which
+is the same failure the first two versions of this email were rejected for. Withholding it would
+have reproduced the defect the whole redesign existed to fix.
+
+**The bound that makes this decidable rather than open-ended.** A note is capped at 200 characters
+by a database CHECK, by the contract schema, and by the write-path validator — three places, each
+stating the same rule, so the field cannot quietly become a place to keep anything substantial. It
+is a reason, not a journal. Somebody who wants to put a password or an account number in it can, and
+nothing here can stop that; what the cap does is make the field obviously unsuitable for it.
+
+**What this amendment still does NOT authorise:** unchanged from above. Not account identifiers, not
+balances, not a second destination, not a remote resource in the message. The chart added on the
+same day is attached to the message as a `cid:` part and fetches nothing.

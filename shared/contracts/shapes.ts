@@ -211,6 +211,12 @@ export const TransactionSchema = z.object({
   rule_applied: z.boolean(),
   account_id: z.string(),
   hidden: z.boolean(),
+  // `timestamptz`, nullable rather than optional: the column exists on every row and is NULL on the
+  // overwhelming majority. An optional key would describe a payload where the field can be absent,
+  // which no query in this app produces and which would let a client tell "not watched" from
+  // "the server did not say" — a distinction with nothing behind it.
+  watched_at: timestamptz.nullable(),
+  watch_note: z.string().min(1).max(200).nullable(),
   created_at: timestamptz,
 });
 export type TransactionFieldsAreExact = Assert<

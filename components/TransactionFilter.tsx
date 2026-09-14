@@ -9,11 +9,12 @@ type AccountOption = { id: string; name: string; landscape: string };
 interface Props {
   total: number;
   uncategorized: number;
+  watched: number;
   accounts: AccountOption[];
   activeAccount: string | null;
 }
 
-export default function TransactionFilter({ total, uncategorized, accounts, activeAccount }: Props) {
+export default function TransactionFilter({ total, uncategorized, watched, accounts, activeAccount }: Props) {
   const router = useRouter();
   const params = useSearchParams();
   const activeFilter = params.get('filter');
@@ -168,6 +169,20 @@ export default function TransactionFilter({ total, uncategorized, accounts, acti
       >
         Uncategorized <span className="ml-1 text-xs opacity-70">{uncategorized}</span>
       </button>
+      {/* Shown only when there is something on the list. A permanent chip reading zero is a
+          control that trains the eye to skip it, and this one is meant to be noticed. */}
+      {watched > 0 && (
+        <button
+          onClick={() => nav({ filter: activeFilter === 'watched' ? null : 'watched' })}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            activeFilter === 'watched'
+              ? 'bg-amber-600 text-white'
+              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          Keeping an eye <span className="ml-1 text-xs opacity-70">{watched}</span>
+        </button>
+      )}
 
       <div className="w-px h-5 bg-slate-200 mx-1" />
 

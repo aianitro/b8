@@ -65,6 +65,18 @@ export interface YearEndPoint {
   projected: boolean;
 }
 
+/** One entry on the watchlist, as the email renders it. */
+export interface WatchedItem {
+  /** ISO `YYYY-MM-DD` of the transaction itself, not of when it was flagged. */
+  date: string;
+  label: string;
+  amount: number;
+  /** The owner's reason, or null if they flagged it without writing one. */
+  note: string | null;
+  /** Whole days since it was flagged. 0 means today. Computed by the caller, from one clock. */
+  daysOpen: number;
+}
+
 export interface DigestData {
   /** The day this digest is about, as three integers. Converted once, by the caller. */
   asOf: { year: number; month: number; day: number };
@@ -87,6 +99,15 @@ export interface DigestData {
     totalOut: number;
     totalIn: number;
   };
+
+  /**
+   * What the owner asked to be reminded of. Oldest first — see `watchlistWidget`.
+   *
+   * Not scoped to the month, unlike everything else in this digest. A return that has been pending
+   * since June is the entry that most needs chasing, and a month-scoped list would drop it on the
+   * first of July, exactly when it stopped being fresh enough to remember unaided.
+   */
+  watchlist: WatchedItem[];
 
   yearEnd: {
     /** Where the year closes if the rest of it goes to plan. */
@@ -418,7 +439,68 @@ function uncategorizedWidget(d: DigestData['uncategorized']): string {
   return widget('Needs a category', rail, txnTable(d.rows, false) + totals);
 }
 
-/** Widget 2 — yesterday, in full. Short enough to list completely, so it is listed completely. */
+/**
+ * Widget 2 — what the owner asked to be reminded of.
+ *
+ * ─── Why the age is the most prominent thing on each row ──────────────────────────────────────
+ *
+ * A watchlist that only says WHAT is on it becomes wallpaper: the same four rows every morning,
+ * unchanged, until the eye stops reading them. The number that changes is the age, and the age is
+ * the thing that should eventually feel wrong — a return pending for three days is a process, one
+ * pending for thirty is a refund nobody is going to chase unless something says so.
+ *
+ * So the age is rendered in ink at the end of the row rather than as a grey aside, and it goes
+ * AMBER past two weeks. Not red: nothing here is an error, and a colour that shouts on day fifteen
+ * has nothing left to say on day sixty.
+ *
+ * Oldest first, from the read layer's own ORDER BY. The newest entry needs no reminding; the owner
+ * flagged it yesterday and remembers why.
+ */
+function watchlistWidget(items: WatchedItem[]): string {
+  if (items.length === 0) return '';
+
+  const cell = `font-family:${FONT};font-size:13px;color:${INK};padding:7px 0;border-bottom:1px solid ${RULE}`;
+
+  const row = (item: WatchedItem, last: boolean): string => {
+    const edge = last ? `${cell};border-bottom:none` : cell;
+    const stale = item.daysOpen >= 14;
+    const age = item.daysOpen === 0 ? 'today' : item.daysOpen === 1 ? '1 day' : `${item.daysOpen} days`;
+    return (
+      `<tr>` +
+      `<td style="${edge}">${esc(item.label)}</td>` +
+      // A flag with no reason still earns its row: the owner marked it, and the absence of a note
+      // is itself worth showing rather than hiding behind an empty cell.
+      `<td style="${edge};color:${MUTED};font-size:12px">${item.note === null ? `<span style="color:${FAINT}">no reason given</span>` : esc(item.note)}</td>` +
+      `<td align="right" style="${edge};font-family:${MONO};font-size:13px;white-space:nowrap">${item.amount < 0 ? '+' : ''}${exact(item.amount)}</td>` +
+      `<td align="right" style="${edge};font-size:12px;white-space:nowrap;padding-left:12px;` +
+      `color:${stale ? AMBER_INK : MUTED};font-weight:${stale ? 600 : 400}">${age}</td>` +
+      `</tr>`
+    );
+  };
+
+  const oldest = items[0].daysOpen; // ORDER BY watched_at ASC — the first row is the oldest.
+  const rail = `${items.length} open${oldest >= 14 ? ` ${MIDDOT} oldest ${oldest} days` : ''}`;
+
+  return widget(
+    'Keeping an eye',
+    rail,
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">` +
+      items.map((item, i) => row(item, i === items.length - 1)).join('') +
+      `</table>`
+  );
+}
+
+/** The same rows as text. The age stays last, so the column the eye should land on is aligned. */
+function watchlistText(items: WatchedItem[]): string[] {
+  const widest = Math.max(0, ...items.map((i) => i.label.length));
+  return items.map((item) => {
+    const age = item.daysOpen === 0 ? 'today' : item.daysOpen === 1 ? '1 day' : `${item.daysOpen} days`;
+    const note = item.note ?? 'no reason given';
+    return `  ${item.label.padEnd(Math.min(widest, 26))}  ${note.padEnd(28)}  ${exact(item.amount).padStart(10)}  ${age}`;
+  });
+}
+
+/** Widget 3 — yesterday, in full. Short enough to list completely, so it is listed completely. */
 function yesterdayWidget(d: DigestData['yesterday']): string {
   const day = esc(shortDate(d.date));
   if (d.rows.length === 0) {
@@ -434,7 +516,7 @@ function yesterdayWidget(d: DigestData['yesterday']): string {
 }
 
 /**
- * Widget 3 — where the year closes, and the track it is on.
+ * Widget 4 — where the year closes, and the track it is on.
  *
  * The headline is the projected year-end P/L; the chart is the cumulative track that produces it,
  * so the reader can see whether the number comes from a steady climb or from one good month. Green
@@ -528,6 +610,7 @@ export function renderDigest(data: DigestData, chartSrc: string): DigestMessage 
     header +
     counters(data) +
     uncategorizedWidget(data.uncategorized) +
+    watchlistWidget(data.watchlist) +
     yesterdayWidget(data.yesterday) +
     yearEndWidget(data.yearEnd, chartSrc) +
     `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:2px 0 0;text-align:center">` +
@@ -554,6 +637,9 @@ export function renderDigest(data: DigestData, chartSrc: string): DigestMessage 
             `${exact(u.totalOut)} out, ${exact(u.totalIn)} in. None of it is counted in the year-end figure below.`,
         ].join('\n'),
     '',
+    ...(data.watchlist.length > 0
+      ? [`KEEPING AN EYE — ${data.watchlist.length} open`, ...watchlistText(data.watchlist), '']
+      : []),
     `YESTERDAY — ${shortDate(y.date)}`,
     y.rows.length === 0 ? '  No transactions posted.' : txnTableText(y.rows, true, false).join('\n'),
     '',

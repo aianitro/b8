@@ -26,6 +26,13 @@ function data(overrides: Partial<DigestData> = {}): DigestData {
       totalOut: 481.55,
       totalIn: 0,
     },
+    // OLDEST FIRST, which is the order lib/digestRead.ts produces (ORDER BY watched_at ASC) and
+    // the order the widget depends on for its "oldest N days" rail. A fixture in the other order
+    // would pass every assertion that does not look at position and hide the one that does.
+    watchlist: [
+      { date: '2026-08-14', label: 'Charles Tyrwhitt', amount: 376.92, note: null, daysOpen: 31 },
+      { date: '2026-09-11', label: 'Zara', amount: 120.17, note: 'returning to Zara', daysOpen: 3 },
+    ],
     yearEnd: {
       profitLoss: 1.08,
       netToDate: -27090.98,
@@ -332,5 +339,79 @@ describe('the fingerprint is what makes this a daily digest', () => {
     // for no reason and fails for no reason. What actually makes the value opaque is that it is
     // the full digest of material this module never puts in the row.
     expect(renderDigest(data(), CHART_SRC).fingerprint).toHaveLength(64);
+  });
+});
+
+describe('the watchlist widget', () => {
+  it('lists what is being watched, with the reason and the amount', () => {
+    const { html, text } = renderDigest(data(), CHART_SRC);
+    // The plain part uses uppercase headings throughout, matching NEEDS A CATEGORY and YEAR END;
+    // the HTML title is uppercased by CSS instead. Asserted per surface rather than by lowercasing
+    // both, so a heading that quietly changed case in one of them would still be caught.
+    expect(html).toContain('Keeping an eye');
+    expect(text).toContain('KEEPING AN EYE');
+    for (const surface of [html, text]) {
+      expect(surface).toContain('Zara');
+      expect(surface).toContain('returning to Zara');
+      expect(surface).toContain('$120.17');
+    }
+  });
+
+  it('shows how long each entry has been open, because that is the number that changes', () => {
+    // A watchlist that only says WHAT is on it becomes wallpaper: the same rows every morning until
+    // the eye stops reading them. The age is the thing that should eventually feel wrong.
+    const { html, text } = renderDigest(data(), CHART_SRC);
+    for (const surface of [html, text]) {
+      expect(surface).toContain('31 days');
+      expect(surface).toContain('3 days');
+    }
+  });
+
+  it('reports the OLDEST entry in the rail, reading it from the first row', () => {
+    // The read layer orders by watched_at ascending, so the oldest is first. Taking the last row
+    // instead would report the newest and always look reassuring.
+    expect(renderDigest(data(), CHART_SRC).html).toContain('oldest 31 days');
+  });
+
+  it('marks an entry stale past two weeks, and leaves a fresh one alone', () => {
+    const d = data();
+    d.watchlist = [{ date: '2026-09-11', label: 'Zara', amount: 120.17, note: 'returning', daysOpen: 3 }];
+    // Amber ink is the stale treatment. Nothing here is an error, so it is never red — and a colour
+    // that shouts on day fifteen has nothing left to say on day sixty.
+    expect(renderDigest(d, CHART_SRC).html).not.toContain('oldest');
+    d.watchlist = [{ date: '2026-08-14', label: 'Zara', amount: 120.17, note: 'returning', daysOpen: 14 }];
+    expect(renderDigest(d, CHART_SRC).html).toContain('oldest 14 days');
+  });
+
+  it('says a flag has no reason rather than rendering an empty cell', () => {
+    const { html, text } = renderDigest(data(), CHART_SRC);
+    for (const surface of [html, text]) expect(surface).toContain('no reason given');
+  });
+
+  it('singularises one day, and says today for one flagged this morning', () => {
+    const d = data();
+    d.watchlist = [{ date: '2026-09-13', label: 'Zara', amount: 12, note: null, daysOpen: 1 }];
+    expect(renderDigest(d, CHART_SRC).text).toContain('1 day');
+    expect(renderDigest(d, CHART_SRC).text).not.toContain('1 days');
+    d.watchlist = [{ date: '2026-09-14', label: 'Zara', amount: 12, note: null, daysOpen: 0 }];
+    expect(renderDigest(d, CHART_SRC).text).toContain('today');
+  });
+
+  it('disappears entirely when nothing is being watched', () => {
+    // An empty widget saying "nothing to watch" every morning is three lines of furniture. Unlike
+    // the uncategorized widget, whose empty state is news, this one has nothing to report.
+    const d = data();
+    d.watchlist = [];
+    const { html, text } = renderDigest(d, CHART_SRC);
+    expect(html).not.toContain('Keeping an eye');
+    expect(text).not.toContain('KEEPING AN EYE');
+  });
+
+  it('escapes a note, which is free text the owner typed', () => {
+    const d = data();
+    d.watchlist = [{ date: '2026-09-11', label: 'Zara', amount: 12, note: '<b>call</b> & ask', daysOpen: 1 }];
+    const { html } = renderDigest(d, CHART_SRC);
+    expect(html).toContain('&lt;b&gt;call&lt;/b&gt; &amp; ask');
+    expect(html).not.toContain('<b>call</b>');
   });
 });
