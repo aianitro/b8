@@ -32,9 +32,28 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('.', import.meta.url)) },
   },
   test: {
-    include: ['app/api/v1/**/*.test.ts'],
-    setupFiles: ['./lib/testDbGuard.setup.ts'],
+    // `proxy.test.ts` sits at the repo root because `proxy.ts` does — Next requires the boundary
+    // file beside `app/`, so its fixture has nowhere else to live. It belongs to THIS config rather
+    // than the pure one for the same reason the route tests do: the boundary's job is a session
+    // lookup against Postgres, and a proxy fixture that stubbed the database would be asserting
+    // that the stub refuses.
+    include: ['app/api/v1/**/*.test.ts', 'proxy.test.ts'],
+    // Two setup files, in this order and for two unrelated reasons. The guard is the control
+    // described above and must stay first — it refuses before any pool exists. The second installs
+    // the one global Next's own Node bootstrap installs before it serves anything; see
+    // `lib/nextNodeRuntime.setup.ts` for why a proxy fixture cannot import a route handler without
+    // it.
+    setupFiles: ['./lib/testDbGuard.setup.ts', './lib/nextNodeRuntime.setup.ts'],
     environment: 'node',
+    // THE REPORTER MUST NOT REPEAT A TEST'S TITLE, and that is a correctness concern here rather
+    // than a cosmetic one. Vitest's default console interception prefixes anything a test logs with
+    // `stdout | <file> > <suite> > <test name>` — so a fixture whose subject writes a log line has
+    // its own title printed twice, and SPEC.md's #22–#32 count the lines carrying each title and
+    // expect exactly `1`. The auth handlers deliberately log enrolments, sign-ins, revocations and
+    // refusals; deleting those to satisfy a grep would remove the only trace an owner has that
+    // somebody enrolled a credential. Turning off the interception keeps both: the log lines are
+    // still printed, unprefixed, and the title appears once, on the reporter's own line.
+    disableConsoleIntercept: true,
     // One scratch database, truncated and seeded by whoever is running. Files must not overlap in
     // time or they overwrite each other's fixtures — there is one file today, and this is what
     // keeps that from being a trap for the second one.
