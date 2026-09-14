@@ -351,3 +351,125 @@ CREATE TABLE IF NOT EXISTS net_worth_snapshots (
 -- carrying a deposit-adjusted `liabilities` — a marker that lies is worse than no marker.
 ALTER TABLE net_worth_snapshots
   ADD COLUMN IF NOT EXISTS liabilities_security_deposits NUMERIC(14, 2);
+
+-- ══ The authentication boundary ═══════════════════════════════════════════════════════════════
+--
+-- The two tables below are the first in this schema that hold no financial data of any kind: no
+-- figure, no payee, no account identifier. Everything above answers "what is true of the owner's
+-- money"; these two answer "who is allowed to ask". They are grouped at the end, as their own
+-- section, rather than interleaved with the ledger, because nothing above joins to them.
+--
+-- NEITHER TABLE HAS A user_id, AND THAT IS A DECISION. This application has exactly one principal.
+-- A user_id would reference a users table holding one row forever, and every query would carry a
+-- predicate with only one possible value — decoration that reads as multi-user support to whoever
+-- arrives later. The decisive reason is narrower than tidiness, though: the single-user model is
+-- what makes this step's central rule expressible. Registration is open only while ZERO
+-- credentials exist, which is a global count; with a user_id it becomes "zero for this user", and
+-- an unauthenticated request cannot name a user without being allowed to invent one. The bootstrap
+-- gate and a one-row users table cannot both be honest. Multi-user, if it ever arrives, is an
+-- additive migration: add the column nullable, backfill the owner, tighten.
+
+-- One row per authenticator enrolled to speak for the owner. Multi-credential by construction — a
+-- laptop and a phone are two rows — so every read here handles N rows. A query that takes the
+-- newest row ("the" passkey) produces a second device that registers fine and can never log in.
+--
+-- credential_id is TEXT and public_key is BYTEA, and the asymmetry is the point: the id exists to
+-- be COMPARED against what a browser sends already-encoded, so storing the encoded form removes
+-- the decode step where padded-vs-unpadded goes wrong, and the CHECK makes unpadded base64url a
+-- property of the database rather than a convention. The public key is never compared, only handed
+-- to a verifier that wants bytes, so storing bytes removes the encoding decision entirely. Its
+-- length CHECK moves "the verification result's field was renamed and we stored an empty buffer"
+-- from a signature failure at some later login to a failure at the INSERT.
+--
+-- sign_count is THE ONE MUTABLE COLUMN in either table, deliberately: it is not a derived value
+-- but a high-water mark of state living inside the authenticator, and clone detection is a
+-- comparison against the highest value seen before. 0 IS A REAL READING, not a missing
+-- observation — per the WebAuthn spec an authenticator with no counter reports 0 forever, which is
+-- most platform authenticators — so clone detection is genuinely inert for such a credential and a
+-- non-increasing counter must not be read as an attack when both values are 0. NOT NULL with no
+-- DEFAULT, like alert_sends.delivered: a default would let an INSERT that forgot the column assert
+-- "no counter support" for an authenticator that has one, disabling the check permanently.
+--
+-- transports NULL = the authenticator reported nothing (unknown); '{}' = it reported an empty
+-- list. Not defaulted, and no CHECK on the elements — the transport vocabulary is open and still
+-- moving ('cable' retired, 'hybrid' and 'smart-card' added), so a closed list would fail a future
+-- browser's registration at the INSERT with no recourse but a migration.
+--
+-- enrolled_via is provenance, not derivation: 'bootstrap' = enrolled by an unauthenticated request
+-- while zero credentials existed; 'authenticated' = enrolled by a request carrying a valid
+-- session. Not recoverable from created_at, which answers a different question.
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  credential_id TEXT PRIMARY KEY CHECK (credential_id ~ '^[A-Za-z0-9_-]+$'),  -- unpadded base64url, as the browser sends it
+  public_key    BYTEA NOT NULL CHECK (octet_length(public_key) > 0),          -- COSE public key, as bytes
+  sign_count    BIGINT NOT NULL CHECK (sign_count >= 0),                      -- no DEFAULT on purpose; 0 means "this authenticator has no counter"
+  transports    TEXT[],                                                       -- NULL = not reported; never defaulted to '{}'
+  enrolled_via  TEXT NOT NULL CHECK (enrolled_via IN ('bootstrap', 'authenticated')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- At most one 'bootstrap' row, ever — the schema's half of the rule that registration is open only
+-- while zero credentials exist. A count-then-insert is a read-modify-write with a window in it,
+-- and under READ COMMITTED two concurrent unauthenticated registrations both read "zero" and both
+-- enrol; neither sees the other's uninserted row and there is no row to lock. This index removes
+-- the window instead of narrowing it: the second INSERT raises a unique violation however the
+-- transactions interleave, and the handler returns the same refusal the count check produces.
+--
+-- It makes the RACE impossible, not the CHECK unnecessary: the database cannot tell whether a
+-- request carried a valid session, so a handler that tags a session-less enrolment 'authenticated'
+-- still enrols a stranger. Deleting the bootstrap credential legitimately re-opens the window.
+CREATE UNIQUE INDEX IF NOT EXISTS webauthn_credentials_one_bootstrap
+  ON webauthn_credentials(enrolled_via) WHERE enrolled_via = 'bootstrap';
+
+-- One row per successful ceremony. The row IS the session: a cookie matching no row here is not a
+-- session, and "no session" is never a reduced access level — this app has no guest or read-only
+-- role for a cookie to fall back to.
+--
+-- token_hash is the SHA-256 of the cookie's token, NOT the token. The cookie value is a bearer
+-- credential; stored verbatim, a database read, a CSV backup or a psql scrollback would each be a
+-- live login. The CHECK makes that structural rather than advisory — the raw token is base64url
+-- CSPRNG output and cannot satisfy a 64-character lowercase-hex pattern, so "just store the cookie
+-- value" is a statement the database refuses. Same idiom as alert_sends.fingerprint.
+--
+-- credential_id is NOT NULL (every session is born from a completed ceremony, so the write order
+-- is credential then session, one transaction) with ON DELETE CASCADE, because removing a retired
+-- device's passkey is a direct database operation in v1 and a delete that left its sessions alive
+-- would retire the key while leaving the door it opened propped. No ON UPDATE CASCADE, unlike the
+-- accounts(id) references above: Plaid really does reissue an account_id, whereas a credential id
+-- is the authenticator's own immutable identifier.
+--
+-- expires_at and revoked_at ARE TWO FACTS AND ARE NOT MERGEABLE. Implementing logout as
+-- `SET expires_at = NOW()` needs no second column and is refused: it overwrites a fact about the
+-- session's creation, it loses the distinction between "the owner signed out" and "the session
+-- aged out" (all this row can ever say about itself, since no separate log exists), and it makes a
+-- logout that does nothing indistinguishable from one that worked, since an untouched session
+-- reaches the same state on its own a few hours later. expires_at is absolute and never extended
+-- in place — a sliding expiry rewritten per request makes a stolen cookie immortal while it is
+-- used. revoked_at NULL means NOT REVOKED, a stated departure from null-means-unknown (as
+-- budget_categories.control_mode is): revocation is an event only this app can cause, so the
+-- absence of a timestamp is knowledge, not ignorance.
+--
+-- THE ONLY PREDICATE THAT DECIDES WHETHER A REQUEST IS AUTHENTICATED, written here so it is not
+-- re-derived at each call site with one conjunct missing:
+--
+--     SELECT 1 FROM auth_sessions
+--      WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()
+--
+-- All three conjuncts, always. `>` and not `>=` — expires_at is the first instant at which the
+-- session is no longer valid, so the interval is half-open. And EVALUATED BY POSTGRES, NEVER IN
+-- JAVASCRIPT: both columns are TIMESTAMPTZ, which `pg` yields as a Date inside a handler and which
+-- becomes an ISO string across Response.json (the boundary P1-11's N4 caught once), so a JS
+-- comparison works against one and misbehaves against the other — and introduces a second clock.
+--
+-- No index beyond the primary key: the hot read is by token_hash, and the expiry sweep and the
+-- cascade both scan a table holding one row per sign-in on a single-user app.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  token_hash    TEXT PRIMARY KEY CHECK (token_hash ~ '^[0-9a-f]{64}$'),  -- SHA-256 of the cookie's token, never the token
+  credential_id TEXT NOT NULL REFERENCES webauthn_credentials(credential_id) ON DELETE CASCADE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at    TIMESTAMPTZ NOT NULL,  -- absolute; never extended in place
+  revoked_at    TIMESTAMPTZ,           -- NULL = not revoked, which here is knowledge rather than unknown
+  -- Refuses a session born already dead — an inverted sign in the TTL arithmetic, or a TTL of
+  -- zero. It fails closed rather than open, so this is not a security hole; it is the difference
+  -- between "login succeeds and the next request 401s for no visible reason" and a named failure.
+  CONSTRAINT auth_sessions_expires_after_created CHECK (expires_at > created_at)
+);
