@@ -15,8 +15,9 @@ import { rememberChallenge } from '@/lib/webauthnChallenge';
 import { PRIMARY_RP_ID } from '@/lib/webauthnOrigins';
 import { AuthenticationCeremonyOptionsSchema } from '@/shared/contracts/auth';
 import type { ApiResponse } from '@/shared/types';
+import { withEnvelope } from '../../shared';
 
-export async function POST() {
+export const POST = withEnvelope(async () => {
   const enrolled = await listCredentials();
 
   const options = await generateAuthenticationOptions({
@@ -36,4 +37,4 @@ export async function POST() {
 
   const data = AuthenticationCeremonyOptionsSchema.parse(options);
   return NextResponse.json({ success: true, data } satisfies ApiResponse<typeof data>);
-}
+});

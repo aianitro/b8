@@ -16,11 +16,11 @@ import { registrationDecision } from '@/lib/registrationGate';
 import { consumeChallenge } from '@/lib/webauthnChallenge';
 import { verifyRegistrationCeremony } from '@/lib/webauthnVerify';
 import { RegistrationCeremonyResponseSchema } from '@/shared/contracts/auth';
-import { authError, ceremonyCompleted, sessionFrom } from '../../shared';
+import { authError, ceremonyCompleted, sessionFrom, withEnvelope } from '../../shared';
 
 const log = createLogger('auth');
 
-export async function POST(request: NextRequest) {
+export const POST = withEnvelope(async (request: NextRequest) => {
   const session = await sessionFrom(request);
   const decision = registrationDecision({
     hasValidSession: session !== null,
@@ -90,4 +90,4 @@ export async function POST(request: NextRequest) {
 
   log.info('credential enrolled', { enrolledVia: decision.enrolledVia });
   return ceremonyCompleted(enrolment.sessionToken);
-}
+});

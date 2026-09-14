@@ -13,11 +13,11 @@
 import type { NextRequest } from 'next/server';
 import { revokeSession } from '@/lib/authSession';
 import { createLogger } from '@/lib/logger';
-import { authError, sessionCleared, sessionFrom } from '../shared';
+import { authError, sessionCleared, sessionFrom, withEnvelope } from '../shared';
 
 const log = createLogger('auth');
 
-export async function POST(request: NextRequest) {
+export const POST = withEnvelope(async (request: NextRequest) => {
   const session = await sessionFrom(request);
   if (!session) {
     return authError('UNAUTHENTICATED', 'This request carried no valid session.', 401);
@@ -26,4 +26,4 @@ export async function POST(request: NextRequest) {
   await revokeSession(session.tokenHash);
   log.info('session revoked');
   return sessionCleared();
-}
+});
