@@ -136,7 +136,13 @@ export async function loadDigest(now: Date): Promise<DigestData> {
     yearEnd: {
       profitLoss: yearEnd.profitLoss,
       netToDate: yearEnd.netToDate,
-      points: yearEnd.monthly.map((p, i) => ({ month: i + 1, cumulative: p.cumulative, projected: p.projected })),
+      points: yearEnd.monthly.map((p, i) => ({
+        month: i + 1,
+        income: p.income,
+        expense: p.expense,
+        cumulative: p.cumulative,
+        projected: p.projected,
+      })),
       uncategorizedNet: yearEnd.uncategorized.net,
     },
   };

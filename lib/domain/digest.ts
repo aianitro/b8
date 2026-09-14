@@ -31,6 +31,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { CHART_DISPLAY_HEIGHT, CHART_DISPLAY_WIDTH } from './digestChart';
 
 /** One transaction, in the only shape this module will render. Note what is absent: no account. */
 export interface DigestTxn {
@@ -44,10 +45,20 @@ export interface DigestTxn {
   category: string | null;
 }
 
-/** One month of the year-end track. Twelve of these are a chart. */
+/**
+ * One month of the year-end track. Twelve of these are a chart.
+ *
+ * Carries the month's own FLOWS as well as the running total, because the chart draws both — the
+ * same pair the dashboard's own P/L widget draws. `cumulative` is not derivable from one point's
+ * flows and the flows are not derivable from the cumulative, so both have to travel.
+ */
 export interface YearEndPoint {
   /** 1–12. */
   month: number;
+  /** Money in this month — actual where settled, plan where forecast. Positive. */
+  income: number;
+  /** Money out this month, as a positive magnitude, on the same rule. */
+  expense: number;
   /** Running profit/loss from January through this month. December's value is the year's P/L. */
   cumulative: number;
   /** True once the month is wholly or partly forecast rather than settled. */
@@ -146,26 +157,18 @@ const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /**
- * What this mail calls itself, in the subject and at the top of the body.
+ * What this mail calls itself in its own body. Plain, and deliberately not the Gmail label.
  *
- * One constant, used in both, so a Gmail filter written against the subject and a human scanning
- * the body are matching the same string — the point of a label is that it is exactly stable, and
- * two copies of it drift the first time one is edited. The HTML form is a numeric entity because
- * everything else this renderer emits is ASCII for charset reasons; `&#129302;` is U+1F916.
- */
-const LABEL_TEXT = '\u{1F916}-b8';
-const LABEL_HTML = '&#129302;-b8';
-
-/**
- * Drawing height of the plot, top of the range to bottom of it.
+ * `🤖-b8` briefly lived here and in the subject line. It has moved OUT of the message and into
+ * Gmail, where a label belongs: a label is something the mailbox puts on a message, not something
+ * the message says about itself. Printed in the subject it was a prefix the owner had to read past
+ * every day to reach the count, and printed in the body it was a second name for the app directly
+ * above the app's name.
  *
- * One scale across the whole plot rather than a separate one per side of zero, so a dollar is the
- * same number of pixels wherever it falls. The range always includes zero — see `chart` for why.
+ * What makes the Gmail filter possible is the `X-B8-Digest` header the sender sets, plus the fixed
+ * From address — neither of which is body text and neither of which a reader has to look at.
  */
-const PLOT_HEIGHT = 128;
-
-/** How thick the line is. Thin enough to read as a line, thick enough to survive a step. */
-const LINE_WEIGHT = 3;
+const WORDMARK = 'b8';
 
 // ─── Formatting ───────────────────────────────────────────────────────────────────────────────
 
@@ -237,120 +240,21 @@ export function esc(value: string): string {
 // ─── Chart ────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The cumulative P/L line, in the form the dashboard already draws it.
+ * The chart, as a reference to a part attached to this very message.
  *
- * Green, solid where settled and pale where forecast — the same series and the same reading as
- * `components/charts/ProfitLossChart.tsx`, so the email and the screen do not develop two pictures
- * of one number. This replaced a red-and-green bar chart of the identical data: a bar per month
- * invites the reader to compare twelve independent quantities, when the whole point of a running
- * total is that each value carries the one before it. A line says that and bars fight it.
+ * `src` is supplied by the caller — `cid:b8-digest-chart` when sending, a relative filename when
+ * previewing in a browser — so this module never decides how the bytes travel and the preview path
+ * exercises the same markup the mail does.
  *
- * WHAT THE DASHBOARD HAS THAT THIS DOES NOT: the per-month money-in and money-out bars behind the
- * line. Drawing a line ON TOP of bars needs absolute positioning, which Gmail strips, so the two
- * would have to be separate charts — two pictures of the same year, which is the thing above this
- * paragraph. The line is the series the dashboard's own caption calls the point.
- *
- * Settled versus forecast is carried again in the text fallback, because colour alone is not a
- * channel every reader has.
+ * `width` and `height` are set as ATTRIBUTES and again in the style. Outlook ignores CSS dimensions
+ * on an image and will render the raster at its natural size, which here is twice what is wanted;
+ * the attributes are what it reads. `max-width:100%` is what keeps it inside a phone.
  */
-function chart(points: YearEndPoint[]): string {
-  const values = points.map((p) => p.cumulative);
-  // Zero is always in frame. A P/L chart whose axis starts at the lowest value drawn would put
-  // break-even off the canvas, and break-even is the only level on this chart that means anything
-  // on its own — above it the year is up, below it the year is down.
-  const top = Math.max(0, ...values);
-  const bottom = Math.min(0, ...values);
-  const span = Math.max(top - bottom, 1);
-
-  /** Pixels from the top of the plot. Inverted, because a bigger number is a higher line. */
-  const y = (value: number) => Math.round(((top - value) / span) * PLOT_HEIGHT);
-  const zeroY = y(0);
-
-  /**
-   * One column of the line, as a vertical stack of blocks.
-   *
-   * There is no way to draw a diagonal in an email — Gmail strips <svg> and rewrites transforms —
-   * so the line is a STEP line: each column carries a segment spanning from the previous month's
-   * level to this one's, which renders as a connected path rather than twelve loose dots. The
-   * shape of the trend survives; the exact slope between two months does not, and the figure under
-   * the chart is where an exact value was always going to come from.
-   */
-  const column = (p: YearEndPoint, i: number): string => {
-    const here = y(p.cumulative);
-    const prior = i === 0 ? here : y(points[i - 1].cumulative);
-    const colour = p.projected ? GREEN_SOFT : GREEN;
-
-    /**
-     * The marks in this column, each at a depth, stacked in order.
-     *
-     * Nothing here can be positioned absolutely — Gmail strips it — so the column is a vertical
-     * stack of blocks and every mark has to be emitted top-down with plain spacers between. That
-     * constraint is also why the marks must not overlap: two blocks at the same depth stack, they
-     * do not superimpose, and the second one would push everything below it down by its height.
-     */
-    const marks: Array<{ at: number; height: number; html: string }> = [];
-
-    // The horizontal run, at this month's level, full column width.
-    const run = {
-      at: here,
-      height: LINE_WEIGHT,
-      html: `<div style="height:${LINE_WEIGHT}px;background-color:${colour};font-size:0;line-height:0">&nbsp;</div>`,
-    };
-
-    // The riser joining the previous month's level to this one, LINE_WEIGHT wide rather than the
-    // full column: drawn full width it is a filled block, and twelve filled blocks are a bar chart
-    // of a running total — the exact picture replacing the bars was meant to get rid of.
-    const rise = Math.abs(here - prior);
-    const riser = rise === 0 ? null : {
-      at: here <= prior ? here + LINE_WEIGHT : prior,
-      height: rise,
-      html: `<div style="width:${LINE_WEIGHT}px;height:${rise}px;background-color:${colour};font-size:0;line-height:0">&nbsp;</div>`,
-    };
-
-    marks.push(run);
-    if (riser) marks.push(riser);
-
-    // Break-even, behind everything. Suppressed where the line is already occupying that depth:
-    // the line is the subject of the chart and the rule is scenery, and they cannot share a row.
-    const lo = Math.min(run.at, riser?.at ?? run.at);
-    const hi = Math.max(run.at + run.height, riser ? riser.at + riser.height : 0);
-    if (zeroY < lo - 1 || zeroY > hi + 1) {
-      marks.push({
-        at: zeroY,
-        height: 1,
-        html: `<div style="height:1px;background-color:${RULE};font-size:0;line-height:0">&nbsp;</div>`,
-      });
-    }
-
-    marks.sort((a, b) => a.at - b.at);
-
-    let cursor = 0;
-    let stack = '';
-    for (const mark of marks) {
-      const gap = Math.max(0, mark.at - cursor);
-      if (gap > 0) stack += `<div style="height:${gap}px;font-size:0;line-height:0">&nbsp;</div>`;
-      stack += mark.html;
-      cursor = mark.at + mark.height;
-    }
-
-    return `<td valign="top" style="width:8.33%;padding:0;font-size:0;line-height:0">${stack}</td>`;
-  };
-
-  const label = (p: YearEndPoint): string => {
-    // The as-of month is the FIRST projected one; it gets the ink so the reader can see where
-    // "today" sits without a legend entry explaining a marker.
-    const isCurrent = p.projected && (p.month === 1 || !points[p.month - 2]?.projected);
-    return (
-      `<td align="center" style="width:8.33%;padding:6px 0 0;font-family:${FONT};font-size:10px;` +
-      `color:${isCurrent ? INK : FAINT};font-weight:${isCurrent ? 600 : 400}">${MONTH_LABELS[p.month - 1]}</td>`
-    );
-  };
-
+function chart(src: string): string {
   return (
-    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="table-layout:fixed">` +
-    `<tr style="height:${PLOT_HEIGHT + LINE_WEIGHT}px">${points.map(column).join('')}</tr>` +
-    `<tr>${points.map(label).join('')}</tr>` +
-    `</table>`
+    `<img src="${src}" width="${CHART_DISPLAY_WIDTH}" height="${CHART_DISPLAY_HEIGHT}" ` +
+    `alt="Cumulative profit and loss for the year, with money in and money out by month." ` +
+    `style="display:block;width:100%;max-width:${CHART_DISPLAY_WIDTH}px;height:auto;border:0"/>`
   );
 }
 
@@ -539,7 +443,7 @@ function yesterdayWidget(d: DigestData['yesterday']): string {
  * `netToDate` is printed beside it, labelled as fact, because the projection is the figure people
  * argue with and the settled number is the one that anchors it.
  */
-function yearEndWidget(d: DigestData['yearEnd']): string {
+function yearEndWidget(d: DigestData['yearEnd'], chartSrc: string): string {
   const positive = d.profitLoss >= 0;
 
   const headline =
@@ -569,12 +473,12 @@ function yearEndWidget(d: DigestData['yearEnd']): string {
 
   const legend =
     `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:10px 0 0">` +
-    `Cumulative profit and loss, January to December. Solid is settled, pale is forecast.</div>`;
+    `Bars: money in above the line, money out below. Line: cumulative profit and loss, dashed once forecast.</div>`;
 
   return widget(
     'Year end',
     '',
-    headline + `<div style="height:18px;font-size:0;line-height:0">&nbsp;</div>` + chart(d.points) + legend + caveat
+    headline + `<div style="height:18px;font-size:0;line-height:0">&nbsp;</div>` + chart(chartSrc) + legend + caveat
   );
 }
 
@@ -590,8 +494,8 @@ function subjectFor(data: DigestData): string {
   const date = shortDate(`${data.asOf.year}-${String(data.asOf.month).padStart(2, '0')}-${String(data.asOf.day).padStart(2, '0')}`);
   const { totalCount } = data.uncategorized;
   const tail = `${round(data.yearEnd.profitLoss)} year end · ${date}`;
-  if (totalCount > 0) return `${LABEL_TEXT} · ${totalCount} to file · ${tail}`;
-  return `${LABEL_TEXT} · all filed · ${tail}`;
+  if (totalCount > 0) return `${totalCount} to file · ${tail}`;
+  return `All filed · ${tail}`;
 }
 
 /**
@@ -601,14 +505,14 @@ function subjectFor(data: DigestData): string {
  * mail client that shows it is a client the HTML failed in, and the failure mode of sending HTML
  * alone is a blank message rather than a plain one.
  */
-export function renderDigest(data: DigestData): DigestMessage {
+export function renderDigest(data: DigestData, chartSrc: string): DigestMessage {
   if (data.yearEnd.points.length !== 12) {
     throw new RangeError(`digest: the year-end track needs 12 points, got ${data.yearEnd.points.length}`);
   }
 
   const header =
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px">` +
-    `<tr><td style="font-family:${FONT};font-size:13px;font-weight:600;color:${INK}">${LABEL_HTML}</td>` +
+    `<tr><td style="font-family:${FONT};font-size:13px;font-weight:600;color:${INK}">${WORDMARK}</td>` +
     `<td align="right" style="font-family:${FONT};font-size:12px;color:${FAINT}">` +
     `${esc(shortDate(`${data.asOf.year}-${String(data.asOf.month).padStart(2, '0')}-${String(data.asOf.day).padStart(2, '0')}`))}, ${data.asOf.year}` +
     `</td></tr></table>`;
@@ -625,7 +529,7 @@ export function renderDigest(data: DigestData): DigestMessage {
     counters(data) +
     uncategorizedWidget(data.uncategorized) +
     yesterdayWidget(data.yesterday) +
-    yearEndWidget(data.yearEnd) +
+    yearEndWidget(data.yearEnd, chartSrc) +
     `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:2px 0 0;text-align:center">` +
     `Sent by b8 on this machine. Figures exclude uncategorized money.</div>` +
     `</td></tr></table></td></tr></table>`;
@@ -635,7 +539,7 @@ export function renderDigest(data: DigestData): DigestMessage {
   const ye = data.yearEnd;
 
   const text = [
-    `${LABEL_TEXT}`,
+    `b8`,
     '',
     `  ${u.totalCount} ${u.totalCount === 1 ? 'record needs' : 'records need'} a category`,
     `  ${y.rows.length} new transaction${y.rows.length === 1 ? '' : 's'} yesterday`,

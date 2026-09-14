@@ -2,7 +2,9 @@ import { createTransport } from 'nodemailer';
 import db from './db';
 import { createLogger } from './logger';
 import { loadDigest } from './digestRead';
+import type { ChartPoint } from './domain/digestChart';
 import { renderDigest, type DigestMessage } from './domain/digest';
+import { CHART_CID, renderChartPng } from './digestImage';
 import { alertsEnabled, describeSmtp, smtpSettings, type SmtpSettings } from './mailConfig';
 
 const log = createLogger('dailyDigest');
@@ -45,7 +47,12 @@ export async function runDailyDigest(): Promise<void> {
     // The one clock read, converted once and passed down — `loadDigest` derives "this month" and
     // "yesterday" from this single Date. A second `new Date()` downstream is a second calendar, and
     // the two disagree for the hours around midnight, which is exactly when this job runs.
-    const message = renderDigest(await loadDigest(new Date()));
+    const data = await loadDigest(new Date());
+
+    // Rendered BEFORE the suppression check is answered? No — after. The chart is the one expensive
+    // step in this job (an SVG rasterised through a native library), and a suppressed run should
+    // not pay for a picture nobody receives.
+    const message = renderDigest(data, `cid:${CHART_CID}`);
 
     // Every row for this fingerprint, unfiltered, handed to the pure predicate. The `delivered`
     // test is deliberately NOT in this WHERE clause: written as `AND delivered LIMIT 1` the SQL
@@ -62,7 +69,7 @@ export async function runDailyDigest(): Promise<void> {
       return;
     }
 
-    await attempt(message);
+    await attempt(message, data.yearEnd.points);
   } catch (err) {
     // Anything that escaped the classified paths below — a database that would not answer, a bug.
     // Logged and dropped, because the alternative is an unhandled rejection inside the daily job
@@ -83,7 +90,7 @@ export async function runDailyDigest(): Promise<void> {
  * a dollar figure. The detail goes to the log, which is where an operator looks and is not the row
  * that gets pasted into a report.
  */
-async function attempt(message: DigestMessage): Promise<void> {
+async function attempt(message: DigestMessage, points: ChartPoint[]): Promise<void> {
   let settings: SmtpSettings;
   try {
     settings = smtpSettings(process.env);
@@ -114,6 +121,15 @@ async function attempt(message: DigestMessage): Promise<void> {
       subject: message.subject,
       text: message.text,
       html: message.html,
+      // The chart travels INSIDE the message. `cid` makes it a referenced part rather than an
+      // attachment the client lists at the bottom, and nothing is fetched to display it.
+      attachments: [
+        { cid: CHART_CID, filename: 'profit-and-loss.png', content: await renderChartPng(points) },
+      ],
+      // What a Gmail filter matches on, so the label lives in the mailbox instead of in the
+      // subject line the owner reads every morning. A custom header is invisible to a reader and
+      // survives every forward and reply.
+      headers: { 'X-B8-Digest': 'daily' },
     });
 
     log.info('digest delivered', { smtp: describeSmtp(settings) });
