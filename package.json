@@ -18,7 +18,7 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.107.0",
+    "@anthropic-ai/sdk": "^0.125.0",
     "@simplewebauthn/browser": "^14.0.0",
     "@simplewebauthn/server": "^14.0.2",
     "@types/pg": "^8.20.0",
