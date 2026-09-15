@@ -1,0 +1,84 @@
+import Link from 'next/link';
+import { Flag } from 'lucide-react';
+import type { WatchedTransaction } from '@/lib/watchlistRead';
+
+const fmt = (n: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Math.abs(n));
+
+/** Whole days since the flag, as a phrase. */
+const age = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day' : `${days} days`);
+
+/** Past this, an entry stops being a process and starts being something nobody is going to chase. */
+const STALE_DAYS = 14;
+
+/**
+ * What the owner said they were not finished with.
+ *
+ * ─── Why it sits directly under the bubbles ───────────────────────────────────────────────────
+ *
+ * The bubbles say where this month's money is and which parts of it are going wrong. Both are
+ * answers the app computed. This card is the one thing on the page the owner put there themselves,
+ * and it belongs next to the computed picture rather than below the feed: a pending return is a
+ * claim that one of those figures is provisional, and it should be read in the same breath.
+ *
+ * ─── The age is the column that changes ───────────────────────────────────────────────────────
+ *
+ * A watchlist that only says WHAT is on it becomes wallpaper — the same rows every morning until
+ * the eye stops reading them. The number that moves is the age, and it is the thing that should
+ * eventually feel wrong: a return pending three days is a process, one pending thirty is a refund
+ * nobody is going to chase unless something says so.
+ *
+ * Amber past two weeks, never red. Nothing here is an error, and a colour that shouts on day
+ * fifteen has nothing left to say on day sixty.
+ *
+ * ─── Empty is not rendered ────────────────────────────────────────────────────────────────────
+ *
+ * Unlike the arrivals feed, whose emptiness is news — it distinguishes "nothing was spent" from "a
+ * bank stopped reporting" — an empty watchlist says only that the owner has not flagged anything.
+ * A permanent card reading "nothing to watch" is furniture directly under the page's main picture.
+ * The page renders this conditionally; see app/dashboard/page.tsx.
+ */
+export default function WatchlistCard({ items }: { items: WatchedTransaction[] }) {
+  const oldest = items[0]?.daysOpen ?? 0; // The read orders oldest first.
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">
+      <div className="flex items-baseline justify-between mb-4">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Keeping an eye</p>
+        <div className="flex items-baseline gap-3">
+          {oldest >= STALE_DAYS && (
+            <span className="text-[10px] font-medium text-amber-600">oldest {age(oldest)}</span>
+          )}
+          <Link href="/transactions?filter=watched" className="text-[10px] text-blue-600 hover:underline">
+            Manage
+          </Link>
+        </div>
+      </div>
+
+      <div className="space-y-2.5">
+        {items.map((item) => {
+          const stale = item.daysOpen >= STALE_DAYS;
+          // Money in is shown with its sign and in green. A refund rendered as a bare figure in a
+          // list of charges reads as another charge to anyone moving quickly — and on this card
+          // a refund landing is often exactly the thing being waited for.
+          const inbound = item.amount < 0;
+          return (
+            <div key={item.id} className="flex items-baseline gap-3 text-sm">
+              <Flag size={13} className={`shrink-0 translate-y-0.5 ${stale ? 'text-amber-500' : 'text-slate-300'}`} />
+              <span className="text-slate-900 truncate max-w-[14rem]">{item.label}</span>
+              <span className="text-xs text-slate-400 truncate flex-1">
+                {item.note ?? <span className="text-slate-300">no reason given</span>}
+              </span>
+              <span className={`font-mono text-sm tabular-nums ${inbound ? 'text-green-600' : 'text-slate-700'}`}>
+                {inbound ? '+' : ''}{fmt(item.amount)}
+              </span>
+              <span className={`text-xs w-16 text-right ${stale ? 'font-semibold text-amber-600' : 'text-slate-400'}`}>
+                {age(item.daysOpen)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

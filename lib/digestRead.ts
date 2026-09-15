@@ -1,6 +1,7 @@
 import db from './db';
 import { loadYearEnd } from './yearEndRead';
 import { loadMonthOutlook } from './monthOutlookRead';
+import { loadWatchlist } from './watchlistRead';
 import { asOfFromDate } from './domain/monthOutlook';
 import type { DigestData, DigestTxn } from './domain/digest';
 
@@ -110,21 +111,9 @@ export async function loadDigest(now: Date): Promise<DigestData> {
        ORDER BY ABS(t.amount) DESC, t.id
     `, [yesterdayIso]),
 
-    // NOT scoped to the month, unlike every other query here. A return pending since June is the
-    // entry that most needs chasing; a month-scoped list would drop it on the first of July.
-    // Oldest flag first, which is the partial index's own order — and the order that puts the
-    // forgotten thing at the top rather than the thing flagged an hour ago.
-    db.query<TxnRow & { watch_note: string | null; days_open: string }>(`
-      SELECT t.date::text, ${LABEL} AS label, t.amount::text, t.mapped_category AS category,
-             t.watch_note,
-             -- Whole days, computed by POSTGRES against ITS clock. In JS this would be a second
-             -- calendar and a subtraction across a DST boundary; here it is one clock, the same one
-             -- that wrote watched_at.
-             FLOOR(EXTRACT(EPOCH FROM (NOW() - t.watched_at)) / 86400)::text AS days_open
-        FROM transactions t ${VISIBLE}
-       WHERE t.watched_at IS NOT NULL
-       ORDER BY t.watched_at ASC, t.id
-    `, []),
+    // Through the shared reader, so the mail and the dashboard cannot disagree about what is on
+    // the list, how it is ordered, or how old an entry is.
+    loadWatchlist(),
 
     // The same read the dashboard's bubbles are built from, so a category cannot carry one figure
     // on the screen and another in the mail.
@@ -155,12 +144,12 @@ export async function loadDigest(now: Date): Promise<DigestData> {
       totalIn: yesterdayRows.filter((t) => t.amount < 0).reduce((s, t) => s - t.amount, 0),
     },
 
-    watchlist: watching.rows.map((r) => ({
-      date: r.date,
-      label: r.label,
-      amount: Number(r.amount),
-      note: r.watch_note,
-      daysOpen: Math.max(0, Number(r.days_open)),
+    watchlist: watching.map((w) => ({
+      date: w.date,
+      label: w.label,
+      amount: w.amount,
+      note: w.note,
+      daysOpen: w.daysOpen,
     })),
 
     // Scoped to the as-of month AND to categories with an allocation. `categoryPacing` emits one
