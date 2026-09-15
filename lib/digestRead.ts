@@ -187,7 +187,6 @@ export async function loadDigest(now: Date): Promise<DigestData> {
         cumulative: p.cumulative,
         projected: p.projected,
       })),
-      uncategorizedNet: yearEnd.uncategorized.net,
     },
   };
 }

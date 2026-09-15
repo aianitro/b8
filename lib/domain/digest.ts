@@ -123,8 +123,6 @@ export interface DigestData {
     netToDate: number;
     /** Twelve points, January first. */
     points: YearEndPoint[];
-    /** Unfiled money excluded from every figure above, disclosed so the exclusion is visible. */
-    uncategorizedNet: number;
   };
 }
 
@@ -429,7 +427,9 @@ function counters(data: DigestData): string {
     // ignore the colour, which costs the one day it actually means something.
     card(unfiled, unfiled === 1 ? 'needs a category' : 'need a category', unfiled > 0) +
     `<td width="12" style="font-size:0;line-height:0">&nbsp;</td>` +
-    card(posted, posted === 1 ? 'new transaction yesterday' : 'new transactions yesterday', false) +
+    // Not "new transactions yesterday": the extra word wrapped the caption onto a second line
+    // at phone width, which is where this is read.
+    card(posted, posted === 1 ? 'transaction yesterday' : 'transactions yesterday', false) +
     `</tr></table>`
   );
 }
@@ -454,18 +454,13 @@ function uncategorizedWidget(d: DigestData['uncategorized']): string {
   const shown = d.rows.length;
   const rail = shown < d.totalCount ? `${shown} of ${d.totalCount} shown` : `${d.totalCount} record${d.totalCount === 1 ? '' : 's'}`;
 
-  // The totals line exists because the listed rows are a sample: the widget shows the largest few,
-  // and a reader who adds up what is on screen would otherwise get a number that is not the number
-  // any other figure in this email was computed from.
-  const totals =
-    `<div style="font-family:${FONT};font-size:12px;color:${AMBER_INK};background-color:${AMBER_BG};` +
-    `border:1px solid ${AMBER_RULE};border-radius:6px;padding:9px 11px;margin:12px 0 0">` +
-    `<strong>${d.totalCount} record${d.totalCount === 1 ? '' : 's'}</strong> uncategorized this month ${MDASH} ` +
-    `${exact(d.totalOut)} out, ${exact(d.totalIn)} in. ` +
-    `None of it is counted in the year-end figure below.` +
-    `</div>`;
-
-  return widget('Needs a category', rail, txnTable(d.rows, false) + totals);
+  // NO TOTALS BOX. It used to sit under the rows restating the count and summing the money in and
+  // out, and the owner's reading was that it duplicates what is already on screen — which it does
+  // whenever the list is short enough to show in full, and that is most days. What it was
+  // protecting against is a reader summing a TRUNCATED list and getting a figure nothing else was
+  // computed from; the rail above still says "8 of 14 shown", which states the truncation without
+  // restating the arithmetic.
+  return widget('Needs a category', rail, txnTable(d.rows, false));
 }
 
 /**
@@ -593,7 +588,7 @@ function yearEndWidget(d: DigestData['yearEnd'], chartSrc: string): string {
     `<div style="font-family:${FONT};font-size:28px;font-weight:600;color:${positive ? GREEN : RED};line-height:1.15">` +
     `${roundHtml(d.profitLoss)}</div>` +
     `<div style="font-family:${FONT};font-size:12px;color:${MUTED};padding:3px 0 0">` +
-    `projected at year end, if the rest of the year goes to plan</div>` +
+    `projected at year end</div>` +
     `</td>` +
     `<td align="right" valign="top">` +
     `<div style="font-family:${FONT};font-size:15px;font-weight:600;color:${INK}">${roundHtml(d.netToDate)}</div>` +
@@ -601,24 +596,22 @@ function yearEndWidget(d: DigestData['yearEnd'], chartSrc: string): string {
     `</td>` +
     `</tr></table>`;
 
-  // Disclosed rather than folded in. `lib/yearEndRead.ts` excludes unfiled money from every figure
-  // because calling it income or spend is a guess — and on 2026-09-11 that guess was wrong by
-  // $2,175 in the flattering direction. Saying so here is what keeps the headline honest.
-  const caveat =
-    Math.abs(d.uncategorizedNet) >= 1
-      ? `<div style="font-family:${FONT};font-size:11px;color:${MUTED};padding:12px 0 0;border-top:1px solid ${RULE};margin:14px 0 0">` +
-        `${roundHtml(Math.abs(d.uncategorizedNet))} of uncategorized money is excluded from both figures. ` +
-        `Filing it will move them.</div>`
-      : '';
-
+  // NO PER-WIDGET EXCLUSION CAVEAT. It named the unfiled total and said filing it would move both
+  // figures. Removed at the owner's request; the fact itself is NOT lost, because the message
+  // footer still reads "Figures exclude uncategorized money" on every send, and the count of what
+  // is unfiled leads the whole email. One statement of it rather than three.
   const legend =
     `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:10px 0 0">` +
     `Bars: money in above the line, money out below. Line: cumulative profit and loss, dashed once forecast.</div>`;
 
   return widget(
-    'Year end',
+    // The dashboard's widget is titled "Profit & Loss"; the mail now says the same thing, so the
+    // two surfaces do not name one number two ways. `&amp;` rather than a bare ampersand because
+    // `widget` interpolates its title raw — titles are module constants, so escaping inside
+    // `widget` would double-escape the entities the rails deliberately contain.
+    'Profit &amp; Loss',
     '',
-    headline + `<div style="height:18px;font-size:0;line-height:0">&nbsp;</div>` + chart(chartSrc) + legend + caveat
+    headline + `<div style="height:18px;font-size:0;line-height:0">&nbsp;</div>` + chart(chartSrc) + legend
   );
 }
 
@@ -684,16 +677,17 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
     `b8`,
     '',
     `  ${u.totalCount} ${u.totalCount === 1 ? 'record needs' : 'records need'} a category`,
-    `  ${y.rows.length} new transaction${y.rows.length === 1 ? '' : 's'} yesterday`,
+    `  ${y.rows.length} transaction${y.rows.length === 1 ? '' : 's'} yesterday`,
     '',
     `NEEDS A CATEGORY`,
     u.totalCount === 0
       ? '  Nothing outstanding — every record this month is filed.'
       : [
           ...txnTableText(u.rows, false),
-          '',
-          `  ${u.totalCount} record${u.totalCount === 1 ? '' : 's'} uncategorized this month — ` +
-            `${exact(u.totalOut)} out, ${exact(u.totalIn)} in. None of it is counted in the year-end figure below.`,
+          // The same removal as the HTML: the totals restated what the rows already show. What is
+          // kept is the truncation notice, and ONLY when the list is actually truncated — the HTML
+          // carries this in the widget rail, which the plain part has no equivalent of.
+          ...(u.rows.length < u.totalCount ? [`  …and ${u.totalCount - u.rows.length} more.`] : []),
         ].join('\n'),
     '',
     ...(data.watchlist.length > 0
@@ -709,15 +703,12 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
           '',
         ]
       : []),
-    `YEAR END`,
-    `  ${round(ye.profitLoss)} projected, if the rest of the year goes to plan.`,
+    `PROFIT & LOSS`,
+    `  ${round(ye.profitLoss)} projected at year end.`,
     `  ${round(ye.netToDate)} so far, settled.`,
     '',
     ...chartText(ye.points),
     '',
-    ...(Math.abs(ye.uncategorizedNet) >= 1
-      ? [`  ${round(Math.abs(ye.uncategorizedNet))} of uncategorized money is excluded from both figures. Filing it will move them.`, '']
-      : []),
     `Sent by b8 on this machine. Figures exclude uncategorized money.`,
   ].join('\n');
 
