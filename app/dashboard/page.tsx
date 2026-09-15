@@ -600,60 +600,6 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Two shorter horizons, kept beside the month because they are the same question at a
-          different scale — not a second headline. */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <KpiCard
-          label="Today"
-          value={fmt(todayStats.spent)}
-          sub={todayStats.avgSameWeekday > 0
-            ? `${todayDelta >= 0 ? '+' : ''}${fmt(todayDelta)} vs the same weekday's recent average`
-            : undefined}
-          subColor={todayStats.avgSameWeekday > 0 ? paceColor(todayVsAvgRatio) : undefined}
-          footer={
-            todayStats.transactions.length === 0 ? (
-              // "No spending yet today" is a claim about behaviour, and while a feed is behind it
-              // is a claim about the pipe wearing behaviour's clothes. Chase last reported on the
-              // 8th, so a $0 today and a flattering delta against the weekday average are both
-              // artefacts. Said here rather than left for the reader to remember.
-              <p className="text-xs text-slate-300">
-                {staleFeed
-                  ? <span className="text-amber-600">A bank feed is behind — nothing recorded today may be the connection, not a quiet day.</span>
-                  : 'No spending yet today'}
-              </p>
-            ) : (
-              <div className="space-y-1">
-                {todayStats.transactions.map((t, i) => (
-                  <div key={i} className="flex justify-between gap-2 text-xs text-slate-500">
-                    <span className="truncate">{t.label}</span>
-                    <span className="font-mono text-slate-400 shrink-0">{fmt(t.amount)}</span>
-                  </div>
-                ))}
-                {todayStats.totalCount > todayStats.transactions.length && (
-                  <p className="text-[10px] text-slate-300">+{todayStats.totalCount - todayStats.transactions.length} more</p>
-                )}
-              </div>
-            )
-          }
-        />
-        <KpiCard
-          label="This Week"
-          value={fmt(weekStats.spent)}
-          sub={`${weekDelta >= 0 ? '+' : ''}${fmt(weekDelta)} vs same point last week`}
-          subColor={expectedWeekSpend > 0 ? paceColor(weekPaceRatio) : undefined}
-          footer={
-            <p className="text-xs text-slate-400">
-              {fmt(weekStats.weeklyBudgetReference)}/wk reference
-              {staleFeed && (
-                <span className="block text-amber-600 mt-0.5">
-                  A bank feed is behind, so recent days may be short.
-                </span>
-              )}
-            </p>
-          }
-        />
-      </div>
-
       {/* The annual ceiling, kept as context rather than as a verdict. The year-pace bar that used
           to sit here counted the current month as fully elapsed — 33% of the year on 1 April
           against a true 25% — which inflated expected spend and flattered the pace. It is deleted
@@ -717,6 +663,69 @@ export default async function DashboardPage() {
             about whether it is on plan; the budget-vs-actual bars said whether it is on plan and
             drew a $378 line the same length as a $29,000 one. */}
         <BudgetTracks rows={budgetVsActual} yearElapsed={yearElapsed} />
+
+        {/* Two shorter horizons. They used to sit directly under the month's verdict, on the
+            grounds that they are the same question at a different scale — but that put a $47 day
+            three lines below the year's projected P/L, and a reader scanning down met the smallest
+            horizon before the charts that explain the largest.
+
+            Below the P/L chart the order reads longest to shortest: where the year closes, then
+            the month category by category, then the week, then today. Each one is the previous one
+            zoomed in, and the two that move most are last, where checking them again later costs
+            no scrolling past anything.
+
+            Still a pair, still side by side: today only means something against the week. */}
+        <div className="grid grid-cols-2 gap-4">
+          <KpiCard
+            label="Today"
+            value={fmt(todayStats.spent)}
+            sub={todayStats.avgSameWeekday > 0
+              ? `${todayDelta >= 0 ? '+' : ''}${fmt(todayDelta)} vs the same weekday's recent average`
+              : undefined}
+            subColor={todayStats.avgSameWeekday > 0 ? paceColor(todayVsAvgRatio) : undefined}
+            footer={
+              todayStats.transactions.length === 0 ? (
+                // "No spending yet today" is a claim about behaviour, and while a feed is behind it
+                // is a claim about the pipe wearing behaviour's clothes. Chase last reported on the
+                // 8th, so a $0 today and a flattering delta against the weekday average are both
+                // artefacts. Said here rather than left for the reader to remember.
+                <p className="text-xs text-slate-300">
+                  {staleFeed
+                    ? <span className="text-amber-600">A bank feed is behind — nothing recorded today may be the connection, not a quiet day.</span>
+                    : 'No spending yet today'}
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {todayStats.transactions.map((t, i) => (
+                    <div key={i} className="flex justify-between gap-2 text-xs text-slate-500">
+                      <span className="truncate">{t.label}</span>
+                      <span className="font-mono text-slate-400 shrink-0">{fmt(t.amount)}</span>
+                    </div>
+                  ))}
+                  {todayStats.totalCount > todayStats.transactions.length && (
+                    <p className="text-[10px] text-slate-300">+{todayStats.totalCount - todayStats.transactions.length} more</p>
+                  )}
+                </div>
+              )
+            }
+          />
+          <KpiCard
+            label="This Week"
+            value={fmt(weekStats.spent)}
+            sub={`${weekDelta >= 0 ? '+' : ''}${fmt(weekDelta)} vs same point last week`}
+            subColor={expectedWeekSpend > 0 ? paceColor(weekPaceRatio) : undefined}
+            footer={
+              <p className="text-xs text-slate-400">
+                {fmt(weekStats.weeklyBudgetReference)}/wk reference
+                {staleFeed && (
+                  <span className="block text-amber-600 mt-0.5">
+                    A bank feed is behind, so recent days may be short.
+                  </span>
+                )}
+              </p>
+            }
+          />
+        </div>
       </div>
     </div>
   );
