@@ -47,7 +47,6 @@ function data(overrides: Partial<DigestData> = {}): DigestData {
       profitLoss: 1.08,
       netToDate: -27090.98,
       points: track(),
-      uncategorizedNet: 2504,
     },
     ...overrides,
   };
@@ -80,15 +79,14 @@ describe('the digest carries what the owner asked for', () => {
     }
   });
 
-  it("reports the month's whole uncategorized population, not just the rows it lists", () => {
-    // The listed rows are a sample of the largest. A reader who summed only what is on screen
-    // would get a figure no other number in this email was computed from, so the totals are stated.
+  it('says when the list is only a sample, so a reader does not sum it and believe the answer', () => {
+    // The totals box under the rows is gone at the owner's request — it restated the count and the
+    // arithmetic, which duplicates what is on screen whenever the list is short enough to show in
+    // full. What must survive is the statement that the list is TRUNCATED, which the rail carries.
     const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
-    for (const surface of [html, text]) {
-      expect(surface).toContain('14 record');
-      expect(surface).toContain('$4,083.84');
-      expect(surface).toContain('$16,238.17');
-    }
+    expect(html).toContain('2 of 14 shown');
+    expect(text).toContain('…and 12 more.');
+    for (const surface of [html, text]) expect(surface).not.toContain('uncategorized this month');
   });
 
   it("lists yesterday's transactions with their categories, and flags the ones that have none", () => {
@@ -129,7 +127,7 @@ describe('the digest carries what the owner asked for', () => {
     for (const surface of [html, text]) {
       expect(surface).toContain('14');
       expect(surface).toMatch(/need a category|records need a category/);
-      expect(surface).toMatch(/new transactions? yesterday/);
+      expect(surface).toMatch(/transactions? yesterday/);
     }
     // Both counters must sit above the lists. An email read on a phone is read from the top, and
     // the whole reason these exist is to be the part that does not need scrolling to.
@@ -144,7 +142,7 @@ describe('the digest carries what the owner asked for', () => {
     d.uncategorized.totalCount = 7;
     const { html, text, subject } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     expect(subject).toContain('7 to file');
-    expect(html).toContain('7 record');
+    expect(html).toContain('2 of 7 shown');
     expect(text).toContain('7 records need a category');
     // The counter card states it as a bare number in its own element, which a substring search for
     // "7" cannot distinguish from a pixel height or a date. Matched on the element instead.
@@ -173,18 +171,15 @@ describe('the digest carries what the owner asked for', () => {
 });
 
 describe('the figures stay honest', () => {
-  it('discloses the uncategorized money that every headline figure excludes', () => {
+  it('still states once that the figures exclude unfiled money', () => {
+    // The per-widget caveat naming the unfiled total was removed at the owner's request. The FACT
+    // must not vanish with the sentence: the footer carries it on every send, and the count of what
+    // is unfiled leads the whole message. One statement of it rather than three.
     const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) {
-      expect(surface).toMatch(/\$2,504 of uncategorized money is excluded/);
+      expect(surface).toContain('Figures exclude uncategorized money');
+      expect(surface).not.toContain('is excluded from both figures');
     }
-  });
-
-  it('says nothing about excluded money when there is none to exclude', () => {
-    const d = data();
-    d.yearEnd.uncategorizedNet = 0;
-    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
-    for (const surface of [html, text]) expect(surface).not.toContain('is excluded from both figures');
   });
 
   it('renders a negative year-end projection as negative rather than as a bare magnitude', () => {
@@ -301,6 +296,15 @@ describe('the empty cases still say something', () => {
     const { html, text, subject } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) expect(surface).toContain('every record this month is filed');
     expect(subject).toContain('All filed');
+  });
+
+  it('says nothing about truncation when the whole list is on screen', () => {
+    // The notice exists to stop a reader summing a partial list. On a short list there is nothing
+    // to warn about, and a permanent "…and 0 more" is furniture.
+    const d = data();
+    d.uncategorized.totalCount = d.uncategorized.rows.length;
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).text).not.toContain('more.');
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).html).toContain('2 records');
   });
 
   it('says a quiet day was quiet rather than rendering an empty table', () => {
@@ -470,8 +474,8 @@ describe('the bubbles widget', () => {
     expect([...html.matchAll(/src="([^"]*)"/g)].map((m) => m[1])).toEqual(['cid:b8-digest-chart']);
   });
 
-  it('sits above the year-end widget, where the owner asked for it', () => {
+  it('sits above the profit-and-loss widget, where the owner asked for it', () => {
     const html = renderDigest(data(), CHART_SRC, BUBBLES_SRC).html;
-    expect(html.indexOf('This month')).toBeLessThan(html.indexOf('Year end'));
+    expect(html.indexOf('This month')).toBeLessThan(html.indexOf('Profit &amp; Loss'));
   });
 });
