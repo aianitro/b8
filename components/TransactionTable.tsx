@@ -308,64 +308,139 @@ function DuplicateButton({ transaction, accounts, categories }: {
 /**
  * Flag a transaction to come back to, with a reason.
  *
- * The reason is the whole value of the flag a week later, when the merchant and the amount no
- * longer recall why anyone cared — so flagging PROMPTS for one rather than offering an edit step
- * afterwards that nobody would take. It is still optional: an empty prompt flags without a note,
- * which is a normal way to use a list like this.
+ * ─── Why this is a modal and not `window.prompt` ──────────────────────────────────────────────
  *
- * `prompt()` rather than an inline editor, deliberately. The alternative is a popover with its own
- * open state, outside-click handling and focus management inside a 729-line table that already has
- * a modal and a bulk bar — and this is one short string typed a few times a month. The uiux skill's
- * own rule is that a component over ~150 lines should be extracted, not that every input must be
- * bespoke.
+ * It was a prompt box, which was the smallest thing that could work and was wrong for three
+ * reasons. It looks like 1998 next to the rest of this table. It cannot show the transaction it is
+ * about, so the owner is typing a reason for "some row I clicked" with the row hidden behind a
+ * system dialog. And it is untestable from automation — a native dialog blocks the browser event
+ * loop, so the one control in this feature nobody could exercise was the one everybody uses.
+ *
+ * The idiom is `DuplicateButton`'s, deliberately: same backdrop, same card, same field styling,
+ * same Cancel/confirm pair. A second modal convention in one table is how a UI starts feeling
+ * assembled rather than designed.
+ *
+ * The reason stays OPTIONAL. Flagging something and writing why later is a normal way to use a list
+ * like this, so the confirm button is never disabled on an empty field.
  */
-function WatchToggleButton({ transactionId, watchedAt, note }: {
-  transactionId: number; watchedAt: string | null; note: string | null;
-}) {
+function WatchToggleButton({ transaction }: { transaction: TxRow }) {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const watched = watchedAt !== null;
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState('');
 
-  async function send(watched: boolean, watch_note: string | null) {
+  const watched = transaction.watched_at !== null;
+  const label = transaction.merchant_name ?? transaction.name ?? 'this transaction';
+
+  async function send(nextWatched: boolean, watch_note: string | null) {
     setBusy(true);
-    await fetch(`/api/transactions/${transactionId}`, {
+    setError(null);
+    const res = await fetch(`/api/transactions/${transaction.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ watched, watch_note }),
+      body: JSON.stringify({ watched: nextWatched, watch_note }),
     });
-    router.refresh();
+    const data = await res.json().catch(() => null);
     setBusy(false);
-  }
-
-  function toggle() {
-    if (watched) {
-      void send(false, null);
+    if (!data?.success) {
+      // The route answers with a stated reason — a note over the limit says how long it was — so
+      // show that rather than a generic failure.
+      setError(data?.error?.message ?? 'That did not work. Try again.');
       return;
     }
-    // `null` is the cancel case and must not flag anything; `''` is "flag it, no reason".
-    const reason = window.prompt('Keeping an eye on this one. Why? (optional)', '');
-    if (reason === null) return;
-    void send(true, reason);
+    setOpen(false);
+    router.refresh();
   }
 
-  function editNote() {
-    const reason = window.prompt('Why are you watching this one?', note ?? '');
-    if (reason === null) return;
-    void send(true, reason);
+  function openModal() {
+    setNote(transaction.watch_note ?? '');
+    setError(null);
+    setOpen(true);
   }
 
   return (
-    <button
-      onClick={watched ? editNote : toggle}
-      onDoubleClick={watched ? toggle : undefined}
-      disabled={busy}
-      className={`disabled:opacity-30 transition-colors ${watched ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-slate-600'}`}
-      title={watched
-        ? `Keeping an eye on this${note ? `: ${note}` : ''} — click to edit the note, double-click to stop watching`
-        : 'Keep an eye on this one'}
-    >
-      <Flag size={14} fill={watched ? 'currentColor' : 'none'} />
-    </button>
+    <>
+      <button
+        onClick={openModal}
+        className={`disabled:opacity-30 transition-colors ${watched ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-amber-500'}`}
+        title={watched ? `Keeping an eye on this${transaction.watch_note ? `: ${transaction.watch_note}` : ''}` : 'Keep an eye on this one'}
+        data-testid="watch-toggle"
+      >
+        <Flag size={14} fill={watched ? 'currentColor' : 'none'} />
+      </button>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+          onClick={() => !busy && setOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 p-6 w-96 mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-amber-50 mb-4">
+              <Flag size={18} className="text-amber-500" />
+            </div>
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">
+              {watched ? 'Keeping an eye on this' : 'Keep an eye on this one'}
+            </h3>
+            {/* The row, named. A prompt box could not say which transaction it was about. */}
+            <p className="text-xs text-slate-400 mb-4">
+              {label} · {fmt(Number(transaction.amount))} · {transaction.date}
+            </p>
+
+            <label className="block text-xs font-medium text-slate-500 mb-1">Why? (optional)</label>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !busy) void send(true, note);
+                if (e.key === 'Escape' && !busy) setOpen(false);
+              }}
+              maxLength={200}
+              autoFocus
+              placeholder="returning to Zara"
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+            />
+            {/* Counts down only near the limit. A counter that is always on is chrome; one that
+                appears at 160 characters is a warning. */}
+            {note.length > 160 && (
+              <p className="text-xs text-slate-400 mt-1">{200 - note.length} characters left</p>
+            )}
+
+            {error && <p className="text-xs text-red-500 mt-3">{error}</p>}
+
+            <div className="flex gap-2 mt-5">
+              {watched ? (
+                <button
+                  onClick={() => send(false, null)}
+                  disabled={busy}
+                  className="flex-1 px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                >
+                  Stop watching
+                </button>
+              ) : (
+                <button
+                  onClick={() => setOpen(false)}
+                  disabled={busy}
+                  className="flex-1 px-4 py-2 rounded-xl text-sm font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                onClick={() => send(true, note)}
+                disabled={busy}
+                className="flex-1 px-4 py-2 rounded-xl text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
+              >
+                {busy ? 'Saving…' : watched ? 'Save note' : 'Keep an eye'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -688,7 +763,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-2">
                       <DuplicateButton transaction={t} accounts={accounts} categories={categories} />
-                      <WatchToggleButton transactionId={t.id} watchedAt={t.watched_at} note={t.watch_note} />
+                      <WatchToggleButton transaction={t} />
                       <HideToggleButton transactionId={t.id} hidden={t.hidden} />
                       <DeleteButton transactionId={t.id} />
                     </div>
