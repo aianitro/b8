@@ -3,8 +3,23 @@ import Anthropic from '@anthropic-ai/sdk';
 import db from '@/lib/db';
 import type { ApiResponse } from '@/shared/types';
 import { createLogger } from '@/lib/logger';
+import { SESSION_COOKIE_NAME } from '@/lib/sessionToken';
+import { check, createLimiter } from '@/lib/rateLimit';
 
 const log = createLogger('chat');
+
+/**
+ * The allowance state, held for the life of the process.
+ *
+ * Module scope rather than per-request, because a limiter recreated on every request permits
+ * everything. It dies with the process — a dev-server restart hands back a full allowance, and a
+ * second worker would keep its own — which is the documented trade in `lib/rateLimit.ts` and the
+ * right one for a single Next process serving one household.
+ *
+ * The rules and the arithmetic are all in that module, where they are tested against a clock passed
+ * in. What lives here is the key, the call, and the refusal.
+ */
+const limiter = createLimiter(new Date());
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -236,6 +251,33 @@ async function runAgentLoop(messages: Message[]): Promise<string> {
 // ── Route handler ──────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  // BEFORE the API-key check and before the body is read, because the point is to spend nothing —
+  // not even the parse — on a request that is not going to run. The session cookie is the key: the
+  // boundary has already verified it, so an absent one cannot reach this line, and the fallback
+  // exists so a future unauthenticated path cannot silently opt out of the limit by having no key.
+  const sessionKey = req.cookies.get(SESSION_COOKIE_NAME)?.value ?? 'anonymous';
+  const verdict = check(limiter, sessionKey, new Date());
+  if (!verdict.allowed) {
+    log.info('rate limited', { reason: verdict.reason, retryAfterSeconds: verdict.retryAfterSeconds });
+    return Response.json(
+      {
+        success: false,
+        error: {
+          code: 'RATE_LIMITED',
+          // Says which limit and when it lifts. "Try again later" makes a client guess, and a
+          // mobile client that guesses will guess "immediately".
+          message:
+            verdict.reason === 'daily'
+              ? "This endpoint has hit today's request ceiling. It resets at midnight."
+              : `Too many requests. Try again in ${verdict.retryAfterSeconds} seconds.`,
+        },
+      } satisfies ApiResponse<never>,
+      // `Retry-After` in seconds, which is what a well-behaved client backs off on rather than
+      // inventing its own interval.
+      { status: 429, headers: { 'Retry-After': String(verdict.retryAfterSeconds) } }
+    );
+  }
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return Response.json(
       { success: false, error: { code: 'NO_API_KEY', message: 'ANTHROPIC_API_KEY is not set in .env.local' } } satisfies ApiResponse<never>,
