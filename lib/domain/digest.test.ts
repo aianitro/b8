@@ -118,8 +118,23 @@ describe('the digest carries what the owner asked for', () => {
     expect(text).toMatch(/Sep.*░/);
   });
 
-  it('leads the subject with the actionable count, where truncation cannot reach it', () => {
-    expect(renderDigest(data(), CHART_SRC, BUBBLES_SRC).subject).toMatch(/^14 to file/);
+  it('names itself, the day and the target in the subject', () => {
+    expect(renderDigest(data(), CHART_SRC, BUBBLES_SRC).subject).toBe('B8 daily · 14 Sep · Target P/L: $1');
+  });
+
+  it('keeps the subject identical whether or not anything needs filing', () => {
+    // The count moved to the preheader, which the inbox shows on the line below. The subject says
+    // which mail this is and where the year is going; the preheader says what is waiting.
+    const clear = data();
+    clear.uncategorized = { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 };
+    expect(renderDigest(clear, CHART_SRC, BUBBLES_SRC).subject)
+      .toBe(renderDigest(data(), CHART_SRC, BUBBLES_SRC).subject);
+  });
+
+  it('spells a negative target the same way the body does', () => {
+    const d = data();
+    d.yearEnd.profitLoss = -1655;
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).subject).toBe('B8 daily · 14 Sep · Target P/L: −$1,655');
   });
 
   it('counts both headline numbers before any of the detail that explains them', () => {
@@ -140,8 +155,7 @@ describe('the digest carries what the owner asked for', () => {
     // Four copies of one fact is four chances to state it differently.
     const d = data();
     d.uncategorized.totalCount = 7;
-    const { html, text, subject } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
-    expect(subject).toContain('7 to file');
+    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     expect(html).toContain('2 of 7 shown');
     expect(text).toContain('7 records need a category');
     // The counter card states it as a bare number in its own element, which a substring search for
@@ -293,9 +307,8 @@ describe('the empty cases still say something', () => {
   it('says the month is clear when nothing needs filing', () => {
     const d = data();
     d.uncategorized = { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 };
-    const { html, text, subject } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
+    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) expect(surface).toContain('every record this month is filed');
-    expect(subject).toContain('All filed');
   });
 
   it('says nothing about truncation when the whole list is on screen', () => {

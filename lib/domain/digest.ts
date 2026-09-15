@@ -633,17 +633,28 @@ function yearEndWidget(d: DigestData['yearEnd'], chartSrc: string): string {
 // ─── The message ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * Subject lines are read in a list, often on a lock screen, and truncated around 40 characters on
- * a phone. So the actionable count goes first and the date last — the reverse of how the body is
- * ordered, and deliberately: "b8 — 13 to file" survives truncation, "b8 daily digest for Sep 14"
- * does not survive it in any useful form.
+ * `B8 daily · 15 Sep · Target P/L: −$1,655`
+ *
+ * Identity, day, and the one figure the whole message is steering by — chosen by the owner, and a
+ * different division of labour from what was here before.
+ *
+ * WHAT LEFT: the count of records to file used to lead this line, on the reasoning that a subject
+ * is read in a list and truncated around forty characters on a phone, so the actionable number
+ * should survive the cut. That reasoning was right about subjects and wrong about this inbox, now
+ * that the message writes its own preheader: the line immediately after the subject already says
+ * "14 to file, 2 being watched". The subject says which mail this is and where the year is going;
+ * the preheader says what is waiting. Two lines, two jobs, no repetition.
+ *
+ * Day first, matching the masthead and unlike the transaction rows below, which are scanned as a
+ * column where the month is the part that repeats.
+ *
+ * The minus is the same U+2212 the body uses rather than a hyphen. Subjects are plain text, so
+ * nothing needs escaping here, and one message spelling a negative two ways is the kind of detail
+ * that reads as carelessness.
  */
 function subjectFor(data: DigestData): string {
-  const date = shortDate(`${data.asOf.year}-${String(data.asOf.month).padStart(2, '0')}-${String(data.asOf.day).padStart(2, '0')}`);
-  const { totalCount } = data.uncategorized;
-  const tail = `${round(data.yearEnd.profitLoss)} year end · ${date}`;
-  if (totalCount > 0) return `${totalCount} to file · ${tail}`;
-  return `All filed · ${tail}`;
+  const day = `${data.asOf.day} ${MONTH_LABELS[data.asOf.month - 1]}`;
+  return `B8 daily ${'\u00b7'} ${day} ${'\u00b7'} Target P/L: ${round(data.yearEnd.profitLoss)}`;
 }
 
 /**
