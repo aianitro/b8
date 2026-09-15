@@ -32,6 +32,7 @@
 
 import { createHash } from 'node:crypto';
 import { CHART_DISPLAY_HEIGHT, CHART_DISPLAY_WIDTH } from './digestChart';
+import { BUBBLES_DISPLAY_HEIGHT, BUBBLES_DISPLAY_WIDTH, type DigestBubble } from './digestBubbles';
 
 /** One transaction, in the only shape this module will render. Note what is absent: no account. */
 export interface DigestTxn {
@@ -108,6 +109,12 @@ export interface DigestData {
    * first of July, exactly when it stopped being fresh enough to remember unaided.
    */
   watchlist: WatchedItem[];
+
+  /**
+   * This month's budget categories, for the bubbles. Every category with an allocation, NOT just
+   * the scored ones — see `bubblesWidget` for why that distinction matters here.
+   */
+  bubbles: DigestBubble[];
 
   yearEnd: {
     /** Where the year closes if the rest of it goes to plan. */
@@ -277,6 +284,28 @@ function chart(src: string): string {
     `alt="Cumulative profit and loss for the year, with money in and money out by month." ` +
     `style="display:block;width:100%;max-width:${CHART_DISPLAY_WIDTH}px;height:auto;border:0"/>`
   );
+}
+
+/**
+ * The bubbles as text: the same categories, largest budget first, with what each has spent.
+ *
+ * A circle-packing has no character equivalent, so this does not attempt one. What it preserves is
+ * the ORDERING the picture encodes — biggest allocation first — and the verdict, spelled out in
+ * words because the plain part has no colour to carry it.
+ */
+function bubblesText(bubbles: DigestBubble[]): string[] {
+  const verdict = (b: DigestBubble): string => {
+    if (b.actual > b.budgeted) return 'already over';
+    if (b.tooEarly || b.projectedRatio === null) return 'too early to call';
+    if (b.projectedRatio > 1) return 'heading over';
+    return 'on plan';
+  };
+  const widest = Math.max(0, ...bubbles.map((b) => b.category.length));
+  return [...bubbles]
+    .sort((a, b) => b.budgeted - a.budgeted)
+    .map((b) =>
+      `  ${b.category.padEnd(Math.min(widest, 24))}  ${exact(b.actual).padStart(10)} of ${exact(b.budgeted).padStart(10)}  ${verdict(b)}`
+    );
 }
 
 /** The chart again, as characters, for the text part and for any client that refuses HTML. */
@@ -516,7 +545,36 @@ function yesterdayWidget(d: DigestData['yesterday']): string {
 }
 
 /**
- * Widget 4 — where the year closes, and the track it is on.
+ * Widget 4 — where this month's money is, and which parts of it are going wrong.
+ *
+ * Area is the budget and colour is the verdict, which is the pairing the dashboard's own bubbles
+ * exist for: a list sorted by overspend puts a $75 education line closing at 300% above a $1,900
+ * grocery line closing at 102%. True, and useless — the grocery line is where the money is.
+ *
+ * EVERY category with an allocation, not only the scored ones. The dashboard learned this the
+ * expensive way: drawn off the scored partition, the picture showed a household spending about
+ * $1,150 when the real figure was several times that, because groceries, fuel, property tax and
+ * utilities are most of a month by value and none of them is a monthly decision. The bubbles are a
+ * map, not a judgement, and a map that omits the largest territory is the wrong shape.
+ *
+ * The legend travels with the image. On a screen a reader can hover a bubble; in an email the
+ * colour is the only thing that says what it means.
+ */
+function bubblesWidget(bubbles: DigestBubble[], src: string): string {
+  if (bubbles.length === 0) return '';
+  return widget(
+    'This month',
+    `${bubbles.length} categories`,
+    `<img src="${src}" width="${BUBBLES_DISPLAY_WIDTH}" height="${BUBBLES_DISPLAY_HEIGHT}" ` +
+      `alt="Every budget category this month as a circle: area is the amount budgeted, colour is whether it is on plan." ` +
+      `style="display:block;width:100%;max-width:${BUBBLES_DISPLAY_WIDTH}px;height:auto;border:0"/>` +
+      `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:8px 0 0">` +
+      `Circle area is what the category was given this month.</div>`
+  );
+}
+
+/**
+ * Widget 5 — where the year closes, and the track it is on.
  *
  * The headline is the projected year-end P/L; the chart is the cumulative track that produces it,
  * so the reader can see whether the number comes from a steady climb or from one good month. Green
@@ -587,7 +645,7 @@ function subjectFor(data: DigestData): string {
  * mail client that shows it is a client the HTML failed in, and the failure mode of sending HTML
  * alone is a blank message rather than a plain one.
  */
-export function renderDigest(data: DigestData, chartSrc: string): DigestMessage {
+export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: string): DigestMessage {
   if (data.yearEnd.points.length !== 12) {
     throw new RangeError(`digest: the year-end track needs 12 points, got ${data.yearEnd.points.length}`);
   }
@@ -612,6 +670,7 @@ export function renderDigest(data: DigestData, chartSrc: string): DigestMessage 
     uncategorizedWidget(data.uncategorized) +
     watchlistWidget(data.watchlist) +
     yesterdayWidget(data.yesterday) +
+    bubblesWidget(data.bubbles, bubblesSrc) +
     yearEndWidget(data.yearEnd, chartSrc) +
     `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:2px 0 0;text-align:center">` +
     `Sent by b8 on this machine. Figures exclude uncategorized money.</div>` +
@@ -643,6 +702,13 @@ export function renderDigest(data: DigestData, chartSrc: string): DigestMessage 
     `YESTERDAY — ${shortDate(y.date)}`,
     y.rows.length === 0 ? '  No transactions posted.' : txnTableText(y.rows, true, false).join('\n'),
     '',
+    ...(data.bubbles.length > 0
+      ? [
+          `THIS MONTH`,
+          ...bubblesText(data.bubbles),
+          '',
+        ]
+      : []),
     `YEAR END`,
     `  ${round(ye.profitLoss)} projected, if the rest of the year goes to plan.`,
     `  ${round(ye.netToDate)} so far, settled.`,

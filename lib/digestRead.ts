@@ -1,5 +1,7 @@
 import db from './db';
 import { loadYearEnd } from './yearEndRead';
+import { loadMonthOutlook } from './monthOutlookRead';
+import { asOfFromDate } from './domain/monthOutlook';
 import type { DigestData, DigestTxn } from './domain/digest';
 
 /**
@@ -74,7 +76,7 @@ export async function loadDigest(now: Date): Promise<DigestData> {
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayIso = localIso(yesterday);
 
-  const [unfiled, unfiledTotals, posted, watching, yearEnd] = await Promise.all([
+  const [unfiled, unfiledTotals, posted, watching, monthRead, yearEnd] = await Promise.all([
     // Largest first — filing the biggest row moves every other figure in the email the most.
     // `ABS`, because a large uncategorized DEPOSIT distorts the year-end projection exactly as
     // hard as a large uncategorized payment does, and 2026-09-11 is the entry in this repo's
@@ -124,6 +126,10 @@ export async function loadDigest(now: Date): Promise<DigestData> {
        ORDER BY t.watched_at ASC, t.id
     `, []),
 
+    // The same read the dashboard's bubbles are built from, so a category cannot carry one figure
+    // on the screen and another in the mail.
+    loadMonthOutlook(asOfFromDate(now)),
+
     // Operational, matching the dashboard's own headline. Capital is a different question with a
     // different cadence and it is not what a daily digest is for.
     loadYearEnd('operational', { year, month }),
@@ -156,6 +162,20 @@ export async function loadDigest(now: Date): Promise<DigestData> {
       note: r.watch_note,
       daysOpen: Math.max(0, Number(r.days_open)),
     })),
+
+    // Scoped to the as-of month AND to categories with an allocation. `categoryPacing` emits one
+    // record per category PER MONTH — that is what lets an earlier month's breach be reported — so
+    // taking the array whole would draw a category once for every month it has a budget in. The
+    // dashboard hit exactly that: 28 circles over 21 categories.
+    bubbles: monthRead.allPaces
+      .filter((p) => p.month === month && p.budgeted > 0)
+      .map((p) => ({
+        category: p.category,
+        budgeted: p.budgeted,
+        actual: p.actual,
+        projectedRatio: p.projectedRatio,
+        tooEarly: p.status === 'too-early' || p.status === 'future' || p.status === 'no-budget',
+      })),
 
     yearEnd: {
       profitLoss: yearEnd.profitLoss,

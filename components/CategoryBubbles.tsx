@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { packCircles } from '@/lib/domain/bubblePack';
 import { STATUS_HEX } from '@/lib/chartColors';
+import { bubbleColor, NEUTRAL_HEX } from '@/lib/domain/bubbleStatus';
 
 export interface BubbleCategory {
   category: string;
@@ -19,27 +20,6 @@ export interface BubbleCategory {
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
-
-const NEUTRAL = '#cbd5e1'; // slate-300
-
-// Red is a FACT, amber is a FORECAST. The split matters more than the thresholds do: money already
-// spent past the line cannot be un-spent and is worth interrupting for, while a projection is a
-// claim about days that have not happened and can still be wrong — or acted on.
-//
-// Red is tested first and outranks everything, `tooEarly` included. Being over is observed, not
-// inferred, so a category with too little month to project from is still over if it has already
-// spent past its budget; deferring to "too early" there would grey out the one state that needs no
-// estimate at all.
-//
-// The 110% band the old rule used is gone. It graded a forecast by severity, which reads as
-// precision the projection does not have on day 11 — a category at 109% and one at 111% differ by
-// a rounding error in a run rate, not by anything the reader should treat differently.
-function bubbleColor(c: BubbleCategory): string {
-  if (c.actual > c.budgeted) return STATUS_HEX.over;
-  if (c.tooEarly || c.projectedRatio === null) return NEUTRAL;
-  if (c.projectedRatio > 1.0) return STATUS_HEX.watch;
-  return STATUS_HEX.good;
-}
 
 // Sized close to the width this actually renders at, so an SVG unit is roughly a CSS pixel and
 // the font sizes below mean what they say. At 680 the box was scaled up by about 1.7 and every
@@ -237,7 +217,7 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
           { c: STATUS_HEX.over, l: 'already over budget' },
           { c: STATUS_HEX.watch, l: 'heading over' },
           { c: STATUS_HEX.good, l: 'projects inside budget' },
-          { c: NEUTRAL, l: 'too early to call' },
+          { c: NEUTRAL_HEX, l: 'too early to call' },
         ].map(({ c, l }) => (
           <span key={l} className="flex items-center gap-1.5">
             <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: c }} />

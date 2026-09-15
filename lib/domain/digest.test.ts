@@ -3,6 +3,7 @@ import { renderDigest, digestFingerprint, esc, shortDate, type DigestData, type 
 
 /** What the sender passes. The fixtures use it so they assert the markup that actually ships. */
 const CHART_SRC = 'cid:b8-digest-chart';
+const BUBBLES_SRC = 'cid:b8-digest-bubbles';
 
 /** A complete, unremarkable digest. Each fixture below changes one thing about it. */
 function data(overrides: Partial<DigestData> = {}): DigestData {
@@ -29,6 +30,15 @@ function data(overrides: Partial<DigestData> = {}): DigestData {
     // OLDEST FIRST, which is the order lib/digestRead.ts produces (ORDER BY watched_at ASC) and
     // the order the widget depends on for its "oldest N days" rail. A fixture in the other order
     // would pass every assertion that does not look at position and hide the one that does.
+    // A month with one of each verdict, so the picture and its text fallback both have something
+    // to say about every colour.
+    bubbles: [
+      { category: 'Grocery', budgeted: 1900, actual: 1420, projectedRatio: 1.02, tooEarly: false },
+      { category: 'Education', budgeted: 75, actual: 96, projectedRatio: 3.0, tooEarly: false },
+      { category: 'Travel', budgeted: 400, actual: 40, projectedRatio: 0.4, tooEarly: false },
+      { category: 'Pets', budgeted: 120, actual: 0, projectedRatio: null, tooEarly: true },
+    ],
+
     watchlist: [
       { date: '2026-08-14', label: 'Charles Tyrwhitt', amount: 376.92, note: null, daysOpen: 31 },
       { date: '2026-09-11', label: 'Zara', amount: 120.17, note: 'returning to Zara', daysOpen: 3 },
@@ -63,7 +73,7 @@ function track(): DigestData['yearEnd']['points'] {
 
 describe('the digest carries what the owner asked for', () => {
   it('lists uncategorized transactions by merchant name and amount', () => {
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) {
       expect(surface).toContain('Lemonade Insurance');
       expect(surface).toContain('$1,525.42');
@@ -73,7 +83,7 @@ describe('the digest carries what the owner asked for', () => {
   it("reports the month's whole uncategorized population, not just the rows it lists", () => {
     // The listed rows are a sample of the largest. A reader who summed only what is on screen
     // would get a figure no other number in this email was computed from, so the totals are stated.
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) {
       expect(surface).toContain('14 record');
       expect(surface).toContain('$4,083.84');
@@ -82,7 +92,7 @@ describe('the digest carries what the owner asked for', () => {
   });
 
   it("lists yesterday's transactions with their categories, and flags the ones that have none", () => {
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) {
       expect(surface).toContain('Grocery');
       expect(surface).toContain('needs a category');
@@ -90,7 +100,7 @@ describe('the digest carries what the owner asked for', () => {
   });
 
   it('states the projected year-end profit and loss, and the settled figure beside it', () => {
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) {
       expect(surface).toContain('$1');
       expect(surface).toMatch(/\$27,091/);
@@ -101,7 +111,7 @@ describe('the digest carries what the owner asked for', () => {
     // The HTML chart is now a picture, so its months are asserted in `digestChart.test.ts` against
     // the SVG. What this file still owns is the TEXT part — which is not a courtesy: it is what a
     // reader sees in a client that refuses images, which most clients do by default.
-    const { text } = renderDigest(data(), CHART_SRC);
+    const { text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const month of ['Jan', 'Jun', 'Sep', 'Dec']) expect(text).toContain(month);
     // Settled and forecast must be distinguishable there too: colour is not a channel every reader
     // has, and the plain part has no colour at all.
@@ -111,11 +121,11 @@ describe('the digest carries what the owner asked for', () => {
   });
 
   it('leads the subject with the actionable count, where truncation cannot reach it', () => {
-    expect(renderDigest(data(), CHART_SRC).subject).toMatch(/^14 to file/);
+    expect(renderDigest(data(), CHART_SRC, BUBBLES_SRC).subject).toMatch(/^14 to file/);
   });
 
   it('counts both headline numbers before any of the detail that explains them', () => {
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) {
       expect(surface).toContain('14');
       expect(surface).toMatch(/need a category|records need a category/);
@@ -123,7 +133,7 @@ describe('the digest carries what the owner asked for', () => {
     }
     // Both counters must sit above the lists. An email read on a phone is read from the top, and
     // the whole reason these exist is to be the part that does not need scrolling to.
-    const { html: h } = renderDigest(data(), CHART_SRC);
+    const { html: h } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     expect(h.indexOf('need a category')).toBeLessThan(h.indexOf('Lemonade Insurance'));
   });
 
@@ -132,7 +142,7 @@ describe('the digest carries what the owner asked for', () => {
     // Four copies of one fact is four chances to state it differently.
     const d = data();
     d.uncategorized.totalCount = 7;
-    const { html, text, subject } = renderDigest(d, CHART_SRC);
+    const { html, text, subject } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     expect(subject).toContain('7 to file');
     expect(html).toContain('7 record');
     expect(text).toContain('7 records need a category');
@@ -145,7 +155,7 @@ describe('the digest carries what the owner asked for', () => {
     // `🤖-b8` used to lead the subject and head the body. It lives in Gmail now, applied by a
     // filter matching the `X-B8-Digest` header the sender sets — invisible to a reader, and not a
     // prefix to read past every morning before reaching the count.
-    const { html, text, subject } = renderDigest(data(), CHART_SRC);
+    const { html, text, subject } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text, subject]) expect(surface).not.toContain('🤖');
   });
 
@@ -155,8 +165,8 @@ describe('the digest carries what the owner asked for', () => {
     // Asserted on the amber BORDER, not the amber ink: the ink is also how an unfiled row is
     // flagged inside yesterday's list, which is a different statement and legitimately survives a
     // clear month. The border belongs only to the counter card and the totals box.
-    const busy = renderDigest(data(), CHART_SRC).html;
-    const clear = renderDigest({ ...data(), uncategorized: { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 } }, CHART_SRC).html;
+    const busy = renderDigest(data(), CHART_SRC, BUBBLES_SRC).html;
+    const clear = renderDigest({ ...data(), uncategorized: { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 } }, CHART_SRC, BUBBLES_SRC).html;
     expect(busy).toContain('#fde68a');
     expect(clear).not.toContain('#fde68a');
   });
@@ -164,7 +174,7 @@ describe('the digest carries what the owner asked for', () => {
 
 describe('the figures stay honest', () => {
   it('discloses the uncategorized money that every headline figure excludes', () => {
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) {
       expect(surface).toMatch(/\$2,504 of uncategorized money is excluded/);
     }
@@ -173,14 +183,14 @@ describe('the figures stay honest', () => {
   it('says nothing about excluded money when there is none to exclude', () => {
     const d = data();
     d.yearEnd.uncategorizedNet = 0;
-    const { html, text } = renderDigest(d, CHART_SRC);
+    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) expect(surface).not.toContain('is excluded from both figures');
   });
 
   it('renders a negative year-end projection as negative rather than as a bare magnitude', () => {
     const d = data();
     d.yearEnd.profitLoss = -8400;
-    const { html, text } = renderDigest(d, CHART_SRC);
+    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     expect(text).toContain('−$8,400');
     expect(html).toContain('&minus;$8,400');
   });
@@ -188,7 +198,7 @@ describe('the figures stay honest', () => {
   it('marks money in with a sign, not with colour alone', () => {
     // The brokerage credit is the row this rule exists for: rendered as a bare "$16,238.17" in
     // green it reads as the largest EXPENSE in the list to anyone who cannot see the colour.
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) expect(surface).toContain('+$16,238.17');
   });
 
@@ -205,7 +215,7 @@ describe('the figures stay honest', () => {
   it('refuses a year-end track that is not twelve months', () => {
     const d = data();
     d.yearEnd.points = track().slice(0, 11);
-    expect(() => renderDigest(d, CHART_SRC)).toThrow(RangeError);
+    expect(() => renderDigest(d, CHART_SRC, BUBBLES_SRC)).toThrow(RangeError);
   });
 });
 
@@ -217,12 +227,18 @@ describe('what may never appear in the rendered message', () => {
     // image reaches a host nobody chose and the request itself reports that the message was opened,
     // at what time, from what address. A `cid:` part is bytes already inside the envelope. Nothing
     // is fetched, and the message renders identically with the network unplugged.
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
 
     expect(html).toContain('src="cid:b8-digest-chart"');
-    // Exactly one image, and exactly one reference of any kind.
-    expect(html.match(/<img/gi)).toHaveLength(1);
-    expect(html.match(/src=/gi)).toHaveLength(1);
+    expect(html).toContain('src="cid:b8-digest-bubbles"');
+
+    // Two images, two references, and EVERY reference is a cid. Asserted as "every src matches"
+    // rather than as a count, so adding a third picture later cannot quietly introduce the one
+    // that reaches the network.
+    const sources = [...html.matchAll(/src="([^"]*)"/g)].map((m) => m[1]);
+    expect(sources).toHaveLength(2);
+    for (const src of sources) expect(src).toMatch(/^cid:/);
+    expect(html.match(/<img/gi)).toHaveLength(2);
 
     for (const surface of [html, text]) {
       expect(surface).not.toMatch(/https?:/i);
@@ -239,21 +255,21 @@ describe('what may never appear in the rendered message', () => {
   });
 
   it('gives the chart a text alternative, since many clients refuse images by default', () => {
-    const html = renderDigest(data(), CHART_SRC).html;
+    const html = renderDigest(data(), CHART_SRC, BUBBLES_SRC).html;
     expect(html).toMatch(/alt="[^"]{30,}"/);
   });
 
   it('sizes the image with attributes as well as CSS, for the clients that ignore CSS', () => {
     // Outlook renders a raster at its natural size when dimensions are given only in a style, and
     // this PNG is drawn at twice its display size to stay sharp on a phone.
-    const html = renderDigest(data(), CHART_SRC).html;
+    const html = renderDigest(data(), CHART_SRC, BUBBLES_SRC).html;
     expect(html).toMatch(/<img[^>]*width="560"[^>]*height="235"/);
   });
 
   it('escapes merchant names rather than letting a bank feed write markup', () => {
     const d = data();
     d.yesterday.rows = [{ date: '2026-09-13', label: '<b>AT&T</b> "Store"', amount: 40, category: null }];
-    const { html } = renderDigest(d, CHART_SRC);
+    const { html } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     expect(html).toContain('&lt;b&gt;AT&amp;T&lt;/b&gt;');
     expect(html).not.toContain('<b>AT&T</b>');
   });
@@ -261,7 +277,7 @@ describe('what may never appear in the rendered message', () => {
   it('escapes category names too, which the owner types by hand', () => {
     const d = data();
     d.yesterday.rows = [{ date: '2026-09-13', label: 'Safeway', amount: 30, category: 'Food & <Drink>' }];
-    expect(renderDigest(d, CHART_SRC).html).toContain('Food &amp; &lt;Drink&gt;');
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).html).toContain('Food &amp; &lt;Drink&gt;');
   });
 
   it('escapes the five characters that matter and leaves the rest alone', () => {
@@ -282,7 +298,7 @@ describe('the empty cases still say something', () => {
   it('says the month is clear when nothing needs filing', () => {
     const d = data();
     d.uncategorized = { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 };
-    const { html, text, subject } = renderDigest(d, CHART_SRC);
+    const { html, text, subject } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) expect(surface).toContain('every record this month is filed');
     expect(subject).toContain('All filed');
   });
@@ -290,7 +306,7 @@ describe('the empty cases still say something', () => {
   it('says a quiet day was quiet rather than rendering an empty table', () => {
     const d = data();
     d.yesterday = { date: '2026-09-13', rows: [], totalOut: 0, totalIn: 0 };
-    const { html, text } = renderDigest(d, CHART_SRC);
+    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) expect(surface).toContain('No transactions posted');
   });
 
@@ -300,8 +316,8 @@ describe('the empty cases still say something', () => {
       month: i + 1, income: 0, expense: 0, cumulative: 0, projected: true,
     }));
     d.yearEnd.profitLoss = 0;
-    expect(() => renderDigest(d, CHART_SRC)).not.toThrow();
-    expect(renderDigest(d, CHART_SRC).text).toContain('Dec');
+    expect(() => renderDigest(d, CHART_SRC, BUBBLES_SRC)).not.toThrow();
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).text).toContain('Dec');
   });
 });
 
@@ -309,12 +325,12 @@ describe('the fingerprint is what makes this a daily digest', () => {
   it('is the same for two renders of the same day, however much the figures moved', () => {
     // The point of filing the backlog is that the numbers move. A fingerprint over the CONTENT
     // would send a second digest on every filed transaction, which on a Monday is several.
-    const morning = renderDigest(data(), CHART_SRC);
+    const morning = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     const afternoon = renderDigest({
       ...data(),
       uncategorized: { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 },
       yearEnd: { ...data().yearEnd, profitLoss: -9999 },
-    }, CHART_SRC);
+    }, CHART_SRC, BUBBLES_SRC);
     expect(afternoon.fingerprint).toBe(morning.fingerprint);
     expect(afternoon.text).not.toBe(morning.text);
   });
@@ -330,7 +346,7 @@ describe('the fingerprint is what makes this a daily digest', () => {
   it('satisfies the shape alert_sends CHECKs on insert', () => {
     // `^[0-9a-f]{16,}$` — the CHECK is what makes "opaque" enforceable rather than intended. A
     // readable fingerprint would put the send date in a column that table keeps meaningless.
-    expect(renderDigest(data(), CHART_SRC).fingerprint).toMatch(/^[0-9a-f]{16,}$/);
+    expect(renderDigest(data(), CHART_SRC, BUBBLES_SRC).fingerprint).toMatch(/^[0-9a-f]{16,}$/);
   });
 
   it('is a whole sha256, which is what "opaque" means here', () => {
@@ -338,13 +354,13 @@ describe('the fingerprint is what makes this a daily digest', () => {
     // string turns up in a 64-character hex digest by chance often enough that such a test passes
     // for no reason and fails for no reason. What actually makes the value opaque is that it is
     // the full digest of material this module never puts in the row.
-    expect(renderDigest(data(), CHART_SRC).fingerprint).toHaveLength(64);
+    expect(renderDigest(data(), CHART_SRC, BUBBLES_SRC).fingerprint).toHaveLength(64);
   });
 });
 
 describe('the watchlist widget', () => {
   it('lists what is being watched, with the reason and the amount', () => {
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     // The plain part uses uppercase headings throughout, matching NEEDS A CATEGORY and YEAR END;
     // the HTML title is uppercased by CSS instead. Asserted per surface rather than by lowercasing
     // both, so a heading that quietly changed case in one of them would still be caught.
@@ -360,7 +376,7 @@ describe('the watchlist widget', () => {
   it('shows how long each entry has been open, because that is the number that changes', () => {
     // A watchlist that only says WHAT is on it becomes wallpaper: the same rows every morning until
     // the eye stops reading them. The age is the thing that should eventually feel wrong.
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) {
       expect(surface).toContain('31 days');
       expect(surface).toContain('3 days');
@@ -370,7 +386,7 @@ describe('the watchlist widget', () => {
   it('reports the OLDEST entry in the rail, reading it from the first row', () => {
     // The read layer orders by watched_at ascending, so the oldest is first. Taking the last row
     // instead would report the newest and always look reassuring.
-    expect(renderDigest(data(), CHART_SRC).html).toContain('oldest 31 days');
+    expect(renderDigest(data(), CHART_SRC, BUBBLES_SRC).html).toContain('oldest 31 days');
   });
 
   it('marks an entry stale past two weeks, and leaves a fresh one alone', () => {
@@ -378,23 +394,23 @@ describe('the watchlist widget', () => {
     d.watchlist = [{ date: '2026-09-11', label: 'Zara', amount: 120.17, note: 'returning', daysOpen: 3 }];
     // Amber ink is the stale treatment. Nothing here is an error, so it is never red — and a colour
     // that shouts on day fifteen has nothing left to say on day sixty.
-    expect(renderDigest(d, CHART_SRC).html).not.toContain('oldest');
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).html).not.toContain('oldest');
     d.watchlist = [{ date: '2026-08-14', label: 'Zara', amount: 120.17, note: 'returning', daysOpen: 14 }];
-    expect(renderDigest(d, CHART_SRC).html).toContain('oldest 14 days');
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).html).toContain('oldest 14 days');
   });
 
   it('says a flag has no reason rather than rendering an empty cell', () => {
-    const { html, text } = renderDigest(data(), CHART_SRC);
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
     for (const surface of [html, text]) expect(surface).toContain('no reason given');
   });
 
   it('singularises one day, and says today for one flagged this morning', () => {
     const d = data();
     d.watchlist = [{ date: '2026-09-13', label: 'Zara', amount: 12, note: null, daysOpen: 1 }];
-    expect(renderDigest(d, CHART_SRC).text).toContain('1 day');
-    expect(renderDigest(d, CHART_SRC).text).not.toContain('1 days');
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).text).toContain('1 day');
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).text).not.toContain('1 days');
     d.watchlist = [{ date: '2026-09-14', label: 'Zara', amount: 12, note: null, daysOpen: 0 }];
-    expect(renderDigest(d, CHART_SRC).text).toContain('today');
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).text).toContain('today');
   });
 
   it('disappears entirely when nothing is being watched', () => {
@@ -402,7 +418,7 @@ describe('the watchlist widget', () => {
     // the uncategorized widget, whose empty state is news, this one has nothing to report.
     const d = data();
     d.watchlist = [];
-    const { html, text } = renderDigest(d, CHART_SRC);
+    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     expect(html).not.toContain('Keeping an eye');
     expect(text).not.toContain('KEEPING AN EYE');
   });
@@ -410,8 +426,52 @@ describe('the watchlist widget', () => {
   it('escapes a note, which is free text the owner typed', () => {
     const d = data();
     d.watchlist = [{ date: '2026-09-11', label: 'Zara', amount: 12, note: '<b>call</b> & ask', daysOpen: 1 }];
-    const { html } = renderDigest(d, CHART_SRC);
+    const { html } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     expect(html).toContain('&lt;b&gt;call&lt;/b&gt; &amp; ask');
     expect(html).not.toContain('<b>call</b>');
+  });
+});
+
+describe('the bubbles widget', () => {
+  it('renders the picture, and the plain part says the same thing in words', () => {
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
+    expect(html).toContain('This month');
+    expect(html).toContain('src="cid:b8-digest-bubbles"');
+
+    // A circle-packing has no character equivalent, so the text part does not attempt one. What it
+    // must preserve is the verdict, which the picture carries in colour and the plain part cannot.
+    expect(text).toContain('THIS MONTH');
+    expect(text).toContain('already over');
+    expect(text).toContain('heading over');
+    expect(text).toContain('on plan');
+    expect(text).toContain('too early to call');
+  });
+
+  it('orders the text fallback by budget, which is what area encodes in the picture', () => {
+    // Grocery is the largest allocation and the smallest overspend; Education is the reverse. A
+    // list ordered by trouble would inverate them and lose the thing the bubbles exist to show.
+    const text = renderDigest(data(), CHART_SRC, BUBBLES_SRC).text;
+    expect(text.indexOf('Grocery')).toBeLessThan(text.indexOf('Education'));
+  });
+
+  it('gives the image a text alternative, since many clients refuse images by default', () => {
+    const html = renderDigest(data(), CHART_SRC, BUBBLES_SRC).html;
+    expect(html).toMatch(/alt="Every budget category[^"]{20,}"/);
+  });
+
+  it('disappears when no category has an allocation this month', () => {
+    const d = data();
+    d.bubbles = [];
+    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
+    expect(html).not.toContain('cid:b8-digest-bubbles');
+    expect(text).not.toContain('THIS MONTH');
+    // And the remaining image is still the chart, so the widget going away takes its picture with
+    // it rather than leaving a broken reference behind.
+    expect([...html.matchAll(/src="([^"]*)"/g)].map((m) => m[1])).toEqual(['cid:b8-digest-chart']);
+  });
+
+  it('sits above the year-end widget, where the owner asked for it', () => {
+    const html = renderDigest(data(), CHART_SRC, BUBBLES_SRC).html;
+    expect(html.indexOf('This month')).toBeLessThan(html.indexOf('Year end'));
   });
 });
