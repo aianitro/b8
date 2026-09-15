@@ -177,24 +177,16 @@ const AMBER_INK = '#92400e';
 const AMBER_BG = '#fffbeb';
 const AMBER_RULE = '#fde68a';
 
+/** Heading accents. Amber where there is work, slate where there is a record, blue for the map. */
+const AMBER_MARK = '#f59e0b';
+const SLATE_MARK = '#cbd5e1';
+const BLUE_MARK = '#3b82f6';
+
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace";
 
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/**
- * What this mail calls itself in its own body. Plain, and deliberately not the Gmail label.
- *
- * `🤖-b8` briefly lived here and in the subject line. It has moved OUT of the message and into
- * Gmail, where a label belongs: a label is something the mailbox puts on a message, not something
- * the message says about itself. Printed in the subject it was a prefix the owner had to read past
- * every day to reach the count, and printed in the body it was a second name for the app directly
- * above the app's name.
- *
- * What makes the Gmail filter possible is the `X-B8-Digest` header the sender sets, plus the fixed
- * From address — neither of which is body text and neither of which a reader has to look at.
- */
-const WORDMARK = 'b8';
 
 // ─── Formatting ───────────────────────────────────────────────────────────────────────────────
 
@@ -321,15 +313,32 @@ function chartText(points: YearEndPoint[]): string[] {
 // ─── Widget shell ─────────────────────────────────────────────────────────────────────────────
 
 /** One card: a heading, an optional right-aligned figure, and a body. */
-function widget(title: string, rightRail: string, body: string): string {
+/**
+ * One card: an accent, a heading, an optional right-aligned figure, and a body.
+ *
+ * ─── The accent is navigation, not decoration ─────────────────────────────────────────────────
+ *
+ * Five cards of identical weight is a wall. A 3px colour chip before each heading gives the eye
+ * something to count down and ties the card to what it is about — amber where there is work,
+ * slate where there is only a record, the chart's own green where the year is. Scrolling back to
+ * "the amber one" is a different motion from re-reading five headings.
+ *
+ * A chip rather than a left border on the card: a coloured border down the whole card reads as a
+ * severity banner, and four of these five are not severe. Rendered as a table cell with a width,
+ * because an inline-block with a background is the first thing Outlook drops.
+ */
+function widget(title: string, rightRail: string, body: string, accent: string = FAINT): string {
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ` +
     `style="background-color:${PAPER};border:1px solid ${RULE};border-radius:10px;margin:0 0 16px">` +
     `<tr><td style="padding:18px 20px 20px">` +
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">` +
     `<tr>` +
+    `<td width="14" valign="middle" style="padding:0 8px 0 0;font-size:0;line-height:0">` +
+    `<div style="width:6px;height:6px;background-color:${accent};border-radius:2px;font-size:0;line-height:0">&nbsp;</div>` +
+    `</td>` +
     `<td style="font-family:${FONT};font-size:11px;font-weight:600;letter-spacing:.07em;` +
-    `text-transform:uppercase;color:${FAINT}">${title}</td>` +
+    `text-transform:uppercase;color:${MUTED}">${title}</td>` +
     `<td align="right" style="font-family:${FONT};font-size:11px;color:${FAINT}">${rightRail}</td>` +
     `</tr></table>` +
     `<div style="height:12px;font-size:0;line-height:0">&nbsp;</div>` +
@@ -448,7 +457,7 @@ function counters(data: DigestData): string {
  */
 function uncategorizedWidget(d: DigestData['uncategorized']): string {
   if (d.totalCount === 0) {
-    return widget('Needs a category', '', emptyState('Nothing outstanding — every record this month is filed.'));
+    return widget('Needs a category', '', emptyState(`Nothing outstanding ${MDASH} every record this month is filed.`), GREEN);
   }
 
   const shown = d.rows.length;
@@ -460,7 +469,7 @@ function uncategorizedWidget(d: DigestData['uncategorized']): string {
   // protecting against is a reader summing a TRUNCATED list and getting a figure nothing else was
   // computed from; the rail above still says "8 of 14 shown", which states the truncation without
   // restating the arithmetic.
-  return widget('Needs a category', rail, txnTable(d.rows, false));
+  return widget('Needs a category', rail, txnTable(d.rows, false), AMBER_MARK);
 }
 
 /**
@@ -510,7 +519,10 @@ function watchlistWidget(items: WatchedItem[]): string {
     rail,
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">` +
       items.map((item, i) => row(item, i === items.length - 1)).join('') +
-      `</table>`
+      `</table>`,
+    // Amber only when something has gone stale. A permanently amber card is a card the eye stops
+    // reading, and the whole point of this one is the day it changes.
+    oldest >= 14 ? AMBER_MARK : SLATE_MARK
   );
 }
 
@@ -528,7 +540,7 @@ function watchlistText(items: WatchedItem[]): string[] {
 function yesterdayWidget(d: DigestData['yesterday']): string {
   const day = esc(shortDate(d.date));
   if (d.rows.length === 0) {
-    return widget('Yesterday', day, emptyState('No transactions posted.'));
+    return widget('Yesterday', day, emptyState('No transactions posted.'), SLATE_MARK);
   }
 
   const net = d.totalOut - d.totalIn;
@@ -536,7 +548,7 @@ function yesterdayWidget(d: DigestData['yesterday']): string {
     `${day} ${MIDDOT} ${d.rows.length} record${d.rows.length === 1 ? '' : 's'} ${MIDDOT} ` +
     `<span style="color:${net > 0 ? INK : GREEN};font-weight:600">${net > 0 ? '' : '+'}${exact(net)}</span> net`;
 
-  return widget('Yesterday', rail, txnTable(d.rows, true, false));
+  return widget('Yesterday', rail, txnTable(d.rows, true, false), SLATE_MARK);
 }
 
 /**
@@ -564,7 +576,8 @@ function bubblesWidget(bubbles: DigestBubble[], src: string): string {
       `alt="Every budget category this month as a circle: area is the amount budgeted, colour is whether it is on plan." ` +
       `style="display:block;width:100%;max-width:${BUBBLES_DISPLAY_WIDTH}px;height:auto;border:0"/>` +
       `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:8px 0 0">` +
-      `Circle area is what the category was given this month.</div>`
+      `Circle area is what the category was given this month.</div>`,
+    BLUE_MARK
   );
 }
 
@@ -611,7 +624,9 @@ function yearEndWidget(d: DigestData['yearEnd'], chartSrc: string): string {
     // `widget` would double-escape the entities the rails deliberately contain.
     'Profit &amp; Loss',
     '',
-    headline + `<div style="height:18px;font-size:0;line-height:0">&nbsp;</div>` + chart(chartSrc) + legend
+    headline + `<div style="height:18px;font-size:0;line-height:0">&nbsp;</div>` + chart(chartSrc) + legend,
+    // The verdict's own colour, matching the headline figure directly beneath it.
+    positive ? GREEN : RED
   );
 }
 
@@ -643,12 +658,67 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
     throw new RangeError(`digest: the year-end track needs 12 points, got ${data.yearEnd.points.length}`);
   }
 
+  const u = data.uncategorized;
+  const y = data.yesterday;
+  const ye = data.yearEnd;
+
+  const dateLine = `${esc(shortDate(`${data.asOf.year}-${String(data.asOf.month).padStart(2, '0')}-${String(data.asOf.day).padStart(2, '0')}`))}, ${data.asOf.year}`;
+
+  /**
+   * THE PREHEADER — the line the inbox shows after the subject, and until now nobody wrote it.
+   *
+   * Every mail client takes the first text in the body when no preheader is supplied. This message
+   * begins with its own wordmark, so the inbox has been reading: "b8 1 record needs a category 4
+   * transactions yesterday". That is the markup leaking into the one line of the message a reader
+   * sees before deciding whether to open it.
+   *
+   * Hidden by the combination that actually works: zero font size AND zero line height AND
+   * `display:none` AND white-on-white. No single one of them is honoured everywhere — Gmail
+   * respects display:none, some clients do not, and the colour is what saves those. The trailing
+   * run of zero-width non-joiners is the standard trick to stop the client back-filling the rest
+   * of the preview with whatever text comes next.
+   */
+  const preheaderText =
+    u.totalCount > 0
+      ? `${u.totalCount} to file${data.watchlist.length > 0 ? `, ${data.watchlist.length} being watched` : ''}. ` +
+        `${roundHtml(ye.profitLoss)} projected at year end.`
+      : `Everything filed. ${roundHtml(ye.profitLoss)} projected at year end.`;
+
+  const preheader =
+    `<div style="display:none;font-size:0;line-height:0;max-height:0;max-width:0;opacity:0;overflow:hidden;` +
+    `mso-hide:all;color:${SHELL}">${preheaderText}` +
+    '&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;&#8204;' +
+    `</div>`;
+
+  /**
+   * The masthead: a drawn mark, the wordmark, and the date.
+   *
+   * The mark is a rounded square with the letter in it, built from a table cell with a background
+   * colour — not an image. An image would have to be a second `cid:` part on every send for a
+   * 28-pixel square, and it would be blocked by default in the clients that block images, which is
+   * exactly where a masthead most needs to survive.
+   *
+   * A hairline under the whole row, so the header reads as a header rather than as the first item
+   * in the list.
+   */
   const header =
-    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 16px">` +
-    `<tr><td style="font-family:${FONT};font-size:13px;font-weight:600;color:${INK}">${WORDMARK}</td>` +
-    `<td align="right" style="font-family:${FONT};font-size:12px;color:${FAINT}">` +
-    `${esc(shortDate(`${data.asOf.year}-${String(data.asOf.month).padStart(2, '0')}-${String(data.asOf.day).padStart(2, '0')}`))}, ${data.asOf.year}` +
-    `</td></tr></table>`;
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 18px">` +
+    `<tr>` +
+    `<td width="28" valign="middle" style="padding:0 10px 0 0">` +
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="28" style="width:28px">` +
+    `<tr><td align="center" valign="middle" height="28" style="height:28px;background-color:${INK};` +
+    `border-radius:7px;font-family:${FONT};font-size:13px;font-weight:700;color:#ffffff;` +
+    `line-height:28px">b8</td></tr></table>` +
+    `</td>` +
+    `<td valign="middle" style="font-family:${FONT};font-size:14px;font-weight:600;color:${INK};line-height:1.2">` +
+    `Daily digest` +
+    `<div style="font-family:${FONT};font-size:11px;font-weight:400;color:${FAINT};padding:2px 0 0">` +
+    `${dateLine}</div>` +
+    `</td>` +
+    `</tr>` +
+    `<tr><td colspan="2" style="padding:14px 0 0;font-size:0;line-height:0">` +
+    `<div style="height:1px;background-color:${RULE};font-size:0;line-height:0">&nbsp;</div></td></tr>` +
+    `</table>`;
 
   const html =
     // `background-color` on the body table rather than on <body>: several clients drop or rewrite a
@@ -656,6 +726,7 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ` +
     `style="background-color:${SHELL};margin:0;padding:0">` +
     `<tr><td align="center" style="padding:24px 12px">` +
+    preheader +
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px">` +
     `<tr><td>` +
     header +
@@ -668,10 +739,6 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
     `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:2px 0 0;text-align:center">` +
     `Sent by b8 on this machine. Figures exclude uncategorized money.</div>` +
     `</td></tr></table></td></tr></table>`;
-
-  const u = data.uncategorized;
-  const y = data.yesterday;
-  const ye = data.yearEnd;
 
   const text = [
     `b8`,
