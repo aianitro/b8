@@ -13,6 +13,7 @@ import AlertBell from '@/components/AlertBell';
 import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbles';
 import RecentArrivals from '@/components/RecentArrivals';
 import WatchlistCard from '@/components/WatchlistCard';
+import BudgetBar from '@/components/BudgetBar';
 import { loadFeedHealth } from '@/lib/feedHealthRead';
 import { loadWatchlist } from '@/lib/watchlistRead';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
@@ -657,7 +658,7 @@ export default async function DashboardPage() {
           to sit here counted the current month as fully elapsed — 33% of the year on 1 April
           against a true 25% — which inflated expected spend and flattered the pace. It is deleted
           rather than repaired: the per-category month above is the figure the page exists for. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         {/* The same figure /budget's header carries, from the same reader — where the operational
             year closes if the plan holds. It leads the row because it is the only one of these
             four that is a target rather than a count. */}
@@ -671,11 +672,27 @@ export default async function DashboardPage() {
           highlight={yearEnd.profitLoss < 0 ? 'red' : 'green'}
           href="/budget"
         />
-        <KpiCard label="Annual Budget" value={fmt(stats.budget)} />
+        {/* ONE CARD WHERE THERE WERE TWO. "Annual Budget" was a constant — it changes when the
+            owner edits a category and never otherwise — and "Remaining" was that constant minus a
+            number shown nowhere on this row. Side by side they asked the reader to subtract two
+            large figures to find the one they came for, and the target took a quarter of the row
+            to say something that does not move.
+
+            The headline is what is LEFT, because that is the figure anyone acts on. The target and
+            the spend become the line under it, where they are context rather than competition, and
+            the bar turns the pair into a ratio neither card could show alone.
+
+            NO YEAR-ELAPSED MARKER on the track, deliberately. Spending 60% of an annual plan by
+            mid-September means something quite different from spending it by March, so a marker
+            would help — but this page already answers pacing twice, in the bubbles and in Projected
+            P/L, and both are computed per category per month. A third answer on an annual basis
+            would disagree with them in exactly the months that matter. */}
         <KpiCard
-          label="Remaining"
+          label="Budget remaining"
           value={fmt(stats.remaining)}
           highlight={stats.remaining < 0 ? 'red' : 'green'}
+          sub={`${fmt(stats.spent)} spent of ${fmt(stats.budget)}`}
+          footer={<BudgetBar spent={stats.spent} budget={stats.budget} />}
         />
         {/* The count alone. A percentage of 1,476 transactions rounds to 0% at one unfiled row and
             still at six, so the card used to read "0%" in amber while there was work waiting.
