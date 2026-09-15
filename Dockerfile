@@ -25,6 +25,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
+# MUST be set explicitly. Next's standalone `server.js` uses `process.env.HOSTNAME` as its BIND
+# ADDRESS, and Docker automatically sets HOSTNAME to the container id — so without this line the
+# server binds to the container's own name and nothing else, which was measured: from inside the
+# container `http://127.0.0.1:3000` was refused while `http://<container-id>:3000` answered. Port
+# publishing still worked, so the fault was invisible from the host; a health check or a sidecar
+# talking to loopback would have found it the hard way.
+ENV HOSTNAME=0.0.0.0
 # Deliberately 0.0.0.0, not the 127.0.0.1 the bare `next start -H 127.0.0.1` script uses —
 # Docker's port publishing connects from outside the container's network namespace, so a
 # loopback-only bind here would make the app unreachable even from the host. The

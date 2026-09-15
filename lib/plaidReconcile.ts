@@ -33,7 +33,7 @@ export interface ReconcileResult {
 }
 
 export async function reconcileAccountIds(accessToken: string): Promise<ReconcileResult> {
-  const live = await plaidClient.accountsGet({ access_token: accessToken });
+  const live = await plaidClient().accountsGet({ access_token: accessToken });
 
   const { rows: dbAccounts } = await db.query<DbAccountRow>(
     'SELECT id, name, mask, subtype, persistent_account_id FROM accounts WHERE access_token = $1',

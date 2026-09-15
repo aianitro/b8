@@ -8,7 +8,7 @@ const log = createLogger('create-link-token');
 
 export async function POST(_req: NextRequest) {
   try {
-    const response = await plaidClient.linkTokenCreate({
+    const response = await plaidClient().linkTokenCreate({
       user: { client_user_id: 'local-user' },
       client_name: 'B8 Finance',
       products: [Products.Transactions],

@@ -39,7 +39,7 @@ async function syncItem(
   const unmatchedAccountIds = new Set<string>();
 
   while (hasMore) {
-    const res = await plaidClient.transactionsSync({
+    const res = await plaidClient().transactionsSync({
       access_token: accessToken,
       cursor: currentCursor,
       options: { include_personal_finance_category: true },
@@ -178,7 +178,7 @@ async function syncItem(
   let itemOk: string | null = null;
   let itemFailed: string | null = null;
   try {
-    const { data } = await plaidClient.itemGet({ access_token: accessToken });
+    const { data } = await plaidClient().itemGet({ access_token: accessToken });
     itemOk = data.status?.transactions?.last_successful_update ?? null;
     itemFailed = data.status?.transactions?.last_failed_update ?? null;
   } catch (err) {
@@ -296,7 +296,7 @@ async function runSyncInner({
   if (force) {
     await Promise.allSettled(
       entries.map(([token]) =>
-        plaidClient.transactionsRefresh({ access_token: token }).catch((e) => {
+        plaidClient().transactionsRefresh({ access_token: token }).catch((e) => {
           log.warn('refresh warning', { error: e?.message });
         })
       )
