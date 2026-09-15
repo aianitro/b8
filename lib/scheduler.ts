@@ -1,6 +1,6 @@
 import { runSync } from './sync';
-import { writeNetWorthSnapshot } from './netWorth';
 import { runDailyDigest } from './dailyDigest';
+import { writeNetWorthSnapshot } from './netWorth';
 import { createLogger } from './logger';
 
 const log = createLogger('scheduler');
@@ -56,6 +56,30 @@ async function runAndLog() {
   // THIS REPLACED `runBreachAlert`, which the owner read and called "not informative, not
   // actionable". The guardrail modules are still in the tree and still tested; nothing schedules
   // them. Two emails a day from one app is one email a day that gets filtered.
+  //
+  // ─── THIS TIMER HOLDS THE CODE IT WAS BORN WITH, AND THAT HAS ALREADY COST A SEND ──────────
+  //
+  // On 2026-09-15 the 06:00 digest went out in the previous evening's template — no bubbles widget,
+  // and wording the owner had already had changed. Nothing was wrong with the code, which was
+  // correct and committed hours earlier. What was wrong is WHEN it was read.
+  //
+  // `instrumentation.ts` runs once at server boot and registers the interval below. Every import
+  // reachable from this file is resolved at that moment, so the timer's closure holds the module
+  // graph as the process found it at startup. Next's hot reload swaps modules for incoming HTTP
+  // REQUESTS; it does not reach inside a timer registered before the change. The dev server had
+  // started at 16:50 and the bubbles landed at 17:03, so the timer spent the night holding a build
+  // from thirteen minutes before the feature existed.
+  //
+  // A LAZY `await import('./dailyDigest')` HERE DOES NOT FIX IT, and that is measured rather than
+  // assumed: a probe module dynamically imported from a boot-registered interval kept returning its
+  // boot-time value for a minute after the file on disk had changed. Next's module cache for this
+  // context is not invalidated by the edit. Do not re-attempt that fix.
+  //
+  // What actually works, in order of durability:
+  //   1. Restart the dev server after changing anything the digest renders. Manual, and the only
+  //      thing available today.
+  //   2. Phase 2 step 20's OS cron, which starts a process per run and therefore cannot hold a
+  //      stale anything. That is the cure, and this is now a reason to bring it forward.
   await runDailyDigest();
 }
 
