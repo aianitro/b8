@@ -479,3 +479,79 @@ describe('the bubbles widget', () => {
     expect(html.indexOf('This month')).toBeLessThan(html.indexOf('Profit &amp; Loss'));
   });
 });
+
+describe('the message as a piece of mail, not just a page', () => {
+  it('writes its own preheader, so the inbox preview is not the markup leaking out', () => {
+    // With no preheader every client takes the first text in the body. This message opens with its
+    // own masthead, so the inbox was reading "b8 Daily digest Sep 15…" — the chrome, in the one
+    // line a reader sees before deciding whether to open it.
+    const { html } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
+    const preheader = /<div style="display:none;[^"]*"[^>]*>([^<]*)/.exec(html);
+    expect(preheader).not.toBeNull();
+    expect(preheader![1]).toContain('14 to file');
+    expect(preheader![1]).toContain('2 being watched');
+
+    // It must come before the visible masthead, or it is not a preheader.
+    expect(html.indexOf('display:none')).toBeLessThan(html.indexOf('Daily digest'));
+  });
+
+  it('hides the preheader by four means, because no one of them is honoured everywhere', () => {
+    const html = renderDigest(data(), CHART_SRC, BUBBLES_SRC).html;
+    const block = /<div style="(display:none;[^"]*)"/.exec(html)![1];
+    for (const rule of ['display:none', 'font-size:0', 'line-height:0', 'mso-hide:all']) {
+      expect(block).toContain(rule);
+    }
+    // And white-on-white for the clients that honour none of them.
+    expect(block).toContain('color:#f3f4f6');
+  });
+
+  it('says everything is filed when it is, rather than reading as an empty alarm', () => {
+    const d = data();
+    d.uncategorized = { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 };
+    const preheader = /<div style="display:none;[^"]*"[^>]*>([^<]*)/.exec(renderDigest(d, CHART_SRC, BUBBLES_SRC).html)![1];
+    expect(preheader).toContain('Everything filed');
+    expect(preheader).not.toContain('to file');
+  });
+
+  it('draws its mark rather than fetching one', () => {
+    // A 28-pixel logo as a second cid part would be blocked by default in exactly the clients that
+    // block images, which is where a masthead most needs to survive.
+    const html = renderDigest(data(), CHART_SRC, BUBBLES_SRC).html;
+    expect(html).toContain('Daily digest');
+    expect(html).toMatch(/border-radius:7px;[^"]*font-weight:700/);
+    // Still only the two chart images, still both cid.
+    expect(html.match(/<img/gi)).toHaveLength(2);
+  });
+
+  it('emits no raw non-ASCII of its own, whatever the charset does', () => {
+    // THIS KEEPS COMING BACK. Three times now a typographic character has gone into the HTML raw —
+    // an em dash, a minus sign — and rendered as "â€\"" the moment a server declined to declare a
+    // charset. Fixing instances has not worked, so this is the control: the fixture's own strings
+    // are pure ASCII, so any non-ASCII in the output can only have come from this module's
+    // literals, and every one of those should be an entity.
+    //
+    // Merchant names and notes are exempt by construction rather than by rule — they ride the
+    // declared charset because there is no finite set of characters to encode there.
+    const { html } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
+    const stray = [...html].filter((ch) => ch.charCodeAt(0) > 126);
+    expect(stray).toEqual([]);
+  });
+
+  it('keeps the plain part readable with real typography, which needs no escaping', () => {
+    // The text part is not HTML and is sent as UTF-8, so an em dash there is just an em dash.
+    expect(renderDigest(data(), CHART_SRC, BUBBLES_SRC).text).toContain('—');
+  });
+
+  it('gives each card a heading accent, and amber only where there is work', () => {
+    const busy = renderDigest(data(), CHART_SRC, BUBBLES_SRC).html;
+    expect(busy).toContain('#f59e0b');  // needs a category, and a stale watch entry
+    expect(busy).toContain('#3b82f6');  // this month
+    expect(busy).toContain('#cbd5e1');  // yesterday — a record, not a task
+
+    const clear = data();
+    clear.uncategorized = { rows: [], totalCount: 0, totalOut: 0, totalIn: 0 };
+    clear.watchlist = [];
+    // With nothing outstanding the amber chip is gone; the filed card takes the on-plan green.
+    expect(renderDigest(clear, CHART_SRC, BUBBLES_SRC).html).not.toContain('#f59e0b');
+  });
+});
