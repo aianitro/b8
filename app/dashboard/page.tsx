@@ -12,7 +12,9 @@ import FeedHealthCard from '@/components/FeedHealthCard';
 import AlertBell from '@/components/AlertBell';
 import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbles';
 import RecentArrivals from '@/components/RecentArrivals';
+import WatchlistCard from '@/components/WatchlistCard';
 import { loadFeedHealth } from '@/lib/feedHealthRead';
+import { loadWatchlist } from '@/lib/watchlistRead';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
@@ -453,11 +455,14 @@ export default async function DashboardPage() {
   const driftPromise = findBalanceDrift();
   const feedPromise = loadFeedHealth();
   const [stats, monthRead, todayStats, weekStats, monthly, budgetVsActual,
-         recentArrivals, yearEnd] =
+         recentArrivals, watchlist, yearEnd] =
     await Promise.all([
       getStats(asOf), loadMonthOutlook(asOf),
       getTodayStats(), getWeekStats(), getMonthlySpending(asOf),
       getBudgetVsActual(asOf), getRecentArrivals(),
+      // In this batch rather than awaited after it: one indexed read over a partial index that
+      // covers only the flagged rows, so it adds no serial round trip to page load.
+      loadWatchlist(),
       // Operational, matching /budget's default tab, so the two pages show the same figure. The
       // capital year is lumpy by construction — a remodel draws $40,000 in May — and averaging it
       // in would give a P/L nobody is steering by.
@@ -566,6 +571,16 @@ export default async function DashboardPage() {
           each is, and what everything around them is doing — the same finding with the evidence
           attached. */}
       <CategoryBubbles categories={bubbleCategories} />
+
+      {/* Directly under the bubbles, and above the feed. The bubbles and the arrivals are both
+          things the app computed; this is the one thing on the page the owner put here themselves,
+          and a pending return is a claim that one of those figures is provisional — it should be
+          read in the same breath as the picture it qualifies.
+
+          Rendered only when there is something on it. Unlike the arrivals feed, whose emptiness is
+          news, an empty watchlist says only that nothing has been flagged, and a permanent card
+          reading "nothing to watch" is furniture under the page's main picture. */}
+      {watchlist.length > 0 && <WatchlistCard items={watchlist} />}
 
       {/* Under the bubbles: they say which categories carry the money, this says what is new
           since the reader last looked. */}
