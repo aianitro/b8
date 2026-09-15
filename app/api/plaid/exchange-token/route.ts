@@ -18,12 +18,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const exchangeRes = await plaidClient.itemPublicTokenExchange({ public_token });
+    const exchangeRes = await plaidClient().itemPublicTokenExchange({ public_token });
     const { access_token } = exchangeRes.data;
 
     const [accountsRes, itemRes] = await Promise.all([
-      plaidClient.accountsGet({ access_token }),
-      plaidClient.itemGet({ access_token }),
+      plaidClient().accountsGet({ access_token }),
+      plaidClient().itemGet({ access_token }),
     ]);
     const accounts = accountsRes.data.accounts;
     const institutionId = itemRes.data.item.institution_id;
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     let bankName: string | null = null;
     if (institutionId) {
       try {
-        const instRes = await plaidClient.institutionsGetById({
+        const instRes = await plaidClient().institutionsGetById({
           institution_id: institutionId,
           country_codes: [CountryCode.Us],
         });

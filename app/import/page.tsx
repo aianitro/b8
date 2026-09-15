@@ -1,3 +1,8 @@
+// Live data, so never prerendered. Its siblings all carry this line; these three did not, and
+// the gap was invisible until `next build` ran without a database and tried to statically
+// generate them. Nothing about the page was wrong — the missing declaration was.
+export const dynamic = 'force-dynamic';
+
 import db from '@/lib/db';
 import CsvImporter from '@/components/CsvImporter';
 
