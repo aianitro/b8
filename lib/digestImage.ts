@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { renderChartSvg, type ChartPoint } from './domain/digestChart';
+import { renderBubblesSvg, type DigestBubble } from './domain/digestBubbles';
 
 /**
  * The chart, rasterised — the one step in the digest that is not pure, and the only one that needs
@@ -39,3 +40,11 @@ export async function renderChartPng(points: ChartPoint[]): Promise<Buffer> {
  * id have to be the same string or the image silently does not appear.
  */
 export const CHART_CID = 'b8-digest-chart';
+
+/** The category bubbles, rasterised on the same terms and for the same reasons as the chart. */
+export async function renderBubblesPng(categories: DigestBubble[]): Promise<Buffer> {
+  return sharp(Buffer.from(renderBubblesSvg(categories), 'utf8')).png({ compressionLevel: 9 }).toBuffer();
+}
+
+/** Its own Content-ID. Two parts, two ids — one id for two images shows the first one twice. */
+export const BUBBLES_CID = 'b8-digest-bubbles';
