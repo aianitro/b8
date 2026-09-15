@@ -656,23 +656,17 @@ export default async function DashboardPage() {
       {/* Charts */}
       <div className="space-y-6">
         <ProfitLossChart data={plSeries} />
-        {/* The donut lost the pair it sat beside when Cash Flow went. Full width rather than half
-            a row with white space next to it — the operational book has fourteen categories and
-            the legend was the cramped half of that layout anyway. */}
-        {/* One widget where there were two. The donut said how big each category is and nothing
-            about whether it is on plan; the budget-vs-actual bars said whether it is on plan and
-            drew a $378 line the same length as a $29,000 one. */}
-        <BudgetTracks rows={budgetVsActual} yearElapsed={yearElapsed} />
-
         {/* Two shorter horizons. They used to sit directly under the month's verdict, on the
             grounds that they are the same question at a different scale — but that put a $47 day
             three lines below the year's projected P/L, and a reader scanning down met the smallest
             horizon before the charts that explain the largest.
 
-            Below the P/L chart the order reads longest to shortest: where the year closes, then
-            the month category by category, then the week, then today. Each one is the previous one
-            zoomed in, and the two that move most are last, where checking them again later costs
-            no scrolling past anything.
+            Between the two charts, the page reads longest horizon to shortest and then back out:
+            where the year closes, then this week and today, then the year category by category.
+            The P/L chart above ends on the current month, so these two continue it inward at the
+            same scale rather than interrupting it — and the category track below is a different
+            question, per category rather than per horizon, which makes it the natural place to
+            stop rather than a step in the sequence.
 
             Still a pair, still side by side: today only means something against the week. */}
         <div className="grid grid-cols-2 gap-4">
@@ -726,6 +720,14 @@ export default async function DashboardPage() {
             }
           />
         </div>
+
+        {/* The donut lost the pair it sat beside when Cash Flow went. Full width rather than half
+            a row with white space next to it — the operational book has fourteen categories and
+            the legend was the cramped half of that layout anyway. */}
+        {/* One widget where there were two. The donut said how big each category is and nothing
+            about whether it is on plan; the budget-vs-actual bars said whether it is on plan and
+            drew a $378 line the same length as a $29,000 one. */}
+        <BudgetTracks rows={budgetVsActual} yearElapsed={yearElapsed} />
       </div>
     </div>
   );
