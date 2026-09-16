@@ -3,19 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -H 127.0.0.1",
     "build": "next build",
-    "start": "next start -H 127.0.0.1",
-    "lint": "eslint",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "migrate:up": "node-pg-migrate up --envPath .env.local",
-    "seed:demo": "node scripts/seed-demo.mjs",
-    "migrate:down": "node-pg-migrate down --envPath .env.local",
-    "migrate:create": "node-pg-migrate create -j sql",
-    "docker:up": "docker compose --env-file .env.local up --build",
+    "dev": "next dev -H 127.0.0.1",
     "docker:down": "docker compose down",
-    "prepare": "husky"
+    "docker:up": "docker compose --env-file .env.local up --build",
+    "job:daily": "tsx --env-file=.env.local scripts/daily-job.ts",
+    "lint": "eslint",
+    "migrate:create": "node-pg-migrate create -j sql",
+    "migrate:down": "node-pg-migrate down --envPath .env.local",
+    "migrate:up": "node-pg-migrate up --envPath .env.local",
+    "prepare": "husky",
+    "seed:demo": "node scripts/seed-demo.mjs",
+    "start": "next start -H 127.0.0.1",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.107.0",
@@ -46,6 +47,7 @@
     "husky": "^9.1.7",
     "node-pg-migrate": "^9.0.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

@@ -133,16 +133,55 @@ first one. Your laptop's credential lives in the laptop's database, so:
 
 ---
 
+---
+
+## The daily job, and why it is not the server's to run
+
+**Fixed 2026-09-16, after the stale digest went out twice.**
+
+The job — Plaid sync, net worth snapshot, digest — used to run on a timer registered inside the Next
+server at boot. That timer's closure holds the module graph from the moment the server started, so
+any code change afterwards is invisible to it. It sent a stale template on two consecutive mornings
+while the correct code sat committed on disk, and "remember to restart the server" failed both times.
+
+A process started per run has no such window. So:
+
+```bash
+npm run job:daily          # the whole job, once, then exits
+```
+
+On this laptop, launchd owns the schedule:
+
+```bash
+./ops/install-daily-job.sh
+echo 'SCHEDULER_IN_PROCESS=false' >> .env.local   # or the job runs twice
+```
+
+**Both halves are required.** Installing the agent without setting `SCHEDULER_IN_PROCESS=false`
+means two syncs a day; setting it without installing the agent means none at all. The in-process
+timer defaults to ON precisely so that forgetting the second half is loud rather than silent.
+
+**On the server, run it in the container**, not on the host — the host has no Node and no
+dependencies:
+
+```
+0 6 * * *  cd /path/to/b8 && docker compose run --rm migrate npm run job:daily
+```
+
+The `migrate` service is the right target: it builds from the `builder` stage, which keeps the
+devDependencies (`tsx` among them) that the pruned runtime image deliberately drops.
+
+---
+
 ## What this step does NOT give you
 
-- **No backups.** That is step 20, and it is the next thing to do. The dumps in `../` are from
-  31 August and July; everything categorised since is unprotected.
+- **No backups.** That is the rest of step 20, and it is the next thing to do. The dumps in `../`
+  are from 31 August and July; everything categorised since is unprotected.
 - **No process supervision beyond `restart: unless-stopped`.** If the machine reboots, Docker
   restarts the containers; if the app crashes in a loop, nothing tells you.
-- **A stale-code hazard remains.** The daily digest is sent by a timer registered at server boot,
-  which holds the module graph from that moment — it already sent one evening-old email. Step 20's
-  OS cron is the fix, and running in a container does not solve it, because the container is also a
-  long-lived process.
+- **launchd only runs while the machine is awake and logged in.** It will run a missed job shortly
+  after wake, which the in-process timer never did, but a laptop closed all day still misses that
+  day. The always-on server is the fix for that, not this.
 
 ---
 

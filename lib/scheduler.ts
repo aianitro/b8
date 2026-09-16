@@ -14,7 +14,14 @@ function msUntilNextRun(hour: number): number {
   return next.getTime() - Date.now();
 }
 
-async function runAndLog() {
+/**
+ * The whole daily job: sync, snapshot, digest. Exported so a PROCESS can be the scheduler.
+ *
+ * `scripts/daily-job.ts` calls exactly this and exits, which is what `npm run job:daily` and the
+ * OS timer run. The in-process timer below calls the same function, so there is one definition of
+ * "the daily job" and not two that drift.
+ */
+export async function runDailyJob() {
   try {
     // Plain sync first, so its transaction count reflects only what Plaid's own
     // background refresh already had cached — then force refresh right after, so its
@@ -87,7 +94,30 @@ async function runAndLog() {
 // If the laptop is asleep or the server isn't running at the scheduled hour, that
 // day's run is skipped; the next sync (scheduled or manual) picks up from wherever
 // the cursor + reconciliation left off, so nothing is lost, just delayed.
+/**
+ * Registers the in-process daily timer — unless an OS timer has taken over.
+ *
+ * ─── THIS TIMER HAS SHIPPED THE WRONG EMAIL TWICE ─────────────────────────────────────────────
+ *
+ * On 2026-09-15 and again on 09-16 the 06:00 digest went out in a template that was hours or days
+ * out of date, while the code on disk had been correct and committed the whole time. The cause is
+ * structural and is documented at the call site below: this timer is registered at server boot and
+ * its closure holds the module graph as the process found it then. Next's hot reload swaps modules
+ * for HTTP requests and never reaches inside a timer. Restarting the server fixes it exactly until
+ * the next edit, which is why "remember to restart" failed twice.
+ *
+ * `SCHEDULER_IN_PROCESS=false` turns this off so an OS timer can own the job instead. A new process
+ * per run cannot hold stale anything — that is the entire fix, and it is Phase 2 step 20.
+ *
+ * DEFAULT IS ON. A default of off would mean that anyone who has not installed the OS timer
+ * silently gets no sync, no snapshot and no mail, which is a worse failure than a stale template
+ * because nothing arrives to look wrong.
+ */
 export function startDailySyncScheduler(hour = 6) {
+  if (process.env.SCHEDULER_IN_PROCESS === 'false') {
+    log.info('in-process scheduler disabled; an OS timer is expected to run the daily job');
+    return;
+  }
   if (started) return; // guard against duplicate timers across hot-reloads
   started = true;
 
@@ -95,7 +125,7 @@ export function startDailySyncScheduler(hour = 6) {
   log.info('daily Plaid sync scheduled', { hour, firstRunInMin: Math.round(delay / 60000) });
 
   setTimeout(() => {
-    runAndLog();
-    setInterval(runAndLog, DAILY_MS);
+    void runDailyJob();
+    setInterval(() => void runDailyJob(), DAILY_MS);
   }, delay);
 }
