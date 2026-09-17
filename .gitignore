@@ -46,3 +46,8 @@ ROADMAP.md
 # kept local — internal design working docs, not part of the shipped app
 DASHBOARD-UX-REVIEW.md
 ops/daily-job.log
+
+# Duplicates the folder sync keeps creating ("route 2.ts"). They are byte-identical copies
+# that were committed once by accident; under app/api each one is a second route file.
+*[0-9].ts
+*[0-9].tsx
