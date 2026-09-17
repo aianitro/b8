@@ -59,7 +59,7 @@ function DeleteButton({ transactionId }: { transactionId: number }) {
 
   async function doDelete() {
     setBusy(true);
-    await fetch(`/api/transactions/${transactionId}`, { method: 'DELETE' });
+    await fetch(`/api/v1/transactions/${transactionId}`, { method: 'DELETE' });
     router.refresh();
   }
 
@@ -169,7 +169,7 @@ function DuplicateButton({ transaction, accounts, categories }: {
     }
     setBusy(true);
     setError(null);
-    const res = await fetch('/api/transactions', {
+    const res = await fetch('/api/v1/transactions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -336,7 +336,7 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
   async function send(nextWatched: boolean, watch_note: string | null) {
     setBusy(true);
     setError(null);
-    const res = await fetch(`/api/transactions/${transaction.id}`, {
+    const res = await fetch(`/api/v1/transactions/${transaction.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ watched: nextWatched, watch_note }),
@@ -450,7 +450,7 @@ function HideToggleButton({ transactionId, hidden }: { transactionId: number; hi
 
   async function toggle() {
     setBusy(true);
-    await fetch(`/api/transactions/${transactionId}`, {
+    await fetch(`/api/v1/transactions/${transactionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hidden: !hidden }),
@@ -556,7 +556,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
       ids.map((id) => [id, transactions.find((t) => t.id === id)?.mapped_category ?? null])
     );
     startTransition(async () => {
-      const res = await fetch('/api/transactions/bulk', {
+      const res = await fetch('/api/v1/transactions/bulk', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, mapped_category: category }),
@@ -581,7 +581,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
     const propertyId = bulkProperty === '__clear__' ? null : Number(bulkProperty);
     const ids = Array.from(selected);
     startTransition(async () => {
-      const res = await fetch('/api/transactions/bulk', {
+      const res = await fetch('/api/v1/transactions/bulk', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, property_id: propertyId }),
@@ -603,7 +603,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
     startTransition(async () => {
       await Promise.all(
         Array.from(prevById.entries()).map(([id, prevCategory]) =>
-          fetch(`/api/transactions/${id}`, {
+          fetch(`/api/v1/transactions/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mapped_category: prevCategory }),
@@ -617,7 +617,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
   function pairAsTransfer() {
     const ids = Array.from(selected);
     startTransition(async () => {
-      const res = await fetch('/api/transfers', {
+      const res = await fetch('/api/v1/transfers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids }),

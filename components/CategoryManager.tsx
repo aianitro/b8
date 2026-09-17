@@ -307,7 +307,7 @@ export default function CategoryManager({ categories, accounts }: Props) {
     }
     setSaving(true);
     setError(null);
-    const res = await fetch('/api/categories', {
+    const res = await fetch('/api/v1/categories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -331,7 +331,7 @@ export default function CategoryManager({ categories, accounts }: Props) {
   }
 
   async function handleDelete(id: number) {
-    await fetch('/api/categories', {
+    await fetch('/api/v1/categories', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
@@ -340,7 +340,7 @@ export default function CategoryManager({ categories, accounts }: Props) {
   }
 
   async function toggleIncome(id: number, current: boolean) {
-    await fetch('/api/categories', {
+    await fetch('/api/v1/categories', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, is_income: !current }),
@@ -357,7 +357,7 @@ export default function CategoryManager({ categories, accounts }: Props) {
   async function saveBudget(id: number) {
     const amount = parseFloat(editingBudgetValue);
     if (isNaN(amount) || amount < 0) { setEditingBudgetId(null); return; }
-    const res = await fetch('/api/categories', {
+    const res = await fetch('/api/v1/categories', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, annual_budget: amount }),
@@ -377,7 +377,7 @@ export default function CategoryManager({ categories, accounts }: Props) {
   async function saveControlMode(id: number, mode: ControlMode) {
     setControlModeErrorId(null);
     setControlModeError(null);
-    const res = await fetch('/api/categories', {
+    const res = await fetch('/api/v1/categories', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, control_mode: mode }),
@@ -392,7 +392,7 @@ export default function CategoryManager({ categories, accounts }: Props) {
   }
 
   async function setDedicatedAccount(id: number, accountId: string | null) {
-    await fetch('/api/categories', {
+    await fetch('/api/v1/categories', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, dedicated_account_id: accountId }),
@@ -401,7 +401,7 @@ export default function CategoryManager({ categories, accounts }: Props) {
   }
 
   async function saveMonthlyAmounts(id: number, amounts: number[] | null) {
-    await fetch('/api/categories', {
+    await fetch('/api/v1/categories', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, monthly_amounts: amounts }),

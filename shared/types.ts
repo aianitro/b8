@@ -134,7 +134,7 @@ export interface BudgetSummary {
   monthly_reference: number;
 }
 
-/** One account as returned by POST /api/plaid/exchange-token, for accounts genuinely new to
+/** One account as returned by POST /api/v1/plaid/exchange-token, for accounts genuinely new to
  *  this app (not a reconnect) — enough for AccountClassifyModal to prompt a valuation type. */
 export interface LinkedAccountSummary {
   id: string;

@@ -17,7 +17,7 @@ export default function TransferLinkButton({ transactionId, groupId, peerLabel, 
 
   async function doUnlink() {
     setBusy(true);
-    await fetch('/api/transfers', {
+    await fetch('/api/v1/transfers', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: transactionId }),

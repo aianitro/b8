@@ -4,7 +4,7 @@
 // below comes from two places and two only: the union in `shared/types.ts`, and the CHECK
 // constraint in `db/schema.sql` that the comment on each schema names. It does not come from
 // `lib/categoryControl.ts`'s `CONTROL_MODES` (which lists the same three values in a different,
-// UI-facing order — least discretion to most), nor from what `POST`/`PATCH /api/categories`
+// UI-facing order — least discretion to most), nor from what `POST`/`PATCH /api/v1/categories`
 // currently accepts. All of those agree today; the rule exists for the day they stop, because a
 // schema derived from the route would ratify the route's omission as the specification, and
 // `control_mode` has already been unwritable through the API once for exactly that reason.

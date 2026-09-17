@@ -16,7 +16,7 @@ export default function AccountDeleteButton({ accountId, accountName }: Props) {
 
   async function doDelete() {
     setBusy(true);
-    const res = await fetch(`/api/accounts/${accountId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/v1/accounts/${accountId}`, { method: 'DELETE' });
     const data = await res.json();
     setBusy(false);
     if (!data.success) {

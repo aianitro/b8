@@ -6,7 +6,7 @@ import type { ApiResponse, TenantFundKind } from '@/shared/types';
 const KINDS: TenantFundKind[] = ['security_deposit', 'last_month_rent'];
 
 // Appends a manual reading of the tenant money this property currently holds, mirroring
-// app/api/properties/[id]/valuation/route.ts: always INSERT, never upsert. property_tenant_funds
+// app/api/v1/properties/[id]/valuation/route.ts: always INSERT, never upsert. property_tenant_funds
 // is an observation history, so raising a deposit at lease renewal — or applying last month's
 // rent down to $0 — is a new reading, and the previous figure stays on the record rather than
 // being overwritten. "Currently held" is then the newest row, derived on read.

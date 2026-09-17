@@ -46,7 +46,7 @@ export default function AccountValuationEdit({ accountId, current, isLiability }
 
     setEditing(false);
     setError(null);
-    const res = await fetch(`/api/accounts/${accountId}/valuation`, {
+    const res = await fetch(`/api/v1/accounts/${accountId}/valuation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ value: parsed }),

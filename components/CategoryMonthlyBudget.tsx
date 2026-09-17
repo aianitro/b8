@@ -38,7 +38,7 @@ export default function CategoryMonthlyBudget({
   const hasSchedule = Boolean(monthlyAmounts);
 
   async function saveMonthlyAmounts(amounts: number[] | null) {
-    await fetch('/api/categories', {
+    await fetch('/api/v1/categories', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: categoryId, monthly_amounts: amounts }),

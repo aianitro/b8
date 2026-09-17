@@ -65,7 +65,7 @@ export default function DriftAlertCard({ findings }: { findings: DriftFinding[] 
 
   async function reconcile(accountIds: string[]) {
     setBusy(true); setError(null);
-    const res = await fetch('/api/accounts/reconcile', {
+    const res = await fetch('/api/v1/accounts/reconcile', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ accountIds }),

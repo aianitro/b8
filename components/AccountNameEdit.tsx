@@ -26,7 +26,7 @@ export default function AccountNameEdit({ accountId, current }: Props) {
   async function save() {
     if (!value.trim()) { setError(true); return; }
     setEditing(false);
-    await fetch(`/api/accounts/${accountId}`, {
+    await fetch(`/api/v1/accounts/${accountId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: value.trim() }),

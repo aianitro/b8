@@ -35,7 +35,7 @@ export default function PropertyLinkedAccounts({ propertyId, accounts }: Props) 
 
   async function toggle(account: LinkableAccount) {
     setBusyId(account.id);
-    await fetch(`/api/accounts/${account.id}`, {
+    await fetch(`/api/v1/accounts/${account.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ property_id: account.linked ? null : propertyId }),

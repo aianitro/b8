@@ -29,7 +29,7 @@ export default function CategoryNameEdit({ id, name }: Props) {
     const trimmed = input.trim();
     if (!trimmed || trimmed === name) { cancel(); return; }
     setSaving(true);
-    await fetch('/api/categories', {
+    await fetch('/api/v1/categories', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, name: trimmed }),

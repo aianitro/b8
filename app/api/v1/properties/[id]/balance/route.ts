@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import type { ApiResponse } from '@/shared/types';
 
-// Deliberately the same shape as /api/accounts/[id]/balance — a property's opening cash
+// Deliberately the same shape as /api/v1/accounts/[id]/balance — a property's opening cash
 // position is the same concept as an account's, keyed by property instead. Upsert on
 // (property_id, year) so re-entering the figure corrects it rather than failing.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

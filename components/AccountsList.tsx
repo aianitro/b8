@@ -77,7 +77,7 @@ export default function AccountsList({ operational, capital, txnCounts, valuatio
       next.splice(toIdx, 0, moved);
 
       const items = next.map((a, i) => ({ id: a.id, sort_order: i }));
-      fetch('/api/accounts/reorder', {
+      fetch('/api/v1/accounts/reorder', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(items),

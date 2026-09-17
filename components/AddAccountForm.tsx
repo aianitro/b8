@@ -43,7 +43,7 @@ export default function AddAccountForm() {
     setSaving(true); setError(null);
     const chosen = ACCOUNT_TYPES.find((t) => t.subtype === typeKey || t.type === typeKey) ?? ACCOUNT_TYPES[0];
     try {
-      const res = await fetch('/api/accounts', {
+      const res = await fetch('/api/v1/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

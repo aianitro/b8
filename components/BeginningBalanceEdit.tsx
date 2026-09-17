@@ -28,7 +28,7 @@ export default function BeginningBalanceEdit({ value, year, landscape }: Props) 
     const num = parseFloat(input.replace(/,/g, ''));
     if (isNaN(num)) { cancel(); return; }
     setSaving(true);
-    await fetch('/api/budget/settings', {
+    await fetch('/api/v1/budget/settings', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ beginning_balance: num, landscape }),

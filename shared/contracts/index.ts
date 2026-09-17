@@ -31,7 +31,7 @@
 // branch has no type parameter and is therefore closed and complete, while its success branch is
 // generic over twelve payloads and is a factory a call site pins. See envelope.ts.
 //
-// WHAT IS NOT HERE. No per-route request/response DTO — `POST /api/accounts`'s ad hoc body, for
+// WHAT IS NOT HERE. No per-route request/response DTO — `POST /api/v1/accounts`'s ad hoc body, for
 // instance, is not an export of shared/types.ts, and enumerating those belongs to the route
 // migration this task excludes. No schema validates anything yet either: nothing under app/ imports
 // this directory, by design, so adopting these is a separate, reviewable change.

@@ -36,7 +36,7 @@ async function getProperties(): Promise<Property[]> {
 }
 
 // Liability, valuation-mode accounts are the only ones a mortgage link makes sense for — see
-// the note on PATCH /api/accounts/[id]'s property_id handling for why that scoping lives here
+// the note on PATCH /api/v1/accounts/[id]'s property_id handling for why that scoping lives here
 // rather than as a DB constraint (step 9's per-property P&L will want other account types
 // linked too, via the same nullable FK).
 async function getMortgageAccounts(): Promise<MortgageAccount[]> {

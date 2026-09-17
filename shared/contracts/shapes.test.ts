@@ -40,7 +40,7 @@ function issuePathsOf(schema: z.ZodType, value: unknown): string[] {
   return result.success ? [] : result.error.issues.map((issue) => issue.path.join('.'));
 }
 
-/** A `budget_categories` row exactly as `GET /api/categories` puts it on the wire. */
+/** A `budget_categories` row exactly as `GET /api/v1/categories` puts it on the wire. */
 const budgetCategoryWireRow = {
   id: 7,
   name: 'Groceries',
@@ -58,7 +58,7 @@ const budgetCategoryWireRow = {
 const monthlySchedule = [80, 80, 100, 100, 100, 100, 120, 120, 100, 100, 100, 100];
 
 describe('BudgetCategorySchema', () => {
-  it('a BudgetCategory row exactly as Postgres and the existing GET /api/categories handler produce it, with annual_budget as the numeric string 1200.00 rather than a JS number, parses successfully', () => {
+  it('a BudgetCategory row exactly as Postgres and the existing GET /api/v1/categories handler produce it, with annual_budget as the numeric string 1200.00 rather than a JS number, parses successfully', () => {
     const parsed = BudgetCategorySchema.parse(budgetCategoryWireRow);
 
     // The flagship claim, in both halves. The string parses and survives untouched — the schema is
