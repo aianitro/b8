@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { ALLOWED_HOSTNAMES } from './hostGuard';
-import { EXPECTED_ORIGINS, EXPECTED_RP_IDS, expectedOriginsFrom, relyingPartyIdsFrom } from './webauthnOrigins';
+import { EXPECTED_ORIGINS, EXPECTED_RP_IDS, expectedOriginsFrom, relyingPartyIdsFrom, relyingPartyIdFor, PRIMARY_RP_ID } from './webauthnOrigins';
 
 /** Every identifier appearing anywhere in a TypeScript source file. */
 function identifiersIn(file: string): Set<string> {
@@ -85,5 +85,39 @@ describe('the WebAuthn relying-party configuration', () => {
     // above cannot be passing because it parsed nothing.
     expect(identifiersIn('lib/webauthnOrigins.ts').has('EXPECTED_ORIGINS')).toBe(true);
     expect(identifiersIn('lib/webauthnVerify.ts').has('expectedOrigin')).toBe(true);
+  });
+});
+
+describe('relyingPartyIdFor — which relying party the options name', () => {
+  it('names the tailnet host when the page was served there', () => {
+    // The bug this exists for: options naming `localhost` on a page at https://<machine>.ts.net are
+    // refused by the browser before the server sees anything.
+    expect(relyingPartyIdFor('b8.tailnet.ts.net')).toBe('b8.tailnet.ts.net');
+  });
+
+  it('ignores the port and the case, as a Host header comparison should', () => {
+    expect(relyingPartyIdFor('localhost:3000')).toBe('localhost');
+    expect(relyingPartyIdFor('B8.Tailnet.TS.NET:443')).toBe('b8.tailnet.ts.net');
+  });
+
+  it('NEVER returns a host that is not in the fixed set, however the header is forged', () => {
+    // The rule that rpID never comes from the request is kept by selection, not by copying: a
+    // forged header can only choose among names this server already answers to.
+    for (const forged of ['evil.example.com', 'b8.tailnet.ts.net.evil.com', 'ts.net', 'localhost.evil', '']) {
+      const chosen = relyingPartyIdFor(forged);
+      expect(EXPECTED_RP_IDS).toContain(chosen);
+      expect(chosen).not.toBe(forged.toLowerCase());
+    }
+  });
+
+  it('falls back for IP-literal hosts, which are allowlisted but cannot be relying parties', () => {
+    for (const ip of ['127.0.0.1:3000', '[::1]:3000', '0.0.0.0']) {
+      expect(relyingPartyIdFor(ip)).toBe(PRIMARY_RP_ID);
+    }
+  });
+
+  it('falls back when there is no Host header at all', () => {
+    expect(relyingPartyIdFor(null)).toBe(PRIMARY_RP_ID);
+    expect(relyingPartyIdFor(undefined)).toBe(PRIMARY_RP_ID);
   });
 });

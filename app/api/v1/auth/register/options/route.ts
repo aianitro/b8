@@ -19,7 +19,7 @@ import { rememberChallenge } from '@/lib/webauthnChallenge';
 import {
   OWNER_USER_HANDLE,
   OWNER_USER_NAME,
-  PRIMARY_RP_ID,
+  relyingPartyIdFor,
   RELYING_PARTY_NAME,
 } from '@/lib/webauthnOrigins';
 import { RegistrationCeremonyOptionsSchema } from '@/shared/contracts/auth';
@@ -46,7 +46,7 @@ export const POST = withEnvelope(async (request: NextRequest) => {
     // FROM THE SERVER'S FIXED CONFIGURATION, never from `request.headers.get('host')`. The schema
     // below requires the field, so an omission fails here rather than becoming a silently different
     // relying party — but only this line can ensure the value did not come from the request.
-    rpID: PRIMARY_RP_ID,
+    rpID: relyingPartyIdFor(request.headers.get('host')),
     userName: OWNER_USER_NAME,
     // The stable owner handle. Regenerating it per ceremony would make every registration look like
     // a new user to the authenticator, so a platform authenticator would quietly create a second

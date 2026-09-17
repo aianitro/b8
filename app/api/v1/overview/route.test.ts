@@ -138,10 +138,12 @@ describe('GET /api/v1/overview, against a seeded scratch database', () => {
     const parsed = OverviewResponseSchema.parse(body);
     expect(parsed.success).toBe(true);
 
-    // Eleven sections, all present, none optional.
+    // Fourteen sections, all present, none optional. Eleven at P1-11; P1-11a added
+    // `monthCategories`, `watchlist` and `jobHealth`, which the dashboard could not be fed without.
     expect(Object.keys(payload).sort()).toEqual([
-      'asOf', 'budgetVsActual', 'driftFindings', 'feedHealth', 'monthOutlook', 'monthlySpending',
-      'recentArrivals', 'stats', 'today', 'week', 'yearEnd',
+      'asOf', 'budgetVsActual', 'driftFindings', 'feedHealth', 'jobHealth', 'monthCategories',
+      'monthOutlook', 'monthlySpending', 'recentArrivals', 'stats', 'today', 'watchlist', 'week',
+      'yearEnd',
     ].sort());
 
     // The one clock read, reaching both places that state it.

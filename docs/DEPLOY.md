@@ -86,20 +86,25 @@ sudo tailscale up
 
 Note the MagicDNS name it prints — something like `b8-server.tailnet-name.ts.net`.
 
-### 5. Put that name in the host allowlist
+### 5. Put that name in the server's `.env.local`
 
-`lib/hostGuard.ts` has:
-
-```ts
-export const TAILNET_HOSTNAME = 'b8.tailnet.ts.net';
+```
+B8_TAILNET_HOSTNAME=<your-magicdns-name>
 ```
 
-Replace it with your real MagicDNS name. **This is deliberately one constant and not an environment
-variable**: `lib/webauthnOrigins.ts` derives the WebAuthn expected-origin set from the allowlist
-rather than copying it, so changing this literal moves both lists at once. A passkey registered
-against the wrong origin will not work and the failure is opaque.
+The trailing dot `tailscale status` prints is fine; it is stripped.
 
-Rebuild after changing it.
+This used to be a hard-coded constant in `lib/hostGuard.ts`. It moved to the environment on
+2026-09-17 because the real name carries the owner's machine name and tailnet id, and the repo is
+public. **The derivation is unchanged:** the host allowlist and the WebAuthn origins are both still
+computed from this one value, so setting it moves both at once.
+
+The app also picks the passkey relying-party id per request now — the tailnet name when the page was
+served there, `localhost` otherwise — always from that fixed set and never from the raw header. A
+browser refuses a ceremony whose relying party is not the page's own domain, so without this every
+sign-in over the tailnet would fail before reaching the server.
+
+Restart the web service after changing it.
 
 ### 6. Serve it over Tailscale, with TLS
 
