@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The daily job as a system LaunchDaemon, for the same reason as the web and database services: a
+  user agent would not run on a morning after a power cut until somebody logged in at the screen.
+
+  RunAtLoad is false, so installing it does not fire a Plaid sync and an email on the spot. launchd
+  runs a StartCalendarInterval job that was missed while the machine was asleep shortly after wake;
+  this machine never sleeps, so the case that remains is a power cut across 06:00, which the
+  dashboard's job-health card reports.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.b8.daily</string>
+  <key>UserName</key><string>__USER__</string>
+  <key>ProgramArguments</key>
+  <array><string>__APP__/ops/server/daily.sh</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>HOME</key><string>__HOME__</string></dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer></dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>__HOME__/b8-logs/daily.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/b8-logs/daily.log</string>
+</dict>
+</plist>

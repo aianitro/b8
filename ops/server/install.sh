@@ -13,7 +13,7 @@ APP="$USER_HOME/b8"
 
 sudo -u "$USER_NAME" mkdir -p "$USER_HOME/b8-logs"
 
-for svc in postgres web; do
+for svc in postgres web daily; do
   target="/Library/LaunchDaemons/com.b8.$svc.plist"
   sed -e "s|__USER__|$USER_NAME|g" -e "s|__HOME__|$USER_HOME|g" -e "s|__APP__|$APP|g" \
     "$APP/ops/server/com.b8.$svc.plist" > "$target"
@@ -25,5 +25,5 @@ done
 
 echo
 echo "logs:   $USER_HOME/b8-logs/"
-echo "remove: sudo launchctl bootout system/com.b8.web; sudo launchctl bootout system/com.b8.postgres"
-echo "        sudo rm /Library/LaunchDaemons/com.b8.web.plist /Library/LaunchDaemons/com.b8.postgres.plist"
+echo "remove: sudo launchctl bootout system/com.b8.daily; sudo launchctl bootout system/com.b8.web; sudo launchctl bootout system/com.b8.postgres"
+echo "        sudo rm /Library/LaunchDaemons/com.b8.daily.plist /Library/LaunchDaemons/com.b8.web.plist /Library/LaunchDaemons/com.b8.postgres.plist"
