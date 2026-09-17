@@ -25,16 +25,28 @@
  * every tailnet the moment one of them is in DNS, which is the shape of relaxation that reads
  * as a one-line convenience in review.
  *
- * IT IS A PLACEHOLDER FOR A REAL NAME, stated plainly because a hostname that does not exist
- * yet cannot be tested against a live tailnet. ROADMAP.md §5 Phase 2 step 19 is what binds the
- * interface; until it runs, nothing reaches this server over the tailnet at all and this entry
- * admits nobody. When that step lands, THIS CONSTANT IS THE ONE PLACE TO CHANGE: the WebAuthn
- * expected-origin set in `lib/webauthnOrigins.ts` is derived from the allowlist below rather
- * than copied from it, so replacing this literal moves both lists at once. That derivation is
- * the point — SPEC.md names "the WebAuthn origin set hand-copied from the host allowlist" as a
- * failure that passes today and drifts the next time either changes.
+ * READ FROM THE ENVIRONMENT, WITH A PLACEHOLDER DEFAULT — changed 2026-09-17, when the home server
+ * joined a real tailnet. This was a hard-coded literal with a comment calling it "the one place to
+ * change", and that reasoning was about DERIVATION: the WebAuthn origin set is computed from the
+ * allowlist below rather than copied from it, so one value moves both. Reading the value from
+ * `B8_TAILNET_HOSTNAME` keeps that property exactly — it is still one value, and both lists are
+ * still derived from it. What changed is where the value lives. The real name is
+ * `<machine>.<tailnet-id>.ts.net`; the machine part carries the owner's surname and the repo is
+ * public, so it belongs in `.env.local`, not in git.
+ *
+ * The placeholder stays the default, so every machine without the variable — the laptop, CI, the
+ * test suite — behaves exactly as before, and the tests that assert the literal still mean
+ * something.
+ *
+ * Normalised: lowercased, and the trailing dot `tailscale status` prints is dropped, because a
+ * browser's Host header never carries one and a set lookup is an exact comparison.
+ *
+ * Read at module load and NEVER THROWS. This repo has been bitten twice by environment validated at
+ * module scope killing `next build`; an absent value here is not an error, it is the placeholder.
  */
-export const TAILNET_HOSTNAME = 'b8.tailnet.ts.net';
+export const TAILNET_HOSTNAME = (process.env.B8_TAILNET_HOSTNAME?.trim() || 'b8.tailnet.ts.net')
+  .toLowerCase()
+  .replace(/\.$/, '');
 
 /**
  * Every hostname this server will answer to, exactly.

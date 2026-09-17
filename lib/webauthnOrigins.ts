@@ -130,10 +130,37 @@ export const EXPECTED_ORIGINS: readonly string[] = expectedOriginsFrom(ALLOWED_H
  * The relying-party id the server PUTS IN the options it issues.
  *
  * One value has to be chosen at issue time — `rp.id` is a single string in the ceremony options —
- * whereas verification accepts the whole set. `localhost` is first in the allowlist and is the
- * only name the app is reachable under today; when Phase 2 binds the tailnet interface, the page
- * served over the tailnet will need this to be the tailnet name, which is the one thing in this
- * file that a future task must revisit rather than inherit. Recorded here so that revisit is a
- * decision and not a bug report.
+ * whereas verification accepts the whole set. This is the FALLBACK now — see `relyingPartyIdFor`,
+ * which is what the ceremony routes actually call.
  */
 export const PRIMARY_RP_ID: string = EXPECTED_RP_IDS[0];
+
+/**
+ * The relying-party id to issue for a request, chosen by its Host header FROM THE FIXED SET.
+ *
+ * ─── The revisit the comment above used to promise ────────────────────────────────────────────
+ *
+ * Issuing `localhost` unconditionally was right while the app was only reachable at localhost. On
+ * the tailnet it is fatal: a browser on `https://<machine>.ts.net` refuses options whose `rp.id` is
+ * not that domain or a registrable suffix of it, so every ceremony there failed with an opaque
+ * `SecurityError` before the server saw anything.
+ *
+ * ─── Why this does not break the rule that rpID never comes from the request ──────────────────
+ *
+ * The rule exists because an attacker controls the Host header, and an rpID copied from it lets a
+ * request name any relying party it likes. This function never returns the header. It uses the
+ * header only to SELECT an entry from `EXPECTED_RP_IDS`, a set derived from the host allowlist at
+ * load time; anything not in that set gets the fallback. The worst a forged header can do is choose
+ * between names this server already answers to — and `proxy.ts` has refused any request whose
+ * Host is outside the allowlist before a route ever runs.
+ *
+ * IP-literal hosts (127.0.0.1, [::1]) are allowlisted but are not valid relying-party ids, so they
+ * also get the fallback; a ceremony started on an IP fails in the browser, as it always did.
+ */
+export function relyingPartyIdFor(hostHeader: string | null | undefined): string {
+  if (!hostHeader) return PRIMARY_RP_ID;
+  // Strip a port, but not the brackets of an IPv6 literal — those are never relying-party ids and
+  // simply fail the membership test below.
+  const hostname = hostHeader.toLowerCase().replace(/:\d+$/, '');
+  return EXPECTED_RP_IDS.includes(hostname) ? hostname : PRIMARY_RP_ID;
+}

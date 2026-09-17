@@ -30,6 +30,18 @@ import { POST as loginVerify } from './verify/route';
 
 const ORIGIN = 'http://localhost:3000';
 
+/**
+ * A bare options request. The route now reads its Host header to choose the relying-party id, so
+ * the fixture must send one — and it sends the same localhost origin the ceremony fixtures use, so
+ * the options and the signed assertion agree about which relying party they are for.
+ */
+function optionsRequest(): NextRequest {
+  return new NextRequest(`${ORIGIN}/api/v1/auth/login/options`, {
+    method: 'POST',
+    headers: { host: 'localhost:3000' },
+  });
+}
+
 function ceremonyRequest(path: string, body: unknown, sessionToken?: string): NextRequest {
   const headers: Record<string, string> = { host: 'localhost:3000', 'Content-Type': 'application/json' };
   if (sessionToken) headers.cookie = `${SESSION_COOKIE_NAME}=${sessionToken}`;
@@ -81,7 +93,7 @@ describe('POST /api/v1/auth/login/*, against a scratch database', () => {
     await enrol(authenticator);
     const sessionsAfterEnrolment = await sessionCount();
 
-    const optionsResponse = await loginOptions();
+    const optionsResponse = await loginOptions(optionsRequest());
     expect(optionsResponse.status).toBe(200);
     const optionsBody = await optionsResponse.json();
     const options = AuthenticationCeremonyOptionsSchema.parse(optionsBody.data);
@@ -127,7 +139,7 @@ describe('POST /api/v1/auth/login/*, against a scratch database', () => {
     expect(Number(stored.rows[0].length)).toBeGreaterThan(0);
 
     const impostor = createTestAuthenticator();
-    const optionsResponse = await loginOptions();
+    const optionsResponse = await loginOptions(optionsRequest());
     const options = AuthenticationCeremonyOptionsSchema.parse((await optionsResponse.json()).data);
 
     // ONE AXIS: the signing key. The credential id names the enrolled authenticator, the challenge
@@ -164,7 +176,7 @@ describe('POST /api/v1/auth/login/*, against a scratch database', () => {
     const secondDevice = createTestAuthenticator();
     await enrol(secondDevice, sessionToken);
 
-    const optionsResponse = await loginOptions();
+    const optionsResponse = await loginOptions(optionsRequest());
     const optionsBody = await optionsResponse.json();
     const options = AuthenticationCeremonyOptionsSchema.parse(optionsBody.data);
     expect(optionsBody.data.allowCredentials.map((c: { id: string }) => c.id).sort()).toEqual(

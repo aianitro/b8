@@ -8,21 +8,22 @@
 // secret), so what is published is "this deployment has at least one passkey", which anybody able
 // to reach the boundary at all can infer from being refused by it.
 
+import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { generateAuthenticationOptions } from '@simplewebauthn/server';
 import { listCredentials } from '@/lib/authSession';
 import { rememberChallenge } from '@/lib/webauthnChallenge';
-import { PRIMARY_RP_ID } from '@/lib/webauthnOrigins';
+import { relyingPartyIdFor } from '@/lib/webauthnOrigins';
 import { AuthenticationCeremonyOptionsSchema } from '@/shared/contracts/auth';
 import type { ApiResponse } from '@/shared/types';
 import { withEnvelope } from '../../shared';
 
-export const POST = withEnvelope(async () => {
+export const POST = withEnvelope(async (request: NextRequest) => {
   const enrolled = await listCredentials();
 
   const options = await generateAuthenticationOptions({
     // The server's fixed relying-party id, exactly as on the registration side.
-    rpID: PRIMARY_RP_ID,
+    rpID: relyingPartyIdFor(request.headers.get('host')),
     // EVERY enrolled credential, not the newest. A list truncated to one row is how a second device
     // registers successfully and can then never sign in — invisible on a single-device setup, which
     // is every setup on day one.
