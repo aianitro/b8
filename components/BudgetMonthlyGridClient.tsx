@@ -481,7 +481,7 @@ export default function BudgetMonthlyGridClient({ rows, currentMonth, beginningB
 
       // Persist after state update
       const items = next.map((r, i) => ({ id: r.id, sort_order: i }));
-      fetch('/api/categories/reorder', {
+      fetch('/api/v1/categories/reorder', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(items),

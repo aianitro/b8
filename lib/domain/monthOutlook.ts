@@ -159,7 +159,7 @@ export interface CategorizationCoverage {
    * The orphaned subset of the unattributed figures — `mapped_category` matching no row at all.
    *
    * Reported separately because it has a different cause and a different fix ([[N43]]): a rename
-   * through `PATCH /api/categories` does not remap the transactions, so the spend vanishes from the
+   * through `PATCH /api/v1/categories` does not remap the transactions, so the spend vanishes from the
    * category's `actual`. Counting an orphan as *categorized*, which is what a
    * `mapped_category IS NOT NULL` test does, makes confidence rise exactly as truth falls. Counting
    * it as unattributed moves it into the denominator only and the share DROPS, which is the one

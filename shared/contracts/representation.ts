@@ -35,7 +35,7 @@ import { z } from 'zod';
  *     SUM(amount)                      → "-103712.31"  typeof string
  *
  * `JSON.stringify` passes a string through unchanged, so the wire value is that same string.
- * `z.number()` here would reject every real response from `GET /api/categories` while accepting
+ * `z.number()` here would reject every real response from `GET /api/v1/categories` while accepting
  * every fixture an implementer hand-writes — JS literals are numbers by habit — which is the first
  * failure mode SPEC.md lists. The corroboration is already in the running code: six `Number(...)`
  * wrappers around `c.annual_budget` in components/CategoryManager.tsx, three more in
@@ -76,12 +76,12 @@ export const numericString = z
  * So this is NOT `z.array(numericString)`, and applying the scalar rule here "for consistency"
  * produces a schema that rejects every category which actually carries a custom monthly schedule —
  * the same class of defect as `z.number()` on the scalar case, pointing the other way. Note that
- * app/budget/page.tsx and app/api/categories/route.ts both annotate this column as `string[]` in
+ * app/budget/page.tsx and app/api/v1/categories/route.ts both annotate this column as `string[]` in
  * their local row types; those annotations are the habit this comment exists to interrupt.
  *
  * Cardinality and sign are deliberately unconstrained, even though every writer produces exactly
  * twelve non-negative values or NULL (`normalizeMonthlyAmounts` in lib/budgetMath.ts, used by both
- * POST and PATCH /api/categories). The column carries no CHECK on length or sign, so a read
+ * POST and PATCH /api/v1/categories). The column carries no CHECK on length or sign, so a read
  * validator demanding twelve would make any row predating that helper unreadable, and SPEC.md's
  * non-goals forbid encoding a rule the database does not hold. Elements are non-nullable because
  * `numeric[]` here is written whole or not at all; NULL is modelled on the column, not inside it.

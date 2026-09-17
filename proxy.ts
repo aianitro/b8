@@ -39,6 +39,16 @@ import type { ApiResponse } from '@/shared/types';
 const log = createLogger('proxy');
 
 /**
+ * The pre-`/api/v1/` shape of the eleven segments P1-10b moved.
+ *
+ * Kept in step with `MIGRATED_SEGMENTS` in `next.config.ts` by being the same list — if a segment is
+ * dropped from the rewrite it should be dropped here too, and the day both are empty this constant
+ * and the rewrite go together.
+ */
+const LEGACY_API =
+  /^\/api\/(accounts|budget|categories|chat|import|plaid|properties|rules|sync|transactions|transfers)(\/|$)/;
+
+/**
  * The five surfaces a browser may reach before a session exists.
  *
  * Exported so `proxy.test.ts` asserts over the same set the boundary uses rather than a transcribed
@@ -123,6 +133,22 @@ export async function proxy(request: NextRequest) {
       error: caught instanceof Error ? caught.message : String(caught),
     });
     return refuse(request);
+  }
+
+  // ─── The legacy-path watch, so the compatibility rewrite can be retired on evidence ─────────
+  //
+  // P1-10b moved 27 handlers under `/api/v1/` and left a rewrite in `next.config.ts` keeping the old
+  // paths alive. The UI was then switched over, and a grep says nothing calls an old path any more —
+  // but a grep is static, and the browser could not be exercised from the session that made the
+  // change. So instead of deleting the rewrite on a belief, the boundary says when an old path is
+  // used. After a period of normal use with nothing logged here, the rewrite can go.
+  //
+  // Placed AFTER the session check on purpose: this is telemetry about the owner's own client, not
+  // a security control, and nothing about it should run for an unauthenticated caller.
+  if (LEGACY_API.test(request.nextUrl.pathname)) {
+    log.warn('legacy API path used; the /api/v1 rewrite is still load-bearing', {
+      path: request.nextUrl.pathname,
+    });
   }
 
   return NextResponse.next();

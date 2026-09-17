@@ -35,13 +35,13 @@ export default function RulesManager({ rows, categories, pendingApply }: Props) 
   async function setRule(plaidCategory: string, mappedCategory: string | null) {
     setBusy(plaidCategory);
     if (mappedCategory) {
-      await fetch('/api/rules', {
+      await fetch('/api/v1/rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plaid_category: plaidCategory, mapped_category: mappedCategory }),
       });
     } else {
-      await fetch('/api/rules', {
+      await fetch('/api/v1/rules', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plaid_category: plaidCategory }),
@@ -54,7 +54,7 @@ export default function RulesManager({ rows, categories, pendingApply }: Props) 
   async function applyToExisting() {
     setApplying(true);
     setApplyResult(null);
-    const res = await fetch('/api/rules/apply', { method: 'POST' });
+    const res = await fetch('/api/v1/rules/apply', { method: 'POST' });
     const data = await res.json();
     if (data.success) setApplyResult(data.data.updated);
     router.refresh();

@@ -14,7 +14,7 @@ export default function SyncControls() {
   async function run(force: boolean) {
     setBusy(force ? 'force' : 'sync');
     try {
-      await fetch('/api/sync', {
+      await fetch('/api/v1/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force }),

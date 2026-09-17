@@ -36,7 +36,7 @@ export default function PropertyValuationHistory({ propertyId, rows }: Props) {
     if (parsed < 0) { setError('Enter a positive market value'); return; }
 
     setSaving(true); setError(null);
-    const res = await fetch(`/api/properties/${propertyId}/valuation`, {
+    const res = await fetch(`/api/v1/properties/${propertyId}/valuation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // Sent as a date-only string; the column is timestamptz and takes midnight local.
@@ -56,7 +56,7 @@ export default function PropertyValuationHistory({ propertyId, rows }: Props) {
 
   async function remove(id: number) {
     setConfirmingId(null);
-    const res = await fetch(`/api/properties/${propertyId}/valuation/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/v1/properties/${propertyId}/valuation/${id}`, { method: 'DELETE' });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       setError(body?.error?.message ?? 'Could not delete');

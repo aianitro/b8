@@ -4,7 +4,7 @@
  * ─── Why this exists, stated plainly, because it is not the usual reason ──────────────────────
  *
  * Not abuse. Every route in this app requires a passkey session and the server binds to loopback,
- * so there is no anonymous caller to throttle. `POST /api/chat` calls Anthropic, which bills per
+ * so there is no anonymous caller to throttle. `POST /api/v1/chat` calls Anthropic, which bills per
  * call, and `runAgentLoop` makes up to FIVE model calls per HTTP request. The thing being limited
  * is an invoice.
  *

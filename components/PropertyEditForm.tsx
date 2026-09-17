@@ -60,7 +60,7 @@ export default function PropertyEditForm({ property, onSaved }: Props) {
 
     setSaving(true); setError(null); setSaved(false);
 
-    const res = await fetch(`/api/properties/${property.id}`, {
+    const res = await fetch(`/api/v1/properties/${property.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

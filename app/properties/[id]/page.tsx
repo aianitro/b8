@@ -72,7 +72,7 @@ async function getValuations(id: string): Promise<ValuationRow[]> {
 
 // Every account eligible to be this property's mortgage: valuation-mode liabilities that are
 // either unlinked or already linked here. Scoping lives in the query rather than the DB — see
-// the note on PATCH /api/accounts/[id]'s property_id handling.
+// the note on PATCH /api/v1/accounts/[id]'s property_id handling.
 // Balance is resolved per account's own regime: a valuation-mode account (a mortgage) reports
 // its latest recorded valuation, a ledger one its opening balance plus this year's transactions
 // — the same two-regime rule computeNetWorthBreakdown() applies, so the figures shown here

@@ -15,7 +15,7 @@ export default function PlaidLinkButton() {
   const [newAccounts, setNewAccounts] = useState<LinkedAccountSummary[] | null>(null);
 
   useEffect(() => {
-    fetch('/api/plaid/create-link-token', { method: 'POST' })
+    fetch('/api/v1/plaid/create-link-token', { method: 'POST' })
       .then((r) => r.json())
       .then((res) => {
         if (res.success) setLinkToken(res.data.link_token);
@@ -29,7 +29,7 @@ export default function PlaidLinkButton() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch('/api/plaid/exchange-token', {
+        const res = await fetch('/api/v1/plaid/exchange-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ public_token: publicToken }),

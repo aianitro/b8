@@ -1,6 +1,6 @@
 // `ApiResponse<T>`'s discriminant, tested against whole realistic envelopes rather than against the
 // `success` field alone — which is what SPEC.md demands in place of "leave it as a TypeScript type
-// for now". The payload schema is `z.array(BudgetCategorySchema)`, the shape `GET /api/categories`
+// for now". The payload schema is `z.array(BudgetCategorySchema)`, the shape `GET /api/v1/categories`
 // actually returns, so the success fixtures below are the real response and not a stand-in.
 //
 // Three properties have to hold, and each has its own fixture because each has its own way of
@@ -26,7 +26,7 @@ import {
 } from './envelope';
 import { BudgetCategorySchema } from './shapes';
 
-/** One `GET /api/categories` row, written out locally — see index.test.ts on why not imported. */
+/** One `GET /api/v1/categories` row, written out locally — see index.test.ts on why not imported. */
 const categoryWireRow = {
   id: 7,
   name: 'Groceries',
@@ -40,7 +40,7 @@ const categoryWireRow = {
   created_at: '2026-01-15T00:00:00.000Z',
 };
 
-/** The envelope `GET /api/categories` returns, as a schema. */
+/** The envelope `GET /api/v1/categories` returns, as a schema. */
 const categoriesResponseSchema = apiResponseSchema(z.array(BudgetCategorySchema));
 
 /** The envelope every mutating handler returns: `{ success: true, data: null }`. */

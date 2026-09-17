@@ -803,7 +803,7 @@ describe('categorizationCoverage', () => {
 
   it("an orphaned mapped category is unattributed rather than categorized, so a rename that hides a category's spend lowers confidence instead of raising it", () => {
     // `Dining Ou` is what a rename leaves behind: `mapped_category` is not a foreign key and
-    // `PATCH /api/categories` does not remap the rows, so the spend vanishes from the category's
+    // `PATCH /api/v1/categories` does not remap the rows, so the spend vanishes from the category's
     // `actual` while still looking categorized.
     const coverage = categorizationCoverage(
       [group('Dining Out', 1900, 20), group('Dining Ou', 100, 3)],

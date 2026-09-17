@@ -3,7 +3,7 @@ import db from '@/lib/db';
 import { roundCents } from '@/lib/budgetMath';
 import type { ApiResponse } from '@/shared/types';
 
-// Appends a manual point-in-time valuation, mirroring app/api/accounts/[id]/valuation/route.ts:
+// Appends a manual point-in-time valuation, mirroring app/api/v1/accounts/[id]/valuation/route.ts:
 // always INSERT, never upsert — property_valuations is an observation history, and a quarterly
 // re-entry is meant to build the series, not overwrite last quarter's number.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

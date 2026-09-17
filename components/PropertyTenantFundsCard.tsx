@@ -64,7 +64,7 @@ export default function PropertyTenantFundsCard({ propertyId, funds, canRecord }
     if (parsed < 0) { setError('Enter a positive amount'); return; }
 
     setSaving(true); setError(null);
-    const res = await fetch(`/api/properties/${propertyId}/tenant-funds`, {
+    const res = await fetch(`/api/v1/properties/${propertyId}/tenant-funds`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       // Sent as a date-only string; the column is timestamptz and takes midnight local.

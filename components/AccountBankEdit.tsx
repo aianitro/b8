@@ -24,7 +24,7 @@ export default function AccountBankEdit({ accountId, current }: Props) {
   async function save() {
     setEditing(false);
     const bank = value.trim() || null;
-    await fetch(`/api/accounts/${accountId}`, {
+    await fetch(`/api/v1/accounts/${accountId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bank }),

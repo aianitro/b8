@@ -79,7 +79,7 @@ export default function InsightsChat() {
     setLoading(true);
     setError(null);
 
-    const res = await fetch('/api/chat', {
+    const res = await fetch('/api/v1/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: next.map((m) => ({ role: m.role, content: m.content })) }),

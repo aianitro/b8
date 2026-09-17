@@ -20,7 +20,7 @@
 //
 // 3. UNKNOWN KEYS ARE STRIPPED, NOT REFUSED — and this is measured, not stylistic. `z.object()`
 //    strips; `z.strictObject()` (used in envelope.ts, where the shape is wholly app-authored) would
-//    reject. A strict row schema would reject a real payload today: `POST /api/categories` returns
+//    reject. A strict row schema would reject a real payload today: `POST /api/v1/categories` returns
 //    `INSERT … RETURNING *`, so its response carries `is_debt_service` and `sort_order` alongside
 //    the ten contracted fields. Stripping is also the safer behaviour for a future inbound use — the
 //    extra key is removed rather than forwarded. Rule 1 is therefore checked against the schema's
@@ -121,7 +121,7 @@ export type AccountFieldsAreExact = Assert<
 >;
 
 /**
- * `budget_categories`, as `GET /api/categories` returns it.
+ * `budget_categories`, as `GET /api/v1/categories` returns it.
  *
  * `landscape`, `exclude_from_budget`, `is_income` and `control_mode` are four INDEPENDENT
  * classifications — db/schema.sql says so in its own comment, and the scored set names all four
@@ -141,7 +141,7 @@ export type AccountFieldsAreExact = Assert<
  * null is a zero, and `annual_budget` is not nullable at all (the column is NOT NULL).
  *
  * No non-negativity check on `annual_budget`, deliberately: there is no `CHECK (annual_budget >= 0)`
- * in db/schema.sql and `POST /api/categories` does not enforce one either (only `PATCH`'s
+ * in db/schema.sql and `POST /api/v1/categories` does not enforce one either (only `PATCH`'s
  * annual_budget branch does). A schema that rejected a negative value would encode a rule that is
  * not true of this data — the same "transcribe an incomplete picture as the specification" failure
  * as deriving a value set from a handler, pointing the other way.
@@ -248,7 +248,7 @@ export type BudgetSummaryFieldsAreExact = Assert<
 >;
 
 /**
- * One genuinely-new account as `POST /api/plaid/exchange-token` reports it, for
+ * One genuinely-new account as `POST /api/v1/plaid/exchange-token` reports it, for
  * AccountClassifyModal's valuation-type prompt.
  *
  * The only shape here that never touches a NUMERIC column — it is assembled in TypeScript from

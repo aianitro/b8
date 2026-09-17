@@ -66,7 +66,7 @@ export const ApiErrorResponseSchema = z.strictObject({
  *
  * Pass the schema of what the handler actually returns — `apiSuccessResponseSchema(z.null())` for
  * the mutating routes, `apiSuccessResponseSchema(z.array(BudgetCategorySchema))` for
- * `GET /api/categories`. `data` is required even when its schema is `z.null()`: `{ success: true }`
+ * `GET /api/v1/categories`. `data` is required even when its schema is `z.null()`: `{ success: true }`
  * with no `data` key is not a response any handler here produces.
  */
 export function apiSuccessResponseSchema<T extends z.ZodType>(dataSchema: T) {

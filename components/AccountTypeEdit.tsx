@@ -15,7 +15,7 @@ export default function AccountTypeEdit({ accountId, type, subtype }: Props) {
   async function save(next: string) {
     setEditing(false);
     const chosen = ACCOUNT_TYPES.find((t) => (t.subtype ?? t.type) === next) ?? ACCOUNT_TYPES[0];
-    await fetch(`/api/accounts/${accountId}`, {
+    await fetch(`/api/v1/accounts/${accountId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: chosen.type, subtype: chosen.subtype }),

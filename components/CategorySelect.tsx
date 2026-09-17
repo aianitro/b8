@@ -55,7 +55,7 @@ export default function CategorySelect({ transactionId, current, categories, des
     const next = e.target.value;
     setValue(next);
     setSaving(true);
-    await fetch(`/api/transactions/${transactionId}`, {
+    await fetch(`/api/v1/transactions/${transactionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mapped_category: next || null }),
@@ -70,7 +70,7 @@ export default function CategorySelect({ transactionId, current, categories, des
     setUndoPrev(null);
     setValue(restore);
     setSaving(true);
-    await fetch(`/api/transactions/${transactionId}`, {
+    await fetch(`/api/v1/transactions/${transactionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mapped_category: restore || null }),

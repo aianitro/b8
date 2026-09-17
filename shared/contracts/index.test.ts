@@ -89,7 +89,7 @@ describe('the contract surface against shared/types.ts', () => {
     expect(Object.keys(BudgetCategorySchema.shape)).not.toContain('sort_order');
 
     // Asserted on the declared field set rather than on a rejection, deliberately. Row schemas
-    // STRIP unknown keys (CONTRACT.md): `POST /api/categories` returns `INSERT ... RETURNING *`, so
+    // STRIP unknown keys (CONTRACT.md): `POST /api/v1/categories` returns `INSERT ... RETURNING *`, so
     // its live response really does carry both extra columns, and a strict schema would reject a
     // payload this application produces today. What "admits none of" means here is that they are
     // dropped rather than validated and passed on — which is what this parse shows.

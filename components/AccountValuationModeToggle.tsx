@@ -27,7 +27,7 @@ export default function AccountValuationModeToggle({ accountId, mode, isLiabilit
     const next = e.target.value as Choice;
     setValue(next);
     setSaving(true);
-    await fetch(`/api/accounts/${accountId}`, {
+    await fetch(`/api/v1/accounts/${accountId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

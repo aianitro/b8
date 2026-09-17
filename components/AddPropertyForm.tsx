@@ -27,7 +27,7 @@ export default function AddPropertyForm() {
     if (!nickname.trim()) { setError('Nickname is required'); return; }
     setSaving(true); setError(null);
     try {
-      const res = await fetch('/api/properties', {
+      const res = await fetch('/api/v1/properties', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

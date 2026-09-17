@@ -52,7 +52,7 @@ export default function AccountClassifyModal({ accounts, onDone }: Props) {
         return;
       }
 
-      const patchRes = await fetch(`/api/accounts/${a.id}`, {
+      const patchRes = await fetch(`/api/v1/accounts/${a.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ valuation_mode: 'valuation', is_liability: choice === 'liability' }),
@@ -64,7 +64,7 @@ export default function AccountClassifyModal({ accounts, onDone }: Props) {
       }
 
       if (parsed !== null) {
-        const valRes = await fetch(`/api/accounts/${a.id}/valuation`, {
+        const valRes = await fetch(`/api/v1/accounts/${a.id}/valuation`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ value: parsed }),

@@ -38,7 +38,7 @@ function BeginningBalanceCell({
     const parsed = Number(draft);
     if (isNaN(parsed)) return;
     setSaving(true);
-    await fetch(`/api/properties/${propertyId}/balance`, {
+    await fetch(`/api/v1/properties/${propertyId}/balance`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ beginning_balance: parsed }),
@@ -157,7 +157,7 @@ export default function PropertyLedgerCard({
   // nothing to undo here and would need its account unlinked instead.
   async function untag(id: number) {
     setBusyId(id);
-    await fetch(`/api/transactions/${id}`, {
+    await fetch(`/api/v1/transactions/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ property_id: null }),

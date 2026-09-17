@@ -27,7 +27,7 @@ export default function CategoryBalanceEdit({ categoryName, value }: Props) {
     const num = parseFloat(input.replace(/,/g, ''));
     if (isNaN(num)) { cancel(); return; }
     setSaving(true);
-    await fetch(`/api/categories/${encodeURIComponent(categoryName)}/balance`, {
+    await fetch(`/api/v1/categories/${encodeURIComponent(categoryName)}/balance`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ beginning_balance: num }),

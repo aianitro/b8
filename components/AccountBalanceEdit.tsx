@@ -27,7 +27,7 @@ export default function AccountBalanceEdit({ accountId, value }: Props) {
     const num = parseFloat(input.replace(/,/g, ''));
     if (isNaN(num)) { cancel(); return; }
     setSaving(true);
-    await fetch(`/api/accounts/${accountId}/balance`, {
+    await fetch(`/api/v1/accounts/${accountId}/balance`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ beginning_balance: num }),
