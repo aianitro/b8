@@ -17,7 +17,8 @@
     "seed:demo": "node scripts/seed-demo.mjs",
     "start": "next start -H 127.0.0.1",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "tokens": "tsx --env-file=.env.local scripts/tokens.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.107.0",

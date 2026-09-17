@@ -30,10 +30,9 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { resolveSession } from '@/lib/authSession';
+import { authorize } from '@/lib/requestAuth';
 import { isAllowedHost } from '@/lib/hostGuard';
 import { createLogger } from '@/lib/logger';
-import { SESSION_COOKIE_NAME } from '@/lib/sessionToken';
 import type { ApiResponse } from '@/shared/types';
 
 const log = createLogger('proxy');
@@ -121,8 +120,24 @@ export async function proxy(request: NextRequest) {
   }
 
   try {
-    const session = await resolveSession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
-    if (!session) return refuse(request);
+    // Cookie OR bearer token, decided in one place — `lib/requestAuth.ts` — so this boundary and the
+    // handlers behind it cannot disagree about who a request is. A bearer token reaches only the API,
+    // only as a device or personal session, and only within its scope.
+    const decision = await authorize(request);
+    if (!decision.ok) {
+      if (decision.status === 403) {
+        // Authenticated, but not allowed THIS — a read-only token attempting a write. 403 rather
+        // than 401, so a client does not respond by signing in again and looping.
+        return NextResponse.json(
+          {
+            success: false,
+            error: { code: decision.code, message: 'This token does not permit that request.' },
+          } satisfies ApiResponse<never>,
+          { status: 403 }
+        );
+      }
+      return refuse(request);
+    }
   } catch (caught) {
     // THE ONLY CATCH IN THIS FILE, AND IT REFUSES. An unreachable database, a throwing lookup, a
     // pool exhausted — every one of them means this request's session could not be verified, and

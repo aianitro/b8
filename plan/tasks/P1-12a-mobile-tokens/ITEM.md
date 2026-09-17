@@ -117,3 +117,37 @@ needs a name and a scope. `shared/contracts/auth.ts` gains the token-issuing sha
 reach the app — the same category as step 12, which is the one place in this codebase where a wrong
 answer is invisible until it is used. The bearer path in particular removes the browser's own
 protections: a cookie is `httpOnly` and `sameSite`, and a header is neither.
+
+---
+
+## The security review, and what it found — 2026-09-17
+
+`/security-review` ran on `git diff main...auth/mobile-tokens` before the merge, as this ITEM.md
+required. One finding, HIGH, confirmed by a second pass that read the code independently.
+
+**A read-only token could enrol a passkey and walk away with full, permanent access.** The two
+`register/*` paths are in `PRE_AUTH_PATHS`, so `proxy.ts` returns `NextResponse.next()` for them
+*before* `authorize` runs — and `authorize` was the only place `scopePermits` was applied. The
+handlers then looked the session up themselves through `credentialFrom`, which this task had taught
+to accept bearer tokens and which asked only whether a session existed. So a `read` personal token
+counted as authority to enrol, and the reply to a registration is a full-scope session plus a
+credential that keeps working after the token is revoked. The scope check existed; it simply did not
+run on the two paths where it mattered most.
+
+**Fixed in the two places the mistake was possible, not in the two routes that showed it.**
+
+1. `credentialFrom` applies `scopePermits` itself. Its old comment — "the boundary already made it"
+   — was true of every path except the five that skip the boundary, and that is the whole bug. A
+   future handler on an allowlisted path can no longer inherit the hole by calling it.
+2. `registrationDecision` takes **the session**, not a `hasValidSession` boolean each route derived.
+   `sessionMayEnrol` is the rule: full scope, and a browser or device session. A personal token is
+   refused even at full scope — a script has no passkey to enrol, and a credential minted through
+   one would outlive `npm run tokens -- revoke`, which would quietly stop meaning what it says.
+
+Registration's bootstrap window is unchanged: while zero credentials exist it is open to anyone, and
+a token buys nothing extra there.
+
+**Proved:** 759 unit tests and 49 integration tests on a scratch database. The new integration block
+runs the attack — options, then a fabricated ceremony — with a read token and a full personal token,
+and asserts `REGISTRATION_CLOSED` from both endpoints, no new credential, and no new session. One
+test enrols a second device from a phone token, because that is the path the fix must not break.

@@ -477,5 +477,20 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   -- Refuses a session born already dead — an inverted sign in the TTL arithmetic, or a TTL of
   -- zero. It fails closed rather than open, so this is not a security hole; it is the difference
   -- between "login succeeds and the next request 401s for no visible reason" and a named failure.
-  CONSTRAINT auth_sessions_expires_after_created CHECK (expires_at > created_at)
+  CONSTRAINT auth_sessions_expires_after_created CHECK (expires_at > created_at),
+
+  -- P1-12a: three kinds of session in one table. browser = cookie, 12h fixed; device = phone app,
+  -- 30 days sliding; personal = a named script token minted over SSH. See lib/bearerAuth.ts.
+  kind          TEXT NOT NULL DEFAULT 'browser'
+                  CONSTRAINT auth_sessions_kind_check CHECK (kind IN ('browser', 'device', 'personal')),
+  scope         TEXT NOT NULL DEFAULT 'full'
+                  CONSTRAINT auth_sessions_scope_check CHECK (scope IN ('full', 'read')),
+  label         TEXT
+                  CONSTRAINT auth_sessions_label_length CHECK (label IS NULL OR length(label) BETWEEN 1 AND 60),
+  last_used_at  TIMESTAMPTZ,
+
+  CONSTRAINT auth_sessions_label_iff_personal CHECK ((kind = 'personal') = (label IS NOT NULL)),
+  CONSTRAINT auth_sessions_read_scope_personal_only CHECK (scope = 'full' OR kind = 'personal'),
+  CONSTRAINT auth_sessions_personal_lifetime
+    CHECK (kind <> 'personal' OR expires_at <= created_at + INTERVAL '366 days')
 );
