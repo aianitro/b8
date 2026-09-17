@@ -646,6 +646,59 @@ export const DriftFindingSchema = z.object({
  * describe a net-worth-first payload that no longer matches what the dashboard renders. Adding
  * either here would be a single-round-trip fetch of figures nothing on the page shows.
  */
+/**
+ * One budget category's month, as the bubbles render it.
+ *
+ * ─── Why this is not `allPaces` ───────────────────────────────────────────────────────────────
+ *
+ * P1-11's NITS.md N1 recorded that this payload could not feed the dashboard's lead widget because
+ * `loadMonthOutlook` returns `{ outlook, allPaces }` and only `outlook` was carried. The obvious
+ * repair is to add `allPaces`. It is the wrong one: `CategoryPace` is the pacing engine's internal
+ * record — one row per category PER MONTH, with the fields the engine needs to reach a verdict —
+ * and a payload carrying it would export the engine's working notes as a contract a mobile client
+ * then depends on.
+ *
+ * What a bubble actually needs is five fields, and they are the same five `DigestBubble` carries,
+ * because the two surfaces draw the same picture from the same rule in `lib/domain/bubbleStatus.ts`.
+ * So the contract states those, scoped to the as-of month, and the per-month rows stay inside the
+ * engine.
+ *
+ * `projectedRatio` is `null`, never `0`, when there is no basis to project from — the distinction
+ * `bubbleColor` turns into "too early to call" rather than "on plan".
+ */
+export const MonthCategorySchema = z.object({
+  category: z.string(),
+  budgeted: moneyString,
+  actual: moneyString,
+  projectedRatio: z.number().nullable(),
+  tooEarly: z.boolean(),
+});
+
+/** One transaction the owner flagged to come back to. */
+export const WatchedTransactionSchema = z.object({
+  id: serialId,
+  date: dateString,
+  label: z.string(),
+  amount: moneyString,
+  category: z.string().nullable(),
+  note: z.string().min(1).max(200).nullable(),
+  /** Whole days since it was flagged. The figure that makes the list get acted on. */
+  daysOpen: z.int().min(0),
+});
+
+/**
+ * Whether the daily job has been running.
+ *
+ * Carried in the payload rather than left to the client, because the verdict depends on the
+ * SERVER's clock and its schedule. A mobile client computing "is this late?" from its own clock
+ * would disagree with the dashboard across a timezone, about a fact that has one answer.
+ */
+export const JobHealthSchema = z.object({
+  status: z.enum(['fresh', 'late', 'missed', 'never']),
+  daysSince: z.int().min(0).nullable(),
+  message: z.string(),
+});
+
 export const OverviewDataSchema = z.object({
   asOf: AsOfSchema,
   stats: OverviewStatsSchema,
@@ -657,9 +710,20 @@ export const OverviewDataSchema = z.object({
   recentArrivals: z.array(RecentArrivalSchema),
   budgetVsActual: z.array(BudgetVsActualRowSchema),
   monthOutlook: MonthOutlookSchema,
+  /**
+   * Every category with an allocation this month — the map the bubbles draw.
+   *
+   * Not only the scored ones. The dashboard learned that the expensive way: drawn off the scored
+   * partition, the picture showed a household spending about $1,150 when the real figure was
+   * several times that, because groceries, fuel and utilities are most of a month by value and
+   * none of them is a monthly decision.
+   */
+  monthCategories: z.array(MonthCategorySchema),
   yearEnd: YearEndReadSchema,
   feedHealth: z.array(FeedFindingSchema),
   driftFindings: z.array(DriftFindingSchema),
+  watchlist: z.array(WatchedTransactionSchema),
+  jobHealth: JobHealthSchema,
 });
 
 /**

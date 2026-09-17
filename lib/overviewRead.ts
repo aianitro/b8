@@ -44,6 +44,10 @@ import type { MonthPoint } from './domain/yearEnd';
 import type { FeedFinding } from './domain/feedHealth';
 import type { DriftFinding } from './domain/drift';
 import { findBalanceDrift } from './drift';
+import type { JobHealth } from './domain/jobHealth';
+import { loadJobHealth } from './jobHealthRead';
+import type { WatchedTransaction } from './watchlistRead';
+import { loadWatchlist } from './watchlistRead';
 import { loadFeedHealth } from './feedHealthRead';
 import { loadMonthOutlook } from './monthOutlookRead';
 import { loadYearEnd, type YearEndRead } from './yearEndRead';
@@ -234,9 +238,25 @@ export interface OverviewSources {
   }[];
   budgetVsActual: { category: string; budget: number; spent: number }[];
   monthOutlook: MonthOutlook;
+  /**
+   * Every category with a budget this month, already narrowed to what a bubble needs.
+   *
+   * Narrowed by the CALLER rather than here, because the narrowing is a scope decision — the as-of
+   * month only, and categories with an allocation — and `composeOverview` is a pure shaper that
+   * should not be deciding which rows exist.
+   */
+  monthCategories: {
+    category: string;
+    budgeted: number;
+    actual: number;
+    projectedRatio: number | null;
+    tooEarly: boolean;
+  }[];
   yearEnd: YearEndRead;
   feedHealth: FeedFinding[];
   driftFindings: DriftFinding[];
+  watchlist: WatchedTransaction[];
+  jobHealth: JobHealth;
 }
 
 function wireMonthVariance(v: MonthVariance): Extract<
@@ -503,9 +523,29 @@ export function composeOverview(sources: OverviewSources): OverviewData {
       spent: wireMoney(b.spent),
     })),
     monthOutlook: wireMonthOutlook(sources.monthOutlook),
+    monthCategories: sources.monthCategories.map((c) => ({
+      category: c.category,
+      budgeted: wireMoney(c.budgeted),
+      actual: wireMoney(c.actual),
+      // A RATIO, NOT MONEY — not passed through `wireMoney`, which cent-rounds. Quantising a
+      // projection into 1% steps would be precision the projection does not have, and `null` here
+      // means "no basis to project from", which `bubbleColor` reads as "too early to call".
+      projectedRatio: c.projectedRatio,
+      tooEarly: c.tooEarly,
+    })),
     yearEnd: wireYearEnd(sources.yearEnd),
     feedHealth: sources.feedHealth.map(wireFeedFinding),
     driftFindings: sources.driftFindings.map(wireDriftFinding),
+    watchlist: sources.watchlist.map((w) => ({
+      id: w.id,
+      date: w.date,
+      label: w.label,
+      amount: wireMoney(w.amount),
+      category: w.category,
+      note: w.note,
+      daysOpen: w.daysOpen,
+    })),
+    jobHealth: sources.jobHealth,
   };
 }
 
@@ -796,7 +836,9 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
       loadYearEnd('operational', asOf),
     ]);
 
-  const [driftFindings, feedHealth] = await Promise.all([driftPromise, feedPromise]);
+  const [driftFindings, feedHealth, watchlist, jobHealth] = await Promise.all([
+    driftPromise, feedPromise, loadWatchlist(), loadJobHealth(now),
+  ]);
 
   return composeOverview({
     asOf,
@@ -807,8 +849,23 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
     recentArrivals,
     budgetVsActual,
     monthOutlook: monthRead.outlook,
+    // Scoped to the as-of month AND to categories with an allocation. `categoryPacing` emits one
+    // record per category PER MONTH — that is what lets an earlier month's breach be reported — so
+    // taking the array whole would carry a category once for every month it has a budget in. The
+    // dashboard hit exactly that: 28 circles over 21 categories.
+    monthCategories: monthRead.allPaces
+      .filter((p) => p.month === asOf.month && p.budgeted > 0)
+      .map((p) => ({
+        category: p.category,
+        budgeted: p.budgeted,
+        actual: p.actual,
+        projectedRatio: p.projectedRatio,
+        tooEarly: p.status === 'too-early' || p.status === 'future' || p.status === 'no-budget',
+      })),
     yearEnd,
     feedHealth,
     driftFindings,
+    watchlist,
+    jobHealth,
   });
 }

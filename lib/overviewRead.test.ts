@@ -76,6 +76,17 @@ function fabricatedSources(): OverviewSources {
   return {
     asOf: { year: 2026, month: 8, day: 12 },
     stats: { budget: 139237, spent: 92110.25, uncategorized: 3, totalTxns: 1284 },
+    // One of each verdict the bubbles can draw, so the wire conversion is exercised on a null ratio
+    // as well as on numbers.
+    monthCategories: [
+      { category: 'Grocery', budgeted: 1900, actual: 1420.5, projectedRatio: 1.02, tooEarly: false },
+      { category: 'Education', budgeted: 75, actual: 96.4, projectedRatio: 3, tooEarly: false },
+      { category: 'Pets', budgeted: 120, actual: 0, projectedRatio: null, tooEarly: true },
+    ],
+    watchlist: [
+      { id: 11406, date: '2026-09-11', label: 'Zara', amount: 120.17, category: null, note: 'returning', daysOpen: 3 },
+    ],
+    jobHealth: { status: 'fresh', daysSince: 0, message: 'The daily job ran today.' },
     today: {
       spent: 214.37,
       avgSameWeekday: 186.4,
@@ -510,5 +521,54 @@ describe('assertScratchDatabase, the control that keeps a seeding suite off the 
     // coordinator opened a real connection with it — and the guard still refuses, because it
     // recognises one shape and declines the rest rather than re-deriving `pg`'s parser.
     expect(() => assertScratchDatabase('postgresql:_b8_p111_throwaway')).toThrow(/cannot prove/);
+  });
+});
+
+describe('the three sections P1-11a added, which the dashboard could not be fed without', () => {
+  it('carries every budgeted category this month, as money strings', () => {
+    // P1-11's N1: the payload claimed to carry "everything the dashboard fetches" and did not carry
+    // the input to its LEAD widget. The repair is these five fields, not the pacing engine's own
+    // per-month records.
+    const data = composeOverview(fabricatedSources());
+    expect(data.monthCategories).toHaveLength(3);
+    expect(data.monthCategories[0]).toEqual({
+      category: 'Grocery',
+      budgeted: '1900.00',
+      actual: '1420.50',
+      projectedRatio: 1.02,
+      tooEarly: false,
+    });
+  });
+
+  it('does not cent-round the projection, because it is a ratio and not money', () => {
+    // Through `wireMoney` a 3.0 ratio would still read 3.00 and look fine; the failure only shows
+    // on a value that quantises, which is why this asserts the exact float rather than the shape.
+    const sources = fabricatedSources();
+    sources.monthCategories[0].projectedRatio = 1.0249;
+    expect(composeOverview(sources).monthCategories[0].projectedRatio).toBe(1.0249);
+  });
+
+  it('keeps a null projection null, never zero', () => {
+    // `bubbleColor` reads null as "too early to call" and 0 as "on plan" — opposite verdicts.
+    expect(composeOverview(fabricatedSources()).monthCategories[2].projectedRatio).toBeNull();
+  });
+
+  it('carries the watchlist with its age, which is the field that makes it get acted on', () => {
+    const [watched] = composeOverview(fabricatedSources()).watchlist;
+    expect(watched).toMatchObject({ label: 'Zara', amount: '120.17', daysOpen: 3, note: 'returning' });
+  });
+
+  it('carries the job verdict computed on the SERVER, not the ingredients for a client to compute', () => {
+    // A mobile client deciding "is this late?" from its own clock would disagree with the dashboard
+    // across a timezone, about a fact that has one answer.
+    expect(composeOverview(fabricatedSources()).jobHealth).toEqual({
+      status: 'fresh',
+      daysSince: 0,
+      message: 'The daily job ran today.',
+    });
+  });
+
+  it('still validates against the published schema with all three present', () => {
+    expect(() => OverviewDataSchema.parse(composeOverview(fabricatedSources()))).not.toThrow();
   });
 });
