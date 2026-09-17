@@ -82,6 +82,16 @@ export interface DigestData {
   /** The day this digest is about, as three integers. Converted once, by the caller. */
   asOf: { year: number; month: number; day: number };
 
+  /**
+   * Whether the daily job has been running. Rendered ONLY when it has not.
+   *
+   * A line saying "the job ran today" in a message the job just sent is a tautology taking up
+   * space. A line saying it has not run for five days, in the first message to arrive after that
+   * gap, is the only place the owner would ever find out — and it tells them the sync and the
+   * backups were missed too, which "no email yesterday" does not imply.
+   */
+  jobGap: string | null;
+
   uncategorized: {
     /** The rows actually shown, largest first. May be shorter than `totalCount`. */
     rows: DigestTxn[];
@@ -741,6 +751,12 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px">` +
     `<tr><td>` +
     header +
+    (data.jobGap
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ` +
+        `style="background-color:${AMBER_BG};border:1px solid ${AMBER_RULE};border-radius:10px;margin:0 0 16px">` +
+        `<tr><td style="padding:14px 18px;font-family:${FONT};font-size:13px;color:${AMBER_INK};line-height:1.5">` +
+        `${esc(data.jobGap)}</td></tr></table>`
+      : '') +
     counters(data) +
     uncategorizedWidget(data.uncategorized) +
     watchlistWidget(data.watchlist) +
@@ -754,6 +770,7 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
   const text = [
     `b8`,
     '',
+    ...(data.jobGap ? [`  ${data.jobGap}`, ''] : []),
     `  ${u.totalCount} ${u.totalCount === 1 ? 'record needs' : 'records need'} a category`,
     `  ${y.rows.length} transaction${y.rows.length === 1 ? '' : 's'} yesterday`,
     '',

@@ -2,6 +2,7 @@ import db from './db';
 import { loadYearEnd } from './yearEndRead';
 import { loadMonthOutlook } from './monthOutlookRead';
 import { loadWatchlist } from './watchlistRead';
+import { loadJobHealth } from './jobHealthRead';
 import { asOfFromDate } from './domain/monthOutlook';
 import type { DigestData, DigestTxn } from './domain/digest';
 
@@ -77,7 +78,7 @@ export async function loadDigest(now: Date): Promise<DigestData> {
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayIso = localIso(yesterday);
 
-  const [unfiled, unfiledTotals, posted, watching, monthRead, yearEnd] = await Promise.all([
+  const [unfiled, unfiledTotals, posted, watching, health, monthRead, yearEnd] = await Promise.all([
     // Largest first — filing the biggest row moves every other figure in the email the most.
     // `ABS`, because a large uncategorized DEPOSIT distorts the year-end projection exactly as
     // hard as a large uncategorized payment does, and 2026-09-11 is the entry in this repo's
@@ -115,6 +116,9 @@ export async function loadDigest(now: Date): Promise<DigestData> {
     // the list, how it is ordered, or how old an entry is.
     loadWatchlist(),
 
+    // Only surfaced when the job has been missing. See DigestData.jobGap.
+    loadJobHealth(now),
+
     // The same read the dashboard's bubbles are built from, so a category cannot carry one figure
     // on the screen and another in the mail.
     loadMonthOutlook(asOfFromDate(now)),
@@ -129,6 +133,9 @@ export async function loadDigest(now: Date): Promise<DigestData> {
 
   return {
     asOf: { year, month: month + 1, day: now.getDate() },
+
+    // `fresh` says nothing: a message the job just sent does not need to announce that the job ran.
+    jobGap: health.status === 'fresh' ? null : health.message,
 
     uncategorized: {
       rows: unfiled.rows.map(toTxn),
