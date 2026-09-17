@@ -10,6 +10,12 @@
   RunAtLoad is false on purpose: loading this agent should not fire a Plaid sync and an email at
   whatever moment it happens to be installed.
 
+  BACKUP FIRST, AND WITH `;` RATHER THAN `&&`. The backup runs before the sync so the dump captures
+  the database as it stood before the day's mutations — if a sync corrupts something, last night's
+  dump is from before it. The separator is a semicolon so a failed backup does not cancel the sync,
+  the snapshot and the mail: those are three independent jobs and a backup problem should cost
+  exactly one of them. The backup's own exit code is in the log either way.
+
   Only runs while the machine is awake and the user is logged in. launchd will run a missed job
   once shortly after wake, which the in-process timer never did — but a laptop closed all day still
   misses that day. Moving this to the always-on server is Phase 2 step 19.
@@ -25,7 +31,7 @@
     <string>-lc</string>
     <!-- A login shell, so nvm/homebrew node is on PATH exactly as it is in a terminal. launchd's
          own PATH is minimal and would not find node at all. -->
-    <string>cd __APP_DIR__ &amp;&amp; exec npm run job:daily</string>
+    <string>cd __APP_DIR__ &amp;&amp; npm run backup; exec npm run job:daily</string>
   </array>
 
   <key>StartCalendarInterval</key>

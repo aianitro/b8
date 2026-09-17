@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "backup": "tsx --env-file=.env.local scripts/backup.ts",
     "build": "next build",
     "dev": "next dev -H 127.0.0.1",
     "docker:down": "docker compose down",
