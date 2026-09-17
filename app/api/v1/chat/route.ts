@@ -5,6 +5,7 @@ import type { ApiResponse } from '@/shared/types';
 import { createLogger } from '@/lib/logger';
 import { SESSION_COOKIE_NAME } from '@/lib/sessionToken';
 import { check, createLimiter } from '@/lib/rateLimit';
+import { parseBearer } from '@/lib/bearerAuth';
 
 const log = createLogger('chat');
 
@@ -255,7 +256,11 @@ export async function POST(req: NextRequest) {
   // not even the parse — on a request that is not going to run. The session cookie is the key: the
   // boundary has already verified it, so an absent one cannot reach this line, and the fallback
   // exists so a future unauthenticated path cannot silently opt out of the limit by having no key.
-  const sessionKey = req.cookies.get(SESSION_COOKIE_NAME)?.value ?? 'anonymous';
+  // P1-12a: a phone app or a script authenticates with a bearer token, so the key is whichever
+  // credential the request carries — the same precedence the boundary uses. Keyed on the raw value
+  // only as a map key in memory; it is never logged or stored.
+  const sessionKey =
+    parseBearer(req.headers.get('authorization')) ?? req.cookies.get(SESSION_COOKIE_NAME)?.value ?? 'anonymous';
   const verdict = check(limiter, sessionKey, new Date());
   if (!verdict.allowed) {
     log.info('rate limited', { reason: verdict.reason, retryAfterSeconds: verdict.retryAfterSeconds });

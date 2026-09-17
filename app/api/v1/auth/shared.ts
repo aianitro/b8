@@ -12,9 +12,10 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { resolveSession, type ActiveSession } from '@/lib/authSession';
+import type { ActiveSession } from '@/lib/authSession';
+import { credentialFrom } from '@/lib/requestAuth';
 import { createLogger } from '@/lib/logger';
-import { SESSION_COOKIE_NAME, clearedSessionCookie, sessionCookie } from '@/lib/sessionToken';
+import { clearedSessionCookie, sessionCookie } from '@/lib/sessionToken';
 import type { ApiResponse } from '@/shared/types';
 
 /**
@@ -31,7 +32,10 @@ import type { ApiResponse } from '@/shared/types';
  * into a 500 that a client can actually read; the refusal is unchanged.
  */
 export async function sessionFrom(request: NextRequest): Promise<ActiveSession | null> {
-  return resolveSession(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+  // P1-12a: through the same function the boundary uses, so a bearer token that the boundary
+  // admitted is the session a handler sees — a phone app can sign out, and can enrol a second
+  // device, exactly as a browser can.
+  return credentialFrom(request);
 }
 
 /**
@@ -61,6 +65,21 @@ export function ceremonyCompleted(sessionToken: string): NextResponse {
   const response = NextResponse.json({ success: true, data: null } satisfies ApiResponse<null>);
   response.cookies.set(sessionCookie(sessionToken));
   return response;
+}
+
+/**
+ * A completed ceremony for a NATIVE client: the device token in the body, and no cookie.
+ *
+ * Only reachable after the handler has checked `mayIssueDeviceToken` — the caller carries no
+ * `Sec-Fetch-*` headers, so it is not a browser. See DeviceSessionSchema for why that matters.
+ * `Cache-Control: no-store` because the body is a credential and nothing between here and the app
+ * should keep a copy.
+ */
+export function deviceSessionIssued(session: { token: string; expiresAt: string }): NextResponse {
+  return NextResponse.json(
+    { success: true, data: session } satisfies ApiResponse<{ token: string; expiresAt: string }>,
+    { headers: { 'Cache-Control': 'no-store' } }
+  );
 }
 
 /** A completed logout: the same envelope, with the cookie removed from the browser. */

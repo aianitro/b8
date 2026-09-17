@@ -37,6 +37,7 @@
 
 import { z } from 'zod';
 import { ApiErrorResponseSchema, apiResponseSchema } from './envelope';
+import { timestamptz } from './representation';
 
 /**
  * Unpadded base64url — the one encoding every binary value in a WebAuthn JSON payload arrives in.
@@ -236,6 +237,33 @@ export const AuthenticationOptionsResponseSchema = apiResponseSchema(
 export const CeremonyVerifiedResponseSchema = apiResponseSchema(z.null());
 
 /**
+ * What a NATIVE client receives from a completed ceremony instead of a cookie — P1-12a.
+ *
+ * A phone app asks for this by sending `X-B8-Client: device`, and receives it only if the request
+ * carries no `Sec-Fetch-*` headers, which every browser sends and page script cannot remove. So the
+ * reason `CeremonyVerifiedResponseSchema` carries no session — the cookie is HttpOnly and a body
+ * copy would be readable by script — still holds for every browser. A native app has no page and no
+ * script to protect against, and it needs the token in hand to put in an Authorization header.
+ *
+ * STRICT, because this object is a credential. A loose schema would pass through whatever else a
+ * future handler put beside the token, and the one payload that must never grow quietly is the one
+ * carrying a bearer secret.
+ *
+ * `expiresAt` is the CURRENT expiry. Device sessions slide — every authenticated request pushes
+ * the expiry out to thirty days from then — so this is the floor the client can count on, not a
+ * countdown it must act on. A client that simply retries sign-in on a 401 needs nothing else.
+ *
+ * The success envelope still cannot say "not verified": a failed ceremony is the error branch
+ * here exactly as it is for the cookie form.
+ */
+export const DeviceSessionSchema = z.strictObject({
+  token: base64url.length(43, 'a session token is 32 bytes, 43 base64url characters'),
+  expiresAt: timestamptz,
+});
+
+export const DeviceSessionResponseSchema = apiResponseSchema(DeviceSessionSchema);
+
+/**
  * The body the boundary returns for a request it refuses: an unauthenticated request to anything
  * outside the five allowlisted surfaces, and `POST /api/v1/auth/logout` with no session.
  *
@@ -277,6 +305,12 @@ export const AuthErrorCodeSchema = z.enum([
   'UNAUTHENTICATED',
   'REGISTRATION_CLOSED',
   'CEREMONY_FAILED',
+  // P1-12a. Authenticated, but this token's scope does not cover the request — a read-only script
+  // token attempting a write. 403, not 401: signing in again would not help, and a client that
+  // treats every refusal as "sign in again" would loop.
+  'INSUFFICIENT_SCOPE',
+  // P1-12a. A device token was requested by a caller that is a browser. See DeviceSessionSchema.
+  'DEVICE_TOKEN_REFUSED',
 ]);
 
 export type RegistrationCeremonyOptions = z.infer<typeof RegistrationCeremonyOptionsSchema>;
@@ -284,3 +318,4 @@ export type AuthenticationCeremonyOptions = z.infer<typeof AuthenticationCeremon
 export type RegistrationCeremonyResponse = z.infer<typeof RegistrationCeremonyResponseSchema>;
 export type AuthenticationCeremonyResponse = z.infer<typeof AuthenticationCeremonyResponseSchema>;
 export type AuthErrorCode = z.infer<typeof AuthErrorCodeSchema>;
+export type DeviceSession = z.infer<typeof DeviceSessionSchema>;

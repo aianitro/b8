@@ -7,16 +7,26 @@
 // against.
 
 import type { NextRequest } from 'next/server';
-import { createSession, listCredentials, recordSignCount } from '@/lib/authSession';
+import { createDeviceSession, createSession, listCredentials, recordSignCount } from '@/lib/authSession';
+import { mayIssueDeviceToken, wantsDeviceToken } from '@/lib/bearerAuth';
 import { createLogger } from '@/lib/logger';
 import { consumeChallenge } from '@/lib/webauthnChallenge';
 import { selectCredential, verifyAuthenticationCeremony } from '@/lib/webauthnVerify';
 import { AuthenticationCeremonyResponseSchema } from '@/shared/contracts/auth';
-import { authError, ceremonyCompleted, withEnvelope } from '../../shared';
+import { authError, ceremonyCompleted, deviceSessionIssued, withEnvelope } from '../../shared';
 
 const log = createLogger('auth');
 
 export const POST = withEnvelope(async (request: NextRequest) => {
+  // P1-12a: a native client may ask for a device token instead of a cookie. Decided BEFORE the
+  // ceremony, so a refused request never spends the user's passkey approval. A browser can never be
+  // given one — see mayIssueDeviceToken for why that is the property that matters.
+  const deviceMode = wantsDeviceToken(request.headers);
+  if (deviceMode && !mayIssueDeviceToken(request.headers)) {
+    log.warn('device token refused: the caller is a browser');
+    return authError('DEVICE_TOKEN_REFUSED', 'Device tokens are issued only to native apps.', 403);
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -58,6 +68,12 @@ export const POST = withEnvelope(async (request: NextRequest) => {
   // The high-water mark, recorded before the session exists, so an accepted assertion cannot be
   // replayed against a counter that was never advanced.
   await recordSignCount(credential.credentialId, verification.newSignCount);
+
+  if (deviceMode) {
+    const device = await createDeviceSession(credential.credentialId);
+    log.info('device session opened');
+    return deviceSessionIssued(device);
+  }
 
   const sessionToken = await createSession(credential.credentialId);
   log.info('session opened');

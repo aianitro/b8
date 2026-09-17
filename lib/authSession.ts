@@ -22,12 +22,17 @@
 import type { PoolClient } from 'pg';
 import db from './db';
 import { SESSION_TTL_SECONDS, generateSessionToken, hashSessionToken } from './sessionToken';
+import { DEVICE_TTL_DAYS, personalTokenDays, type SessionKind, type SessionScope } from './bearerAuth';
 import type { StoredCredential } from './webauthnVerify';
 
 /** A session that exists, is unrevoked, and has not expired — the only kind this module returns. */
 export interface ActiveSession {
   tokenHash: string;
   credentialId: string;
+  /** Which carrier may present it and how long it lives — see lib/bearerAuth.ts. */
+  kind: SessionKind;
+  /** What it may do. Only personal tokens are ever `read`; the schema enforces that. */
+  scope: SessionScope;
 }
 
 /**
@@ -46,8 +51,8 @@ export interface ActiveSession {
 export async function resolveSession(token: string | null | undefined): Promise<ActiveSession | null> {
   if (!token) return null;
 
-  const result = await db.query<{ token_hash: string; credential_id: string }>(
-    `SELECT token_hash, credential_id
+  const result = await db.query<{ token_hash: string; credential_id: string; kind: SessionKind; scope: SessionScope }>(
+    `SELECT token_hash, credential_id, kind, scope
        FROM auth_sessions
       WHERE token_hash = $1
         AND revoked_at IS NULL
@@ -56,7 +61,9 @@ export async function resolveSession(token: string | null | undefined): Promise<
   );
 
   const row = result.rows[0];
-  return row ? { tokenHash: row.token_hash, credentialId: row.credential_id } : null;
+  return row
+    ? { tokenHash: row.token_hash, credentialId: row.credential_id, kind: row.kind, scope: row.scope }
+    : null;
 }
 
 /**
@@ -70,6 +77,33 @@ export async function resolveSession(token: string | null | undefined): Promise<
  * closed by `webauthn_credentials_one_bootstrap` — see `enrolCredential`. The count is what
  * produces a clean refusal in the ordinary case; the index is what covers the concurrent one.
  */
+/**
+ * Record that a session was used, and slide a device session's expiry forward.
+ *
+ * THROTTLED TO ONCE EVERY FIVE MINUTES PER SESSION, in the WHERE clause, so a phone app polling the
+ * API does not turn every read into a write. The boundary and the handler both resolve the same
+ * request; the second call finds the row already touched and does nothing.
+ *
+ * Sliding is `GREATEST`, never a plain assignment, so a touch can only ever extend a device session
+ * — it cannot shorten one whose expiry was set further out by some other path.
+ *
+ * Browser and personal sessions are recorded but not extended. A browser session is 12 hours from
+ * sign-in by design, and a personal token's lifetime is whatever the owner chose when minting it.
+ */
+export async function touchSession(tokenHash: string): Promise<void> {
+  await db.query(
+    `UPDATE auth_sessions
+        SET last_used_at = NOW(),
+            expires_at = CASE WHEN kind = 'device'
+                              THEN GREATEST(expires_at, NOW() + make_interval(days => $2::int))
+                              ELSE expires_at END
+      WHERE token_hash = $1
+        AND revoked_at IS NULL
+        AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '5 minutes')`,
+    [tokenHash, DEVICE_TTL_DAYS]
+  );
+}
+
 export async function countCredentials(): Promise<number> {
   const result = await db.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM webauthn_credentials');
   return Number(result.rows[0].count);
@@ -203,6 +237,100 @@ async function insertSession(client: PoolClient, credentialId: string): Promise<
 }
 
 /** Open a session outside an enrolment — the login path. Same statement, its own connection. */
+/**
+ * A phone app's session, returned to the app as a token it keeps in its keychain.
+ *
+ * Only ever called after a verified passkey ceremony AND after `mayIssueDeviceToken` has confirmed
+ * the caller is not a browser — see the login and register verify handlers.
+ */
+export async function createDeviceSession(credentialId: string): Promise<{ token: string; expiresAt: string }> {
+  const token = generateSessionToken();
+  const result = await db.query<{ expires_at: string }>(
+    `INSERT INTO auth_sessions (token_hash, credential_id, kind, expires_at)
+     VALUES ($1, $2, 'device', NOW() + make_interval(days => $3::int))
+     RETURNING to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at`,
+    [hashSessionToken(token), credentialId, DEVICE_TTL_DAYS]
+  );
+  return { token, expiresAt: result.rows[0].expires_at };
+}
+
+/**
+ * A personal token for a script — minted only by `scripts/tokens.ts`, run by the owner over SSH.
+ *
+ * THERE IS NO HTTP ENDPOINT THAT MINTS THESE, deliberately. A minting endpoint is a way for a
+ * compromised browser session to create a durable credential for itself; SSH access to the server
+ * is a stronger proof of being the owner than anything the web app can check, and the owner is the
+ * only person who ever needs one.
+ *
+ * Attached to the most recently enrolled passkey, because `credential_id` is required and a token
+ * must die with the credential it was minted under — the foreign key cascades.
+ */
+export async function createPersonalToken(options: {
+  label: string;
+  scope: SessionScope;
+  days?: number;
+}): Promise<{ token: string; tokenHash: string; expiresAt: string }> {
+  const days = personalTokenDays(options.days);
+  const label = options.label.trim();
+  if (label.length < 1 || label.length > 60) throw new RangeError('a token label is 1–60 characters');
+
+  const owner = await db.query<{ credential_id: string }>(
+    'SELECT credential_id FROM webauthn_credentials ORDER BY created_at DESC LIMIT 1'
+  );
+  if (owner.rows.length === 0) throw new Error('no passkey is enrolled; register one before minting tokens');
+
+  const token = generateSessionToken();
+  const tokenHash = hashSessionToken(token);
+  const result = await db.query<{ expires_at: string }>(
+    `INSERT INTO auth_sessions (token_hash, credential_id, kind, scope, label, expires_at)
+     VALUES ($1, $2, 'personal', $3, $4, NOW() + make_interval(days => $5::int))
+     RETURNING expires_at::text`,
+    [tokenHash, owner.rows[0].credential_id, options.scope, label, days]
+  );
+  return { token, tokenHash, expiresAt: result.rows[0].expires_at };
+}
+
+/** Every live session, newest first, with nothing that could be used to authenticate. */
+export async function listSessions(): Promise<Array<{
+  tokenHash: string; kind: SessionKind; scope: SessionScope; label: string | null;
+  createdAt: string; expiresAt: string; lastUsedAt: string | null;
+}>> {
+  const result = await db.query<{
+    token_hash: string; kind: SessionKind; scope: SessionScope; label: string | null;
+    created_at: string; expires_at: string; last_used_at: string | null;
+  }>(
+    `SELECT token_hash, kind, scope, label, created_at::text, expires_at::text, last_used_at::text
+       FROM auth_sessions
+      WHERE revoked_at IS NULL AND expires_at > NOW()
+      ORDER BY created_at DESC`
+  );
+  return result.rows.map((r) => ({
+    tokenHash: r.token_hash, kind: r.kind, scope: r.scope, label: r.label,
+    createdAt: r.created_at, expiresAt: r.expires_at, lastUsedAt: r.last_used_at,
+  }));
+}
+
+/**
+ * Revoke the one live session whose hash starts with `prefix`.
+ *
+ * A PREFIX, because a person types it from a list, but at least eight characters and it must match
+ * EXACTLY ONE live row — an ambiguous prefix revokes nothing and says so, rather than revoking the
+ * first match and leaving the owner believing a different token is gone.
+ */
+export async function revokeByPrefix(prefix: string): Promise<'revoked' | 'none' | 'ambiguous' | 'too-short'> {
+  const p = prefix.trim().toLowerCase();
+  if (!/^[0-9a-f]{8,64}$/.test(p)) return 'too-short';
+  const matches = await db.query<{ token_hash: string }>(
+    `SELECT token_hash FROM auth_sessions
+      WHERE token_hash LIKE $1 || '%' AND revoked_at IS NULL AND expires_at > NOW()`,
+    [p]
+  );
+  if (matches.rows.length === 0) return 'none';
+  if (matches.rows.length > 1) return 'ambiguous';
+  await revokeSession(matches.rows[0].token_hash);
+  return 'revoked';
+}
+
 export async function createSession(credentialId: string): Promise<string> {
   const client: PoolClient = await db.connect();
   try {
