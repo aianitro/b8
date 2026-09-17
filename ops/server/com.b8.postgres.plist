@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A system LaunchDaemon, not a per-user LaunchAgent, on purpose: agents only start once someone logs
+  in at the screen, so after a power cut — which this battery-less machine has already had — a
+  headless server would stay down until somebody opened the lid and typed a password. Daemons start
+  at boot. UserName drops privileges, so nothing here runs as root.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.b8.postgres</string>
+  <key>UserName</key><string>__USER__</string>
+  <key>ProgramArguments</key>
+  <array><string>__APP__/ops/server/start-postgres.sh</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>HOME</key><string>__HOME__</string></dict>
+  <key>RunAtLoad</key><true/>
+  <!-- Restart on crash, but not in a tight loop: ten seconds between attempts. -->
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>__HOME__/b8-logs/postgres.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/b8-logs/postgres.log</string>
+</dict>
+</plist>
