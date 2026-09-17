@@ -130,6 +130,23 @@ the app and `tailscale serve` agree by construction.
 
 ### 7. Register a passkey on the server
 
+**Done 2026-09-17, and the way it had to be done is worth knowing.** A passkey belongs to the domain
+it was registered on. The restored database carried the laptop's passkey, registered at `localhost`,
+which a browser on the tailnet will never offer — and because one passkey existed, registration was
+closed. So nobody could sign in. The fix was to remove that one row from the SERVER's database only,
+saved first, which reopened registration, and to register from the phone at the tailnet address
+immediately.
+
+**This changes cutover.** A fresh copy of the laptop's data must leave out `webauthn_credentials`
+and `auth_sessions`, or it will overwrite the tailnet passkey with the unusable `localhost` one:
+
+```bash
+pg_dump -Fc -d b8_finance \
+  --exclude-table-data=webauthn_credentials --exclude-table-data=auth_sessions -f b8.dump
+```
+
+The original guidance, kept for a fresh install:
+
 The first registration is open only while zero credentials exist, and closes permanently on the
 first one. Your laptop's credential lives in the laptop's database, so:
 

@@ -419,3 +419,32 @@ checked that the migration had in fact been applied to the database the app runs
 merge was green because every suite runs against a scratch database that the harness migrates
 itself. Recorded as a finding; the envelope fix that makes the next such failure legible is
 `8e07eb4`.
+
+---
+
+## Evidence #3 — 2026-09-17, DISCHARGED
+
+**Authentication with an enrolled passkey: CONFIRMED on real hardware, over the tailnet.**
+
+The home server's copy of the database had its `localhost` credential removed (the owner ran the
+delete; the rows were saved first to `~/b8-backups/passkey-before-tailnet-2026-09-17.dump`), which
+reopened the bootstrap window. The owner then registered from an iPhone 15 Pro at
+`https://<machine>.tail368cae.ts.net`, and signed in twice more:
+
+```
+webauthn_credentials  AiKKYxM7…  enrolled_via=bootstrap  08:48:37
+auth_sessions         a7efe4f4…  08:48:37   ← issued by registration
+auth_sessions         c8ed5e60…  08:49:19   ← "session opened": an authentication ceremony
+auth_sessions         abaabaec…  08:49:43   ← "session opened": an authentication ceremony
+```
+
+A second registration attempt afterwards returned `REGISTRATION_CLOSED`, so the bootstrap window
+closed on the first credential exactly as designed.
+
+**This also proves the relying-party change made the same day.** Both ceremonies ran on the tailnet
+origin with `rp.id` set to the tailnet hostname, selected per request by `relyingPartyIdFor`. With
+the previous fixed `localhost` the browser would have refused before the server saw a request.
+
+**Carried forward, and not solved here:** sessions are 12 hours. On a phone that means signing in
+twice a day. P1-12a's design gives phone sessions a sliding 30-day window; until it is built, that
+is the cost.
