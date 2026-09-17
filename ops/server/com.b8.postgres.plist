@@ -17,6 +17,8 @@
   <!-- Restart on crash, but not in a tight loop: ten seconds between attempts. -->
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
+  <!-- Room for a fast shutdown's checkpoint before launchd resorts to SIGKILL. -->
+  <key>ExitTimeOut</key><integer>60</integer>
   <key>StandardOutPath</key><string>__HOME__/b8-logs/postgres.log</string>
   <key>StandardErrorPath</key><string>__HOME__/b8-logs/postgres.log</string>
 </dict>

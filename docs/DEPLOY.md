@@ -229,6 +229,28 @@ Never restore over `b8_finance` without taking a dump of it first.
 
 ---
 
+## Cutover — done 2026-09-17
+
+The home server is the source of truth. What was done, in this order, so there was never a morning
+with two emails or none:
+
+1. The laptop's daily job was DISABLED (`launchctl disable`, which persists across reboots) and
+   its `ALERTS_ENABLED` emptied. Nothing on the laptop writes on a schedule any more.
+2. A final verified backup on the laptop, then a dump with the passkey and session DATA excluded.
+3. Restored on the server into a NEW database, `b8_finance_new`, with the server's own tailnet
+   passkey and sessions copied in, and every count compared against the laptop.
+4. Swapped: connections refused, the live database renamed to `b8_finance_pre_cutover` and kept,
+   the new one renamed into place. Nothing was dropped.
+5. Mail and the daily job enabled on the server. The morning run — backup, sync, snapshot, digest —
+   runs as `com.b8.daily`, a system daemon, at 06:00.
+
+**The laptop's database is now stale.** Use `https://<machine>.ts.net` on the laptop too. The laptop's
+copy is kept as a fallback, not a second place to file transactions.
+
+**To roll back:** re-enable the laptop's job and alerts, and on the server rename the databases back.
+
+---
+
 ## What this step does NOT give you
 - **No process supervision beyond `restart: unless-stopped`.** If the machine reboots, Docker
   restarts the containers; if the app crashes in a loop, nothing tells you.
