@@ -173,10 +173,41 @@ devDependencies (`tsx` among them) that the pruned runtime image deliberately dr
 
 ---
 
-## What this step does NOT give you
+---
 
-- **No backups.** That is the rest of step 20, and it is the next thing to do. The dumps in `../`
-  are from 31 August and July; everything categorised since is unprotected.
+## Backups
+
+**Done 2026-09-16.** `npm run backup`, and the launchd agent runs it before the daily job every
+morning.
+
+Each run dumps, **restores the dump into a scratch database and counts it against the source**, and
+only then keeps the file. A restore rehearsed once by hand tells you about that day; what goes wrong
+later is silent — a dump truncated because a disk filled, a `pg_dump` that starts failing after a
+server upgrade — and every one of those leaves a directory full of files that look exactly like
+backups. The output here is not "a backup was written", it is "a backup was written and it came
+back".
+
+- Written to `../backups/`, outside the repo, 30 kept (about 4 MB).
+- The pruner only ever considers files matching its own naming pattern, so the dumps taken by hand
+  before risky migrations are invisible to it.
+- Written under a `.partial` name and renamed on success, so an interrupted dump can never be
+  mistaken for a good one.
+- Backup runs BEFORE the sync, so the dump is from before the day's mutations, and with `;` rather
+  than `&&`, so a backup failure costs the backup and not the sync, the snapshot and the mail.
+
+**Restoring for real**, which is the thing this rehearses:
+
+```bash
+createdb b8_restore_check
+pg_restore -d b8_restore_check --no-owner ../backups/<newest>.dump
+psql -d b8_restore_check -c 'SELECT count(*) FROM transactions;'
+```
+
+Never restore over `b8_finance` without taking a dump of it first.
+
+---
+
+## What this step does NOT give you
 - **No process supervision beyond `restart: unless-stopped`.** If the machine reboots, Docker
   restarts the containers; if the app crashes in a loop, nothing tells you.
 - **launchd only runs while the machine is awake and logged in.** It will run a missed job shortly
