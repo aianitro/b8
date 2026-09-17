@@ -251,6 +251,45 @@ copy is kept as a fallback, not a second place to file transactions.
 
 ---
 
+## Tokens for a script or a phone — `npm run tokens`
+
+The app answers a `Authorization: Bearer <token>` header as well as a browser cookie. Two kinds,
+both rows in the same `auth_sessions` table:
+
+- **A device session** is what the phone app will get from the passkey ceremony it already uses.
+  Nothing to mint by hand — it arrives in the sign-in response, lasts 30 days, and every use pushes
+  that out, so an app in daily use never signs itself out. A BROWSER can never be given one.
+- **A personal token** is for a script of your own. It is minted here on the server, over SSH, and
+  there is no HTTP endpoint that mints one — a credential that a request can create is a credential
+  a stolen request can create.
+
+```bash
+ssh -i ~/.ssh/b8_server aanpilogov@<server>
+export PATH=$HOME/opt/node/bin:$HOME/opt/pg16/bin:$PATH
+cd ~/b8
+
+npm run tokens -- create "eval runner" --read --days 30   # --read is optional; default is full
+npm run tokens -- list                                     # id, kind, scope, label, last use, expiry
+npm run tokens -- revoke <id>                              # the short id from create or list
+```
+
+**The token is printed once and never again** — only its hash is stored, so `list` cannot show it
+and neither can anybody who reads the database. Lost it, mint another and revoke the old one.
+
+`--read` is worth using for anything that only reads: a read token may GET anything and POST only
+`/api/v1/chat`, and every write comes back 403 `INSUFFICIENT_SCOPE`. It also cannot enrol a passkey
+— a read-only credential that could enrol would not be read-only, and neither can a full personal
+token, because the passkey would outlive revoking the token that made it. Enrolling is for the
+browser you are signed in to and for the phone.
+
+Use it against the tailnet name, not the LAN address:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" https://<machine>.ts.net/api/v1/overview
+```
+
+---
+
 ## What this step does NOT give you
 - **No process supervision beyond `restart: unless-stopped`.** If the machine reboots, Docker
   restarts the containers; if the app crashes in a loop, nothing tells you.
