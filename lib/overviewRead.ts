@@ -24,13 +24,12 @@
 // plausible and fails only the one that checks it AGREES with the other caller. They are called,
 // never copied.
 //
-// WHAT IT DOES REIMPLEMENT, and why that is not the same thing. The six ad hoc queries below —
-// `getStats`, `getTodayStats`, `getWeekStats`, `getMonthlySpending`, `getRecentArrivals`,
-// `getBudgetVsActual` — are private, unexported functions inside `app/dashboard/page.tsx` today. A
-// route handler cannot import a page's private function any more than the scheduler could, which
-// is the reason `lib/monthOutlookRead.ts` exists. Their SQL is carried here with the predicates
-// UNCHANGED, down to the comments that record what each one cost to get right, so the endpoint and
-// the page cannot disagree before `P1-11a` deletes the page's copy and points it at this one.
+// THE SIX QUERIES BELOW ARE NOW THE ONLY COPY. They began as private functions inside
+// `app/dashboard/page.tsx` — `getStats`, `getTodayStats`, `getWeekStats`, `getMonthlySpending`,
+// `getRecentArrivals`, `getBudgetVsActual` — and were carried here for the endpoint with their
+// predicates unchanged. P1-11a checked the two copies were still identical on 2026-09-17, deleted
+// the page's, and pointed the dashboard at `loadOverview`. The dashboard and the API therefore read
+// one definition; a change to a figure made here changes both, which is the point.
 
 import db from './db';
 import { roundCents } from './budgetMath';
@@ -557,7 +556,7 @@ export function composeOverview(sources: OverviewSources): OverviewData {
 // six WHERE clauses that look arbitrary and invite the next reader to "simplify" one.
 
 /**
- * The four headline counters — the page's `getStats`.
+ * The four headline counters — rendered by the dashboard and served by the API.
  */
 async function readStats(asOf: AsOf): Promise<OverviewSources['stats']> {
   const result = await db.query<{
@@ -605,7 +604,7 @@ async function readStats(asOf: AsOf): Promise<OverviewSources['stats']> {
 }
 
 /**
- * What arrived since the previous day's sync — the page's `getRecentArrivals`.
+ * What arrived since the previous day's sync — rendered by the dashboard and served by the API.
  *
  * Keyed on `created_at`, not on the transaction DATE: the question is what is new to the reader,
  * and a charge dated the 9th that landed this morning is news while one dated today that arrived
@@ -640,7 +639,7 @@ async function readRecentArrivals(): Promise<OverviewSources['recentArrivals']> 
   }));
 }
 
-/** Today, against the same weekday's recent average — the page's `getTodayStats`. */
+/** Today, against the same weekday's recent average — rendered by the dashboard and served by the API. */
 async function readToday(): Promise<OverviewSources['today']> {
   const [todayResult, avgResult, txnsResult] = await Promise.all([
     db.query<{ spent: string }>(`
@@ -697,7 +696,7 @@ async function readToday(): Promise<OverviewSources['today']> {
   };
 }
 
-/** This week, against the same point last week — the page's `getWeekStats`. */
+/** This week, against the same point last week — rendered by the dashboard and served by the API. */
 async function readWeek(): Promise<OverviewSources['week']> {
   const [weekResult, lastWeekResult, budgetResult] = await Promise.all([
     db.query<{ spent: string; iso_dow: number }>(`
@@ -744,7 +743,7 @@ async function readWeek(): Promise<OverviewSources['week']> {
   };
 }
 
-/** Operational spending per elapsed month — the page's `getMonthlySpending`. */
+/** Operational spending per elapsed month — rendered by the dashboard and served by the API. */
 async function readMonthlySpending(asOf: AsOf): Promise<OverviewSources['monthlySpending']> {
   const { rows } = await db.query<{ month_num: number; total: string; received: string }>(`
     SELECT EXTRACT(MONTH FROM t.date)::int AS month_num,
@@ -775,7 +774,7 @@ async function readMonthlySpending(asOf: AsOf): Promise<OverviewSources['monthly
   return out;
 }
 
-/** Each operational category's year against its allocation — the page's `getBudgetVsActual`. */
+/** Each operational category's year against its allocation — rendered by the dashboard and served by the API. */
 async function readBudgetVsActual(asOf: AsOf): Promise<OverviewSources['budgetVsActual']> {
   const result = await db.query<{ category: string; budget: string; spent: string }>(`
     -- Net of refunds, like every other spend figure on this page. Gross was overstating Travel by

@@ -2,11 +2,9 @@ export const dynamic = 'force-dynamic';
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import db from '@/lib/db';
-import BudgetTracks, { type BudgetTrackRow } from '@/components/charts/BudgetTracks';
+import BudgetTracks from '@/components/charts/BudgetTracks';
 import ProfitLossChart from '@/components/charts/ProfitLossChart';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
-import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
 import JobHealthCard from '@/components/JobHealthCard';
@@ -15,22 +13,19 @@ import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbl
 import RecentArrivals from '@/components/RecentArrivals';
 import WatchlistCard from '@/components/WatchlistCard';
 import BudgetBar from '@/components/BudgetBar';
-import { loadFeedHealth } from '@/lib/feedHealthRead';
-import { loadWatchlist } from '@/lib/watchlistRead';
-import { loadJobHealth } from '@/lib/jobHealthRead';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
 // this one replaces was already in tension with it.
-import { asOfFromDate, type MonthOutlook, type OutlookCategory } from '@/lib/domain/monthOutlook';
+import { asOfFromDate, type OutlookCategory } from '@/lib/domain/monthOutlook';
+import { loadOverview } from '@/lib/overviewRead';
+import { dashboardFromWire } from '@/lib/overviewFromWire';
 // The SQL behind that verdict now lives in `lib/`, shared with the daily job's breach alert, so the
 // page and the email can never drift on what this month's outlook is. It moved for the same reason
 // `lib/` already holds a shared reader for the scheduler's other daily computation: a scheduler
 // cannot import a page's private function, and copying the queries would have put two definitions
 // of the same figures one directory apart. Nothing a reader sees changed — the queries moved
 // verbatim, and the page is touched here only by a deletion and this import.
-import { loadMonthOutlook } from '@/lib/monthOutlookRead';
-import { loadYearEnd } from '@/lib/yearEndRead';
 import { MONTHS, drillHref } from '@/lib/drilldown';
 // The calendar rule, imported rather than restated: `./pacing` exports it precisely so a caller
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
@@ -48,270 +43,16 @@ const fmtCents = (n: number) =>
 /** A fraction of budget as a percentage. `2.6625` reads "266%" — of budget, not over it. */
 const pct = (fraction: number) => `${Math.round(fraction * 100)}%`;
 
-interface DashboardAsOf {
-  year: number;
-  month: number;
-  day: number;
-}
-
-async function getStats(asOf: DashboardAsOf) {
-  const result = await db.query<{ total_budget: string; ytd_spent: string; uncategorized: string; total_txns: string }>(`
-    SELECT
-      -- OPERATIONAL only, and expenses only.
-      --
-      -- is_income was already excluded on both halves: a salary category carries an annual_budget
-      -- too, and counting it made "Annual Budget" the sum of what is planned to be spent AND what
-      -- is expected to come in.
-      --
-      -- The landscape predicate is newer and fixes the same shape of error one level up. These two
-      -- cards were summing both books while everything around them — the hero, the bubbles, the
-      -- P/L chart and card — reads operational, so "Annual Budget" was $309,946 against an
-      -- operational plan of $139,237, and "Remaining" was −$58,312, a figure driven almost entirely
-      -- by a bathroom remodel overrunning its capital allocation rather than by anything in the
-      -- monthly budget beneath it.
-      --
-      -- Net of refunds, not gross, matching app/budget/page.tsx. Those two disagreed by $11,169
-      -- across 2026, which was enough for the same year to read over pace on one page and on track
-      -- on the other.
-      (SELECT COALESCE(SUM(annual_budget), 0) FROM budget_categories
-        WHERE exclude_from_budget = FALSE AND is_income = FALSE
-          AND landscape = 'operational')::text AS total_budget,
-      (SELECT COALESCE(SUM(t.amount), 0)
-         FROM transactions t
-         JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-         JOIN budget_categories bc ON bc.name = t.mapped_category
-              AND bc.exclude_from_budget = FALSE AND bc.is_income = FALSE
-              AND bc.landscape = 'operational'
-         WHERE EXTRACT(YEAR FROM t.date) = $1 AND t.hidden = FALSE)::text AS ytd_spent,
-      (SELECT COUNT(*) FROM transactions t JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-         WHERE t.mapped_category IS NULL AND t.hidden = FALSE)::text AS uncategorized,
-      (SELECT COUNT(*) FROM transactions t JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-         WHERE t.hidden = FALSE)::text AS total_txns
-  `, [asOf.year]);
-  const r = result.rows[0];
-  const budget = Number(r.total_budget);
-  const spent = Number(r.ytd_spent);
-  const uncategorized = Number(r.uncategorized);
-  const totalTxns = Number(r.total_txns);
-  return {
-    budget, spent, remaining: budget - spent, uncategorized, totalTxns,
-  };
-}
-
-
-interface MonthlySpend { month: string; operational: number; received: number }
-
-interface TodayStats {
-  spent: number;
-  avgSameWeekday: number;
-  transactions: { label: string; amount: number }[];
-  totalCount: number;
-}
-
+/**
+ * One recently arrived transaction, as `RecentArrivals` renders it. Kept here because the component
+ * imports its type from this page.
+ */
 export interface RecentArrival {
   id: number;
   date: string;
   amount: number;
   label: string;
   category: string | null;
-}
-
-
-/**
- * What arrived since the previous day's sync.
- *
- * Keyed on `created_at`, not on the transaction DATE: the question is what is new to the reader,
- * and a charge dated the 9th that landed this morning is news while one dated today that arrived
- * two syncs ago is not. Those differ by a day or more on every card feed.
- *
- * 36 hours rather than 24 so a sync running an hour later than yesterday's does not silently drop
- * a day's arrivals out of the window.
- */
-async function getRecentArrivals(): Promise<RecentArrival[]> {
-  const { rows } = await db.query<{
-    id: number; date: string; amount: string; label: string;
-    category: string | null; created_at: string;
-  }>(`
-    SELECT t.id, t.date::text, t.amount::text,
-           COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
-           t.mapped_category AS category, t.created_at::text
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-     WHERE t.created_at > NOW() - INTERVAL '36 hours'
-       AND t.hidden = FALSE
-     ORDER BY t.amount DESC, t.id
-     LIMIT 12
-  `);
-  return rows.map((r) => ({
-    id: r.id, date: r.date, amount: Number(r.amount),
-    label: r.label, category: r.category,
-  }));
-}
-
-async function getTodayStats(): Promise<TodayStats> {
-  const [todayResult, avgResult, txnsResult] = await Promise.all([
-    db.query<{ spent: string }>(`
-      SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS spent
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-      LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
-      WHERE t.date = CURRENT_DATE
-        AND t.hidden = FALSE
-        -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
-        -- whether an unfiled row is income, spend or half a transfer, and the last one to
-        -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
-        -- them, because a row with no category row fails it.
-        AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
-    `),
-    // Average of the same weekday's total spend over the trailing 30 days (excluding today) —
-    // "is today unusual" without building full anomaly detection.
-    db.query<{ avg_spent: string }>(`
-      SELECT COALESCE(AVG(daily_total), 0)::text AS avg_spent
-      FROM (
-        SELECT t.date, SUM(t.amount) FILTER (WHERE t.amount > 0) AS daily_total
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-        LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
-        WHERE t.date >= CURRENT_DATE - INTERVAL '30 days'
-          AND t.date < CURRENT_DATE
-          AND EXTRACT(DOW FROM t.date) = EXTRACT(DOW FROM CURRENT_DATE)
-          AND t.hidden = FALSE
-          -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
-        -- whether an unfiled row is income, spend or half a transfer, and the last one to
-        -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
-        -- them, because a row with no category row fails it.
-        AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
-        GROUP BY t.date
-      ) daily
-    `),
-    db.query<{ name: string | null; merchant_name: string | null; amount: string; total_count: string }>(`
-      SELECT t.name, t.merchant_name, t.amount::text, COUNT(*) OVER()::text AS total_count
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-      WHERE t.date = CURRENT_DATE AND t.hidden = FALSE AND t.amount > 0
-      ORDER BY t.amount DESC
-      LIMIT 3
-    `),
-  ]);
-  return {
-    spent: Number(todayResult.rows[0]?.spent ?? 0),
-    avgSameWeekday: Number(avgResult.rows[0]?.avg_spent ?? 0),
-    transactions: txnsResult.rows.map((r) => ({ label: r.merchant_name ?? r.name ?? 'Transaction', amount: Number(r.amount) })),
-    totalCount: Number(txnsResult.rows[0]?.total_count ?? 0),
-  };
-}
-
-interface WeekStats {
-  spent: number;
-  spentComparableLastWeek: number;
-  weeklyBudgetReference: number;
-  /** Monday = 1 … Sunday = 7, matching `date_trunc('week', …)`. Read database-side, beside the
-   *  CURRENT_DATE the same query already filters on, rather than from a second clock in JS that
-   *  can disagree with it across midnight. */
-  isoDow: number;
-}
-
-async function getWeekStats(): Promise<WeekStats> {
-  const [weekResult, lastWeekResult, budgetResult] = await Promise.all([
-    db.query<{ spent: string; iso_dow: number }>(`
-      SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS spent,
-             EXTRACT(ISODOW FROM CURRENT_DATE)::int AS iso_dow
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-      LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
-      WHERE t.date >= date_trunc('week', CURRENT_DATE)
-        AND t.hidden = FALSE
-        -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
-        -- whether an unfiled row is income, spend or half a transfer, and the last one to
-        -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
-        -- them, because a row with no category row fails it.
-        AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
-    `),
-    // Same portion of the week, shifted back exactly 7 days — a fair week-over-week comparison
-    // regardless of which day of the week "today" is.
-    db.query<{ spent: string }>(`
-      SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS spent
-      FROM transactions t
-      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-      LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
-      WHERE t.date >= date_trunc('week', CURRENT_DATE) - INTERVAL '7 days'
-        AND t.date <= CURRENT_DATE - INTERVAL '7 days'
-        AND t.hidden = FALSE
-        -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
-        -- whether an unfiled row is income, spend or half a transfer, and the last one to
-        -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
-        -- them, because a row with no category row fails it.
-        AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
-    `),
-    db.query<{ weekly_budget: string }>(`
-      -- Operational only, matching the spend it is compared against. It was summing both books,
-      -- so a week of operational spending was measured against $5,960.50 when the operational
-      -- reference is $2,677.63 — the week read twice as comfortable as it is.
-      SELECT COALESCE(SUM(annual_budget) / 52, 0)::text AS weekly_budget
-      FROM budget_categories
-      WHERE exclude_from_budget = FALSE AND is_income = FALSE AND landscape = 'operational'
-    `),
-  ]);
-  return {
-    spent: Number(weekResult.rows[0]?.spent ?? 0),
-    spentComparableLastWeek: Number(lastWeekResult.rows[0]?.spent ?? 0),
-    weeklyBudgetReference: Number(budgetResult.rows[0]?.weekly_budget ?? 0),
-    isoDow: Number(weekResult.rows[0]?.iso_dow ?? 1),
-  };
-}
-
-/** Operational spending per elapsed month, for the bars behind the P/L line. */
-async function getMonthlySpending(asOf: DashboardAsOf): Promise<MonthlySpend[]> {
-  // The budget-per-month reference this used to fetch alongside is gone with the line it drew.
-  // It summed every category including income, so it put the whole salary above the bars it was
-  // meant to measure — and the P/L line now answers "are we ahead" better than a flat average did.
-  const { rows } = await db.query<{ month_num: number; total: string; received: string }>(`
-    SELECT EXTRACT(MONTH FROM t.date)::int AS month_num,
-           COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text        AS total,
-           COALESCE(ABS(SUM(t.amount) FILTER (WHERE t.amount < 0)), 0)::text   AS received
-    FROM transactions t
-    JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-    LEFT JOIN budget_categories bc ON bc.name = t.mapped_category
-    WHERE EXTRACT(YEAR FROM t.date) = $1
-      -- Uncategorized rows are excluded here as they are from the P/L: the app cannot say
-      -- whether an unfiled row is income, spend or half a transfer, and the last one to
-      -- arrive was half a transfer worth $2,175. A LEFT JOIN plus this predicate drops
-      -- them, because a row with no category row fails it.
-      AND bc.exclude_from_budget = FALSE AND bc.landscape = 'operational'
-      AND t.hidden = FALSE
-    GROUP BY month_num
-  `, [asOf.year]);
-
-  const out: MonthlySpend[] = MONTHS.map((month) => ({ month, operational: 0, received: 0 }));
-  for (const r of rows) {
-    out[r.month_num - 1].operational = Number(r.total);
-    out[r.month_num - 1].received = Number(r.received);
-  }
-  return out;
-}
-
-
-
-async function getBudgetVsActual(asOf: DashboardAsOf): Promise<BudgetTrackRow[]> {
-  const result = await db.query<BudgetTrackRow & { landscape: string }>(`
-    -- Net of refunds, like every other spend figure on this page. Gross was overstating Travel by
-    -- $4,099 of cancelled bookings and Health by $1,836 of reimbursements — enough to put Health
-    -- at 198% of its budget when it is at 137%.
-    SELECT bc.name AS category, bc.landscape, bc.annual_budget AS budget,
-           COALESCE(SUM(t.amount), 0) AS spent
-    FROM budget_categories bc
-    LEFT JOIN transactions t ON t.mapped_category = bc.name
-      AND EXTRACT(YEAR FROM t.date) = $1
-      AND t.hidden = FALSE
-    LEFT JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-    WHERE bc.exclude_from_budget = FALSE
-      AND bc.landscape = 'operational'
-      AND bc.is_income = FALSE
-      AND (t.id IS NULL OR a.id IS NOT NULL)
-    GROUP BY bc.name, bc.landscape, bc.annual_budget
-    ORDER BY bc.landscape, spent DESC
-  `, [asOf.year]);
-  return result.rows.map((r) => ({ ...r, budget: Number(r.budget), spent: Number(r.spent) }));
 }
 
 function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
@@ -450,35 +191,24 @@ export default async function DashboardPage() {
   // The page's ONE clock read. Everything downstream — the domain module's as-of point, every
   // date-bounded query, the year in the header — is derived from these three integers, in local
   // calendar time, so nothing on this page can straddle midnight or a New Year in two directions.
-  const asOf = asOfFromDate(new Date());
+  const now = new Date();
+  const asOf = asOfFromDate(now);
   const monthLength = daysInMonth(asOf.year, asOf.month);
 
-  // Kicked off alongside the rest rather than awaited after, so the reconciliation check
-  // doesn't add a serial round trip to page load.
-  const driftPromise = findBalanceDrift();
-  const feedPromise = loadFeedHealth();
-  const jobHealthPromise = loadJobHealth();
-  const [stats, monthRead, todayStats, weekStats, monthly, budgetVsActual,
-         recentArrivals, watchlist, yearEnd] =
-    await Promise.all([
-      getStats(asOf), loadMonthOutlook(asOf),
-      getTodayStats(), getWeekStats(), getMonthlySpending(asOf),
-      getBudgetVsActual(asOf), getRecentArrivals(),
-      // In this batch rather than awaited after it: one indexed read over a partial index that
-      // covers only the flagged rows, so it adds no serial round trip to page load.
-      loadWatchlist(),
-      // Operational, matching /budget's default tab, so the two pages show the same figure. The
-      // capital year is lumpy by construction — a remodel draws $40,000 in May — and averaging it
-      // in would give a P/L nobody is steering by.
-      loadYearEnd('operational', asOf),
-    ]);
-  const [driftFindings, feedFindings, jobHealth] = await Promise.all([driftPromise, feedPromise, jobHealthPromise]);
-
-  // The whole verdict, from one reader shared with the daily job. Its three queries still run
-  // concurrently with everything else above — `loadMonthOutlook` issues them together and is itself
-  // one entry in this `Promise.all`, so nothing became serial in the move.
-  const outlook: MonthOutlook = monthRead.outlook;
-
+  // P1-11a: EVERYTHING BELOW IS READ FROM THE /overview PAYLOAD — the same object the mobile client
+  // will consume, produced by the same function the API handler wraps. The page used to run ten
+  // queries and six loaders of its own; those were copied into `lib/overviewRead.ts` for the
+  // endpoint on 2026-09-13, and on 2026-09-17 they were checked to be identical before this switch
+  // (one differed by a constant column nothing read). Reading the payload is what keeps the two
+  // from ever diverging again: a field this screen needs and the payload lacks is now a type error.
+  //
+  // `now` is the same Date the page's own clock read produced, so the payload's as-of point and the
+  // page's are one calendar, not two that disagree around midnight.
+  const {
+    stats, today: todayStats, week: weekStats, monthlySpending: monthly, budgetVsActual,
+    recentArrivals, watchlist, yearEnd, offCycleElsewhere, monthCategories,
+    feedFindings, driftFindings, jobHealth,
+  } = dashboardFromWire(await loadOverview(now));
 
   // Share of the year gone, from the page's own clock read. The tracks compare a year's spend to
   // a year's budget, and without this the reader has to date the figure themselves.
@@ -520,30 +250,11 @@ export default async function DashboardPage() {
     plProjected: i >= lastSettled ? yearEnd.monthly[i].cumulative : null,
   }));
 
-  // EVERY operational spending category, not the scored subset.
-  //
-  // The lists below partition to `isScoredCategory` — discretionary lines, where behaviour is the
-  // variable — and that is right for a verdict. It is wrong for a picture of where the money is:
-  // groceries, fuel, property tax and utilities are most of the month by value and none of them
-  // are a decision anyone makes monthly, so a chart drawn off the partitions showed a household
-  // spending about $1,150 when the real figure is several times that. The bubbles are a map, not
-  // a judgement, and a map that omits the largest territory is the wrong shape.
-  //
-  // `monthRead.allPaces` comes off the same fetch, the same actuals and the same recurrence the
-  // verdict uses, so a category appearing in both cannot carry two different figures.
-  // Scoped to the as-of month. `categoryPacing` emits a record per category PER MONTH — that is
-  // what lets `offCycleElsewhere` report an earlier month's breach — so taking the array whole
-  // drew a category once for every month it had a budget in, 28 circles over 21 categories.
-  const bubbleCategories: BubbleCategory[] = monthRead.allPaces
-    .filter((p) => p.month === asOf.month && p.budgeted > 0)
-    .map((p) => ({
-      category: p.category,
-      budgeted: p.budgeted,
-      actual: p.actual,
-      projectedRatio: p.projectedRatio,
-      tooEarly: p.status === 'too-early' || p.status === 'future' || p.status === 'no-budget',
-    }));
-
+  // EVERY operational spending category with an allocation this month, not the scored subset —
+  // the bubbles are a map, not a judgement, and a map that omits groceries, fuel and utilities is
+  // the wrong shape. Scoping and shaping now happen in `lib/overviewRead.ts`, once, for this page
+  // and the mobile client alike.
+  const bubbleCategories: BubbleCategory[] = monthCategories;
 
   return (
     <div className="p-8 max-w-6xl mx-auto">
@@ -597,10 +308,10 @@ export default async function DashboardPage() {
       {/* One panel where there were three, so the grid that sized itself to the survivors is gone
           with them — a single-column grid is a div, and the arithmetic behind it was machinery for
           a layout that no longer varies. */}
-      {outlook.offCycleElsewhere.length > 0 && (
+      {offCycleElsewhere.length > 0 && (
         <div className="mb-6">
           <Panel title="Off-cycle earlier this year">
-            {outlook.offCycleElsewhere.map((c) => (
+            {offCycleElsewhere.map((c) => (
               <CategoryLine key={`${c.categoryId}-${c.month}`} c={c} note={`${MONTHS[c.month]} drew outside its schedule`} />
             ))}
           </Panel>
@@ -619,8 +330,8 @@ export default async function DashboardPage() {
           label="Projected P/L"
           value={`${yearEnd.profitLoss < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.profitLoss))}`}
           sub={`${yearEnd.netToDate < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.netToDate))} so far`
-            + (yearEnd.uncategorized.net !== 0
-                ? ` · ${fmt(Math.abs(yearEnd.uncategorized.net))} unfiled, not counted`
+            + (yearEnd.uncategorizedNet !== 0
+                ? ` · ${fmt(Math.abs(yearEnd.uncategorizedNet))} unfiled, not counted`
                 : '')}
           highlight={yearEnd.profitLoss < 0 ? 'red' : 'green'}
           href="/budget"

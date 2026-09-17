@@ -28,6 +28,7 @@ vi.mock('./db', () => ({
 import { composeOverview, wireMoney, wireMoneyOrNull, type OverviewSources } from './overviewRead';
 import { assertScratchDatabase } from './testDbGuard';
 import { OverviewDataSchema } from '../shared/contracts/overview';
+import { dashboardFromWire } from './overviewFromWire';
 import type { OutlookCategory } from './domain/monthOutlook';
 import type { FeedFinding } from './domain/feedHealth';
 
@@ -570,5 +571,58 @@ describe('the three sections P1-11a added, which the dashboard could not be fed 
 
   it('still validates against the published schema with all three present', () => {
     expect(() => OverviewDataSchema.parse(composeOverview(fabricatedSources()))).not.toThrow();
+  });
+});
+
+describe('the dashboard reads the payload back without losing anything it displays', () => {
+  // P1-11a. The dashboard now renders from `dashboardFromWire(loadOverview())` instead of from its
+  // own ten queries, so every figure makes a round trip: float -> cent-rounded string -> float. This
+  // is the fixture that says the round trip is exact to the cent, which is the finest precision any
+  // figure on the page is displayed at.
+  const cents = (n: number) => Math.round(n * 100);
+
+  it('round-trips every money figure to the cent', () => {
+    const src = fabricatedSources();
+    const page = dashboardFromWire(composeOverview(src));
+
+    expect(cents(page.stats.budget)).toBe(cents(src.stats.budget));
+    expect(cents(page.stats.spent)).toBe(cents(src.stats.spent));
+    expect(cents(page.stats.remaining)).toBe(cents(src.stats.budget - src.stats.spent));
+    expect(cents(page.today.spent)).toBe(cents(src.today.spent));
+    expect(cents(page.week.spent)).toBe(cents(src.week.spent));
+    expect(page.monthlySpending.map((m) => cents(m.operational))).toEqual(src.monthlySpending.map((m) => cents(m.operational)));
+    expect(page.recentArrivals.map((r) => cents(r.amount))).toEqual(src.recentArrivals.map((r) => cents(r.amount)));
+    expect(page.budgetVsActual.map((b) => cents(b.spent))).toEqual(src.budgetVsActual.map((b) => cents(b.spent)));
+    expect(cents(page.yearEnd.profitLoss)).toBe(cents(src.yearEnd.profitLoss));
+    expect(page.yearEnd.monthly.map((p) => cents(p.cumulative))).toEqual(src.yearEnd.monthly.map((p) => cents(p.cumulative)));
+    expect(page.monthCategories.map((c) => cents(c.actual))).toEqual(src.monthCategories.map((c) => cents(c.actual)));
+    expect(page.watchlist.map((w) => cents(w.amount))).toEqual(src.watchlist.map((w) => cents(w.amount)));
+  });
+
+  it('turns every money value back into a real number, not a string that would concatenate', () => {
+    // `'84.20' + 12.5` is `'84.212.5'` — a plausible figure and no type error, which is exactly what
+    // a missed conversion looks like on a chart.
+    const page = dashboardFromWire(composeOverview(fabricatedSources()));
+    expect(typeof page.stats.budget).toBe('number');
+    expect(typeof page.yearEnd.monthly[0].cumulative).toBe('number');
+    expect(typeof page.budgetVsActual[0].spent).toBe('number');
+    expect(typeof page.recentArrivals[0].amount).toBe('number');
+  });
+
+  it('keeps a null as null, because 0 and null mean opposite things on this page', () => {
+    // `Number(null)` is 0. A projection with no basis must stay "too early to call", not become
+    // "on plan".
+    const page = dashboardFromWire(composeOverview(fabricatedSources()));
+    expect(page.monthCategories[2].projectedRatio).toBeNull();
+  });
+
+  it('gives the feed card a Date, which it formats, rather than the string it arrived as', () => {
+    const src = fabricatedSources();
+    const page = dashboardFromWire(composeOverview(src));
+    // Asserted on a finding the fixture is known to carry with a timestamp, so this cannot pass by
+    // iterating over nothing or over nulls only.
+    const dated = page.feedFindings.filter((f) => f.lastSuccessfulUpdate !== null);
+    expect(dated.length).toBeGreaterThan(0);
+    for (const f of dated) expect(f.lastSuccessfulUpdate).toBeInstanceOf(Date);
   });
 });
