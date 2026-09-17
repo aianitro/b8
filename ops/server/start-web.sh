@@ -20,6 +20,8 @@ cd "$APP/.next/standalone"
 # Loopback only. Phones reach this through `tailscale serve`, which terminates TLS — passkeys need a
 # secure context, so the app must never be reached over plain http from another machine.
 export HOSTNAME=127.0.0.1
-# 3100, not 3000: Grafana already holds 3000 on this machine.
-export PORT="${B8_PORT:-3100}"
+# 3000, the same port as everywhere else in this repo. It was briefly 3100 while an old Grafana held
+# 3000 on this machine; that was removed on 2026-09-17. B8_PORT overrides it if anything claims 3000
+# again.
+export PORT="${B8_PORT:-3000}"
 exec "$HOME/opt/node/bin/node" --env-file="$APP/.env.local" server.js
