@@ -9,6 +9,7 @@ const BUBBLES_SRC = 'cid:b8-digest-bubbles';
 function data(overrides: Partial<DigestData> = {}): DigestData {
   return {
     asOf: { year: 2026, month: 9, day: 14 },
+    jobGap: null,
     uncategorized: {
       rows: [
         { date: '2026-09-09', label: 'Manual CR-Bkrg', amount: -16238.17, category: null },
@@ -566,5 +567,30 @@ describe('the message as a piece of mail, not just a page', () => {
     clear.watchlist = [];
     // With nothing outstanding the amber chip is gone; the filed card takes the on-plan green.
     expect(renderDigest(clear, CHART_SRC, BUBBLES_SRC).html).not.toContain('#f59e0b');
+  });
+});
+
+describe('the missed-job banner', () => {
+  it('is silent when the job is running, because a message the job sent need not say so', () => {
+    const { html, text } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
+    expect(html).not.toContain('has not run');
+    expect(text).not.toContain('has not run');
+  });
+
+  it('leads the message when there has been a gap', () => {
+    // The first mail to arrive after a gap is the only place the owner would find out — and it has
+    // to say the sync and the backups were missed too, which "no email yesterday" does not imply.
+    const d = data();
+    d.jobGap = 'The daily job has not run for 5 days. Sync, backups and this message are all behind.';
+    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
+    for (const surface of [html, text]) expect(surface).toContain('has not run for 5 days');
+    // Above the counters, or it is a footnote about the thing that broke everything below it.
+    expect(html.indexOf('has not run for 5 days')).toBeLessThan(html.indexOf('need a category'));
+  });
+
+  it('escapes the banner, which is rendered text like any other', () => {
+    const d = data();
+    d.jobGap = 'ran <b>never</b> & so on';
+    expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).html).toContain('&lt;b&gt;never&lt;/b&gt; &amp; so on');
   });
 });

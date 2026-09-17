@@ -9,6 +9,7 @@ import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import { findBalanceDrift } from '@/lib/drift';
 import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
+import JobHealthCard from '@/components/JobHealthCard';
 import AlertBell from '@/components/AlertBell';
 import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbles';
 import RecentArrivals from '@/components/RecentArrivals';
@@ -16,6 +17,7 @@ import WatchlistCard from '@/components/WatchlistCard';
 import BudgetBar from '@/components/BudgetBar';
 import { loadFeedHealth } from '@/lib/feedHealthRead';
 import { loadWatchlist } from '@/lib/watchlistRead';
+import { loadJobHealth } from '@/lib/jobHealthRead';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
@@ -455,6 +457,7 @@ export default async function DashboardPage() {
   // doesn't add a serial round trip to page load.
   const driftPromise = findBalanceDrift();
   const feedPromise = loadFeedHealth();
+  const jobHealthPromise = loadJobHealth();
   const [stats, monthRead, todayStats, weekStats, monthly, budgetVsActual,
          recentArrivals, watchlist, yearEnd] =
     await Promise.all([
@@ -469,7 +472,7 @@ export default async function DashboardPage() {
       // in would give a P/L nobody is steering by.
       loadYearEnd('operational', asOf),
     ]);
-  const [driftFindings, feedFindings] = await Promise.all([driftPromise, feedPromise]);
+  const [driftFindings, feedFindings, jobHealth] = await Promise.all([driftPromise, feedPromise, jobHealthPromise]);
 
   // The whole verdict, from one reader shared with the daily job. Its three queries still run
   // concurrently with everything else above — `loadMonthOutlook` issues them together and is itself
@@ -561,7 +564,11 @@ export default async function DashboardPage() {
         {/* Counted by CARD, not by finding: two institutions behind is one message about the
             feed, and five drifting accounts is one message about the ledger. The number is how
             many things there are to read, which is the only sense in which a reader counts them. */}
-        <AlertBell count={(feedFindings.length > 0 ? 1 : 0) + (driftFindings.length > 0 ? 1 : 0)}>
+        <AlertBell count={(feedFindings.length > 0 ? 1 : 0) + (driftFindings.length > 0 ? 1 : 0)
+          + (jobHealth.status !== 'fresh' ? 1 : 0)}>
+          {/* First in the bell, because it outranks the other two: they each say a figure may be
+              wrong, this says every figure may be old and the backups are missing as well. */}
+          <JobHealthCard health={jobHealth} />
           <FeedHealthCard findings={feedFindings} />
           <DriftAlertCard findings={driftFindings} />
         </AlertBell>

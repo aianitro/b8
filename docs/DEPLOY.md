@@ -210,6 +210,11 @@ Never restore over `b8_finance` without taking a dump of it first.
 ## What this step does NOT give you
 - **No process supervision beyond `restart: unless-stopped`.** If the machine reboots, Docker
   restarts the containers; if the app crashes in a loop, nothing tells you.
+- **No EXTERNAL uptime check.** The local half is done — the dashboard and the digest both report a
+  missed daily job, derived from `sync_log` — but a check running on the machine cannot speak while
+  the machine is silent. The usual remedy is a third-party service expecting a ping, which is a new
+  outbound destination and a §5.1 escalation nobody has made. Worth deciding once the server is real
+  and "the machine is off" stops being something the owner already knows.
 - **launchd only runs while the machine is awake and logged in.** It will run a missed job shortly
   after wake, which the in-process timer never did, but a laptop closed all day still misses that
   day. The always-on server is the fix for that, not this.
