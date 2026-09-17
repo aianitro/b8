@@ -275,3 +275,76 @@ describe('personal tokens, as the SSH command mints them', () => {
     expect(await revokeByPrefix(minted.tokenHash.slice(0, 8))).toBe('revoked');
   });
 });
+
+// ─── The escalation the P1-12a security review found, and the fix, from the outside ───────────
+//
+// The two `register/*` paths are allowlisted in `proxy.ts`, so `authorize` — and with it the scope
+// check every other path gets — never runs on them. The handlers looked up the session themselves
+// and asked only whether one existed. A read-only token therefore counted, and the reply to a
+// registration is a full-scope session plus a passkey that outlives the token being revoked.
+describe('a token cannot enrol a passkey', () => {
+  async function seedToken(scope: 'full' | 'read'): Promise<string> {
+    await enrol(createTestAuthenticator()); // the owner's real passkey; registration is now closed
+    const minted = await createPersonalToken({ label: 'eval runner', scope });
+    return minted.token;
+  }
+
+  async function credentialCount(): Promise<number> {
+    const r = await db.query<{ n: string }>('SELECT COUNT(*) AS n FROM webauthn_credentials');
+    return Number(r.rows[0].n);
+  }
+
+  for (const scope of ['read', 'full'] as const) {
+    it(`refuses a ${scope} personal token both ceremony endpoints, and enrols nothing`, async () => {
+      const token = await seedToken(scope);
+      const before = await credentialCount();
+      // The owner's own enrolment left a browser session; the attack must add nothing to it.
+      const sessionsBefore = (await listSessions()).map((s) => s.tokenHash).sort();
+
+      const options = await registerOptions(request('/api/v1/auth/register/options', {
+        method: 'POST',
+        headers: bearer(token),
+      }));
+      expect(options.status).toBe(403);
+      expect((await options.json()).error.code).toBe('REGISTRATION_CLOSED');
+
+      // No challenge was issued, so the attacker's ceremony is fabricated against one of its own.
+      // The gate runs before the body is read, which is what makes that irrelevant.
+      const attacker = createTestAuthenticator();
+      const verify = await registerVerify(request('/api/v1/auth/register/verify', {
+        method: 'POST',
+        headers: bearer(token),
+        body: fabricateRegistrationResponse({
+          authenticator: attacker,
+          challenge: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+          rpId: 'localhost',
+        }),
+      }));
+      expect(verify.status).toBe(403);
+      expect((await verify.json()).error.code).toBe('REGISTRATION_CLOSED');
+
+      // Nothing was enrolled, and no new session of any kind was opened.
+      expect(await credentialCount()).toBe(before);
+      expect((await listSessions()).map((s) => s.tokenHash).sort()).toEqual(sessionsBefore);
+    });
+  }
+
+  it('still lets a phone app enrol a second device — the thing the fix must not break', async () => {
+    const authenticator = createTestAuthenticator();
+    await enrol(authenticator);
+    const signedIn = DeviceSessionResponseSchema.parse(await (await signIn(authenticator, NATIVE)).json());
+    if (!signedIn.success) throw new Error('expected success');
+
+    const response = await enrol(createTestAuthenticator(), bearer(signedIn.data.token));
+    expect(response.status).toBe(200);
+    expect((await db.query('SELECT 1 FROM webauthn_credentials')).rowCount).toBe(2);
+  });
+
+  it('refuses a read token the endpoints a handler reads its own session on', async () => {
+    // The same rule at the level below the routes: `credentialFrom` now applies the scope check
+    // itself, so no future handler on an allowlisted path inherits the hole by calling it.
+    const token = await seedToken('read');
+    const response = await logout(request('/api/v1/auth/logout', { method: 'POST', headers: bearer(token) }));
+    expect(response.status).toBe(401);
+  });
+});

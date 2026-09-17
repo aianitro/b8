@@ -29,7 +29,7 @@ import { authError, sessionFrom, withEnvelope } from '../../shared';
 export const POST = withEnvelope(async (request: NextRequest) => {
   const session = await sessionFrom(request);
   const decision = registrationDecision({
-    hasValidSession: session !== null,
+    session,
     credentialCount: await countCredentials(),
   });
   if (!decision.allowed) {

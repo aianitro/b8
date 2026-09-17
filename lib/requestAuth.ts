@@ -61,7 +61,24 @@ export async function authorize(request: RequestLike): Promise<AuthDecision> {
   return { ok: true, session };
 }
 
-/** A handler's question: which session is this? No scope check — the boundary already made it. */
+/**
+ * A handler's question: which session is this, for THIS request?
+ *
+ * IT APPLIES THE SCOPE CHECK ITSELF, and the earlier version of this function did not — its comment
+ * said "the boundary already made it", which is true of every path except the five in
+ * `PRE_AUTH_PATHS`, and two of those five are the registration endpoints. The boundary returns
+ * `NextResponse.next()` for them before `authorize` runs, so on exactly the paths that can enrol a
+ * permanent credential, nothing had checked scope at all: a READ-ONLY personal token counted as a
+ * session, `registrationDecision` saw `hasValidSession: true`, and the handler enrolled whatever
+ * passkey the caller sent and answered with a full-scope session. A read-only token minting
+ * permanent full access is the opposite of what its scope says, so the check moved here — to the
+ * function both callers share — rather than into the handlers that happened to need it.
+ *
+ * It costs the other callers nothing. `logout` sits behind the boundary, which has already applied
+ * the same predicate to the same request, so the answer there is the one it was already given.
+ */
 export async function credentialFrom(request: RequestLike): Promise<ActiveSession | null> {
-  return identify(request);
+  const session = await identify(request);
+  if (!session) return null;
+  return scopePermits(session.scope, request.method, request.nextUrl.pathname) ? session : null;
 }
