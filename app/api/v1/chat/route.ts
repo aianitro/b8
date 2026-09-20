@@ -34,7 +34,12 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'get_monthly_spending',
-    description: 'Get month-by-month spending totals for the current year, optionally filtered to one category.',
+    description:
+      'Spending totals per month for the current year, ALREADY SUMMED — one row per month per '
+      + 'category. This is the tool for "how much did I spend on X in <month>": call it and read '
+      + 'the row for that month. Prefer it over get_transactions for any total, average or '
+      + 'month-to-month comparison — get_transactions returns individual rows, is capped at 100, '
+      + 'and summing them by hand is slower and silently wrong if the cap is hit.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -206,10 +211,39 @@ Guidelines:
 
 type Message = Anthropic.MessageParam;
 
-async function runAgentLoop(messages: Message[]): Promise<string> {
+/**
+ * One tool call the agent made, in the order it made it.
+ *
+ * This exists for the eval runner (ROADMAP.md §5 step 14). Grading only the prose cannot tell a
+ * routing bug from a phrasing bug: an agent that calls `get_top_merchants` when it should have
+ * called `get_monthly_spending` can still produce a sentence containing the right number, and an
+ * agent that calls the right tool can describe the result badly. Those are different defects with
+ * different fixes, and the loop already knows which happened — it just used to throw it away.
+ *
+ * `input` is the arguments AS THE MODEL SENT THEM, not as `runTool` defaulted them. A fixture
+ * asserting `{ limit: 10 }` should fail when the model stops sending `limit` and starts relying on
+ * the handler's default, because that is a real change in the model's behaviour.
+ */
+export type ToolCallTrace = { turn: number; name: string; input: Record<string, unknown> };
+
+export type ChatRun = {
+  reply: string;
+  trace: ToolCallTrace[];
+  /** Turns actually consumed — 1 means it answered without a tool. */
+  turns: number;
+  /** True when the loop hit MAX_TURNS and gave up; the reply is then boilerplate, not an answer. */
+  stoppedAtMaxTurns: boolean;
+  /** Summed across every model call in the loop, so cost per question is measurable. */
+  usage: { inputTokens: number; outputTokens: number };
+};
+
+async function runAgentLoop(messages: Message[]): Promise<ChatRun> {
   const system = await buildSystemPrompt();
   const history: Message[] = [...messages];
   const MAX_TURNS = 5;
+
+  const trace: ToolCallTrace[] = [];
+  const usage = { inputTokens: 0, outputTokens: 0 };
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const response = await anthropic.messages.create({
@@ -220,12 +254,28 @@ async function runAgentLoop(messages: Message[]): Promise<string> {
       messages: history,
     });
 
+    // Accumulated before any early return, so a question answered on turn 1 still reports its cost.
+    usage.inputTokens += response.usage.input_tokens;
+    usage.outputTokens += response.usage.output_tokens;
+
     // Collect text and tool calls from this response
     const textBlocks = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
     const toolUseBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
 
+    // Recorded BEFORE the stop check. A model may emit tool_use blocks and stop in the same
+    // response; dropping those would under-report what it asked for.
+    for (const block of toolUseBlocks) {
+      trace.push({ turn, name: block.name, input: block.input as Record<string, unknown> });
+    }
+
     if (response.stop_reason === 'end_turn' || toolUseBlocks.length === 0) {
-      return textBlocks.map((b) => b.text).join('');
+      return {
+        reply: textBlocks.map((b) => b.text).join(''),
+        trace,
+        turns: turn + 1,
+        stoppedAtMaxTurns: false,
+        usage,
+      };
     }
 
     // Add assistant turn
@@ -246,7 +296,13 @@ async function runAgentLoop(messages: Message[]): Promise<string> {
     history.push({ role: 'user', content: toolResults });
   }
 
-  return 'I reached the maximum number of reasoning steps. Please try a more specific question.';
+  return {
+    reply: 'I reached the maximum number of reasoning steps. Please try a more specific question.',
+    trace,
+    turns: MAX_TURNS,
+    stoppedAtMaxTurns: true,
+    usage,
+  };
 }
 
 // ── Route handler ──────────────────────────────────────────────────────────────
@@ -299,8 +355,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const reply = await runAgentLoop(messages);
-    return Response.json({ success: true, data: { reply } } satisfies ApiResponse<{ reply: string }>);
+    const run = await runAgentLoop(messages);
+    // `reply` keeps its place and its meaning, so the web chat is untouched; everything else is
+    // additive and exists for the eval runner.
+    return Response.json({ success: true, data: run } satisfies ApiResponse<ChatRun>);
   } catch (err) {
     log.error('request failed', { error: err instanceof Error ? err.message : String(err) });
     return Response.json(

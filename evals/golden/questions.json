@@ -1,0 +1,238 @@
+{
+  "_comment": [
+    "Golden questions for the b8 chat agent. Every figure here is a CONSTANT derived once by SQL",
+    "against the frozen seed database (see golden/README.md for the exact commands), never computed",
+    "at run time by the code under test.",
+    "",
+    "Every question is pinned to a COMPLETED month or an explicit date range. The seed generates",
+    "data for the elapsed part of the current year, so year-to-date figures move every month, but a",
+    "past month's figures do not \u2014 verified by seeding as-if-July and as-if-today and diffing",
+    "Jan-June, which came back identical across 118 category-months."
+  ],
+  "questions": [
+    {
+      "id": "groceries-june",
+      "question": "What did I spend on groceries in June?",
+      "expect_tools": [
+        {
+          "name": "get_monthly_spending",
+          "args": {
+            "category": "Groceries"
+          }
+        }
+      ],
+      "expect_amounts": [
+        {
+          "value": 1040.4,
+          "label": "June groceries"
+        }
+      ],
+      "note": "The canonical single-tool lookup. Category filter must be passed, not filtered client-side."
+    },
+    {
+      "id": "dining-march",
+      "question": "How much did I spend on Dining Out in March?",
+      "expect_tools": [
+        {
+          "name": "get_monthly_spending",
+          "args": {
+            "category": "Dining Out"
+          }
+        }
+      ],
+      "expect_amounts": [
+        {
+          "value": 548.63,
+          "label": "March dining"
+        }
+      ]
+    },
+    {
+      "id": "utilities-june",
+      "question": "What was my utilities bill in June?",
+      "expect_tools": [
+        {
+          "name": "get_monthly_spending",
+          "args": {
+            "category": "Utilities"
+          }
+        }
+      ],
+      "expect_amounts": [
+        {
+          "value": 450.0,
+          "label": "June utilities"
+        }
+      ],
+      "note": "Utilities are four fixed debits, so this figure is exact and identical every month."
+    },
+    {
+      "id": "transport-june",
+      "question": "What did I spend on Transport in June?",
+      "expect_tools": [
+        {
+          "name": "get_monthly_spending",
+          "args": {
+            "category": "Transport"
+          }
+        }
+      ],
+      "expect_amounts": [
+        {
+          "value": 676.01,
+          "label": "June transport"
+        }
+      ]
+    },
+    {
+      "id": "dining-march-vs-june",
+      "question": "Compare my Dining Out spending in March with June.",
+      "expect_tools": [
+        {
+          "name": "get_monthly_spending",
+          "args": {
+            "category": "Dining Out"
+          }
+        }
+      ],
+      "expect_amounts": [
+        {
+          "value": 548.63,
+          "label": "March"
+        },
+        {
+          "value": 474.12,
+          "label": "June"
+        }
+      ],
+      "note": "Two figures from one tool call. An agent making two calls is wasteful but not wrong, so extras are allowed."
+    },
+    {
+      "id": "top-dining-merchant-h1",
+      "question": "Who were my top Dining Out merchants between 2026-01-01 and 2026-06-30?",
+      "expect_tools": [
+        {
+          "name": "get_top_merchants",
+          "args": {
+            "category": "Dining Out",
+            "from_date": "2026-01-01",
+            "to_date": "2026-06-30"
+          }
+        }
+      ],
+      "expect_amounts": [
+        {
+          "value": 747.38,
+          "label": "Copper Kettle total"
+        }
+      ],
+      "expect_phrases": [
+        "Copper Kettle"
+      ],
+      "note": "Explicit dates in the question must reach the tool as from_date/to_date. If the agent omits them and filters in prose, the arguments assertion catches it even when the total is right."
+    },
+    {
+      "id": "travel-march-offcycle",
+      "question": "Did I spend anything on Travel in March?",
+      "expect_tools": [
+        {
+          "name": "get_monthly_spending",
+          "args": {
+            "category": "Travel"
+          }
+        }
+      ],
+      "expect_amounts": [
+        {
+          "value": 1438.73,
+          "label": "March travel"
+        }
+      ],
+      "note": "Travel is budgeted only in June and August, so March is an off-cycle month. The seed creates this deliberately; an agent that reports the BUDGET rather than the SPEND fails here."
+    },
+    {
+      "id": "budget-summary-overspend",
+      "question": "Am I over budget on anything so far this year?",
+      "expect_tools": [
+        {
+          "name": "get_budget_summary"
+        }
+      ],
+      "note": "No figure asserted: the answer moves with the month by design. What is asserted is the routing \u2014 this is a budget question and get_budget_summary is the tool for it."
+    },
+    {
+      "id": "large-may-transaction",
+      "question": "What was my largest single expense in May 2026?",
+      "expect_tools": [
+        {
+          "name": "get_transactions",
+          "args": {
+            "from_date": "2026-05-01"
+          }
+        }
+      ],
+      "expect_amounts": [
+        {
+          "value": 4000.0,
+          "label": "Meridian Invest Transfer"
+        }
+      ],
+      "note": "The true largest May row is a $4,000 Investments transfer. get_transactions does NOT exclude transfers even though the system prompt says transfers are not spending \u2014 this fixture pins current behaviour, and is the one to revisit if that inconsistency is fixed."
+    },
+    {
+      "id": "refuse-credit-score",
+      "question": "What's my credit score?",
+      "kind": "refusal",
+      "max_tools": 0,
+      "note": "Nothing in the schema holds a credit score. Reaching for a tool at all is the defect.",
+      "forbid_figures_near": [
+        "credit score",
+        "fico"
+      ]
+    },
+    {
+      "id": "refuse-future-rent",
+      "question": "What will my rent be in 2030?",
+      "kind": "refusal",
+      "max_tools": 0,
+      "allow_numbers": [
+        2030
+      ],
+      "note": "The year may be repeated back while refusing; any OTHER figure is a confabulation.",
+      "forbid_figures_near": [
+        "2030",
+        "will be",
+        "will rise",
+        "projected rent",
+        "future rent"
+      ]
+    },
+    {
+      "id": "refuse-asset-allocation",
+      "question": "How diversified is my investment portfolio across asset classes?",
+      "kind": "refusal",
+      "max_tools": 0,
+      "note": "ROADMAP.md \u00a74 names this category explicitly: holdings-level data does not exist, so allocation questions must be declined rather than estimated from account balances.",
+      "forbid_figures_near": [
+        "allocation",
+        "allocated",
+        "diversification",
+        "diversified",
+        "asset class",
+        "asset classes"
+      ]
+    },
+    {
+      "id": "refuse-off-domain",
+      "question": "What's the weather going to be this weekend?",
+      "kind": "refusal",
+      "max_tools": 0,
+      "note": "Off-domain entirely. Cheap to run and the first thing a broken system prompt breaks.",
+      "forbid_figures_near": [
+        "weather",
+        "forecast",
+        "temperature"
+      ]
+    }
+  ]
+}
