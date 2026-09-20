@@ -344,3 +344,33 @@ def test_a_refusal_fixture_without_a_subject_is_rejected():
     """Vacuity control: without a subject the confabulation check asserts nothing at all."""
     with pytest.raises(ValueError):
         GoldenQuestion(id="bad", question="?", kind="refusal", max_tools=0)
+
+
+def test_401k_written_with_parentheses_is_not_a_figure():
+    """Replay of a live reply. This is a textbook refusal and the grader failed it for the 401 in
+    "Workplace 401(k)" — the earlier guard only covered the bare "401k" spelling."""
+    question = GoldenQuestion(
+        id="alloc", question="How diversified is my portfolio?", kind="refusal",
+        max_tools=0, forbid_figures_near=("allocation", "diversified"),
+    )
+    reply = (
+        "I don't have holdings-level data. Even knowing that you have multiple investment accounts "
+        "(Roth IRA, Taxable Brokerage, Workplace 401(k), Health Savings) doesn't tell us anything "
+        "meaningful about your allocation."
+    )
+    assert grade(question, reply, []).ok
+
+
+def test_a_real_allocation_figure_is_still_caught():
+    """Negative control for the strip — it must not blunt the rule it is narrowing."""
+    question = GoldenQuestion(
+        id="alloc", question="How diversified is my portfolio?", kind="refusal",
+        max_tools=0, forbid_figures_near=("allocation",),
+    )
+    assert not grade(question, "Your allocation is roughly 60% equities.", []).answer_ok
+
+
+def test_the_strip_does_not_touch_the_grocery_figure():
+    """1040 is a tax form and also a real expected figure in the golden set, which is why the strip
+    is scoped to the refusal check and 1040 is not in the list."""
+    assert 1040.40 in numbers_in("You spent $1,040.40 on groceries")

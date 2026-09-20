@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+import time as _time
 from typing import Callable, Sequence
 
 import httpx
@@ -28,6 +29,15 @@ class Attempt:
     def ok(self) -> bool:
         return self.grade is not None and self.grade.ok
 
+    @property
+    def graded(self) -> bool:
+        """Did this attempt produce a verdict at all?
+
+        An attempt that errored (a 429, a dead socket) has no opinion about the agent. Counting it
+        as a failed vote would blame the model for the network.
+        """
+        return self.grade is not None
+
 
 @dataclass
 class QuestionResult:
@@ -36,7 +46,15 @@ class QuestionResult:
 
     @property
     def passed(self) -> bool:
-        return majority(a.ok for a in self.attempts)
+        graded = [a for a in self.attempts if a.graded]
+        if not graded:
+            return False
+        return majority(a.ok for a in graded)
+
+    @property
+    def inconclusive(self) -> bool:
+        """No attempt produced a verdict. NOT a pass, and not a failure of the agent either."""
+        return not any(a.graded for a in self.attempts)
 
     @property
     def tools_passed(self) -> bool:
@@ -48,8 +66,11 @@ class QuestionResult:
 
     @property
     def flaky(self) -> bool:
-        """Passed by majority but not unanimously — worth seeing, and not a failure."""
-        oks = [a.ok for a in self.attempts]
+        """Passed by majority but not unanimously — worth seeing, and not a failure.
+
+        Only graded attempts count. A rate-limited attempt once made a clean 3/3 look like [..x].
+        """
+        oks = [a.ok for a in self.attempts if a.graded]
         return self.passed and not all(oks)
 
     @property
@@ -71,6 +92,12 @@ class Report:
     results: list[QuestionResult] = field(default_factory=list)
     requests_made: int = 0
     started_at: float = field(default_factory=time.time)
+    # Set when the run did not get through the whole set. A partial run that reports a clean pass
+    # is the worst output this harness can produce: it is a green CI build over a suite that never
+    # ran. Observed once for real — a 429 on request 36 of 39 dropped a question and the report
+    # said "12/12 passed", exit code 0.
+    stopped_early: str | None = None
+    planned: int = 0
 
     @property
     def passed(self) -> list[QuestionResult]:
@@ -99,12 +126,25 @@ class Report:
         return sum(r.output_tokens for r in self.results)
 
     @property
+    def inconclusive(self) -> list[QuestionResult]:
+        return [r for r in self.results if r.inconclusive]
+
+    @property
+    def complete(self) -> bool:
+        return self.stopped_early is None and len(self.results) == self.planned
+
+    @property
     def ok(self) -> bool:
-        return not self.failed
+        """A run is ok only if it FINISHED and everything passed."""
+        return self.complete and not self.failed and not self.inconclusive
 
 
 def planned_requests(questions: Sequence[GoldenQuestion], repeats: int) -> int:
     return len(questions) * repeats
+
+
+# How long the whole run may spend sitting in the limiter's backoff before giving up.
+MAX_RATE_LIMIT_WAIT_S = 120.0
 
 
 def run_suite(
@@ -112,7 +152,8 @@ def run_suite(
     questions: Sequence[GoldenQuestion],
     repeats: int = 3,
     on_event: Callable[[str], None] = lambda _msg: None,
-    stop_on_rate_limit: bool = True,
+    sleep: Callable[[float], None] = _time.sleep,
+    http: httpx.Client | None = None,
 ) -> Report:
     planned = planned_requests(questions, repeats)
     if planned > DAILY_CEILING:
@@ -122,11 +163,15 @@ def run_suite(
             "that dies halfway spends the allowance and reports nothing."
         )
 
-    report = Report()
-    with httpx.Client(timeout=client.timeout_s) as http:
+    report = Report(planned=len(questions))
+    waited = 0.0
+    owns_http = http is None
+    http = http or httpx.Client(timeout=client.timeout_s)
+    try:
         for question in questions:
             result = QuestionResult(question=question)
-            for attempt_index in range(repeats):
+            attempt_index = 0
+            while attempt_index < repeats:
                 try:
                     run = client.ask(question.question, client=http)
                     report.requests_made += 1
@@ -139,15 +184,30 @@ def run_suite(
                     )
                 except RateLimited as exc:
                     report.requests_made += 1
+                    # The per-session bucket refills in seconds and is just pacing; waiting it out
+                    # costs nothing and keeps the attempt. The DAILY ceiling is the one that means
+                    # "come back tomorrow", and only that one ends the run.
+                    pause = exc.retry_after
+                    if pause is not None and waited + pause <= MAX_RATE_LIMIT_WAIT_S:
+                        waited += pause
+                        on_event(f"  {question.id} paced by the limiter; waiting {pause:.0f}s")
+                        sleep(pause)
+                        continue  # same attempt_index — the request did not produce a verdict
                     result.attempts.append(Attempt(run=None, grade=None, error=str(exc)))
-                    on_event(f"  {question.id} rate limited: {exc}")
-                    if stop_on_rate_limit:
-                        report.results.append(result)
-                        on_event("Stopping: the app's rate limit was hit.")
-                        return report
+                    report.results.append(result)
+                    report.stopped_early = (
+                        f"the app's rate limit was hit and not waitable ({exc}); "
+                        f"{len(report.results)} of {len(questions)} questions ran"
+                    )
+                    on_event(f"STOPPING: {report.stopped_early}")
+                    return report
                 except Exception as exc:  # noqa: BLE001 - one bad question must not end the run
                     report.requests_made += 1
                     result.attempts.append(Attempt(run=None, grade=None, error=str(exc)))
                     on_event(f"  {question.id} [{attempt_index + 1}/{repeats}] ERROR {exc}")
+                attempt_index += 1
             report.results.append(result)
+    finally:
+        if owns_http:
+            http.close()
     return report

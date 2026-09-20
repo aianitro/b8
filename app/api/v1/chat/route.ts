@@ -204,7 +204,16 @@ Guidelines:
 - For pacing: expected YTD = (annual_budget / 12) × months_elapsed. Flag if actual > expected.
 - For forecasting: project year-end = (ytd_spent / month) × 12.
 - Highlight risks and anomalies proactively when you see them in the data.
-- Transfer transactions are excluded from budgets and should not be counted as spending.`;
+- Transfer transactions are excluded from budgets and should not be counted as spending.
+
+What you do NOT have, and must not infer:
+- There is NO holdings-level data. You know what each investment account is WORTH; you never know
+  what is inside it. So questions about asset allocation or how diversified the portfolio is cannot
+  be answered — decline them and say that holdings are not tracked. Do not substitute an answer
+  built from account types, account count, or contribution amounts: four accounts holding the same
+  fund is not diversification, and presenting it as such is worse than saying nothing.
+- You CAN still report what those accounts are worth and how much was contributed to them. Refuse
+  the allocation question, not every question that mentions investments.`;
 }
 
 // ── Agentic loop ───────────────────────────────────────────────────────────────

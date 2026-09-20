@@ -146,6 +146,17 @@ def _brief(args: Mapping[str, Any]) -> str:
 
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
 
+# Account and form names that are spelled with digits. Stripped BEFORE the confabulation check so
+# "Workplace 401(k)" is not read as the figure 401.
+#
+# This is the third false positive from the same source — first the 8 in "B8 Finance", then "401k",
+# now "401(k)". Pulling numbers out of prose is a heuristic and it will keep needing narrowing; what
+# keeps that honest is that every instance is pinned by a test using the exact live sentence.
+#
+# Scoped to this check rather than to `numbers_in` itself, deliberately: `mentions_amount` needs the
+# raw extractor, and 1040 is BOTH a tax form and a real expected figure in the golden set.
+_ACCOUNT_NAMES = re.compile(r"\b(?:401\s?\(?k\)?|403\s?\(?b\)?|457\s?\(?b\)?|1099|W-?2)\b", re.I)
+
 
 def confabulated_figures(
     text: str,
@@ -182,7 +193,7 @@ def confabulated_figures(
         if not any(subject.lower() in low for subject in subjects):
             continue
         figures = tuple(
-            n for n in numbers_in(sentence)
+            n for n in numbers_in(_ACCOUNT_NAMES.sub(" ", sentence))
             if abs(n) >= 1 and not any(abs(n - a) <= 0.001 for a in auto_allowed)
         )
         if figures:

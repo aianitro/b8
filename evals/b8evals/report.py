@@ -43,6 +43,14 @@ def to_text(report: Report, color: bool = True) -> str:
         + (f", {len(report.failed)} failed" if report.failed else ""),
     ]
 
+    # First, loudest, and before any per-question detail: a partial run is not a pass.
+    if report.stopped_early:
+        lines.append(c(RED, f"  RUN DID NOT FINISH — {report.stopped_early}"))
+        lines.append(c(RED, "  This is NOT a pass. The questions that did not run were not checked."))
+    if report.inconclusive:
+        ids = ", ".join(r.question.id for r in report.inconclusive)
+        lines.append(c(RED, f"  inconclusive (no attempt produced a verdict): {ids}"))
+
     # The split that decides which file you open next.
     if report.routing_failures:
         ids = ", ".join(r.question.id for r in report.routing_failures)
@@ -69,6 +77,10 @@ def to_text(report: Report, color: bool = True) -> str:
 def to_json(report: Report) -> str:
     payload: dict[str, Any] = {
         "ok": report.ok,
+        "complete": report.complete,
+        "stopped_early": report.stopped_early,
+        "planned": report.planned,
+        "inconclusive": [r.question.id for r in report.inconclusive],
         "passed": len(report.passed),
         "failed": len(report.failed),
         "requests_made": report.requests_made,
