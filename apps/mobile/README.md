@@ -9,14 +9,34 @@ payload, and `/api/v1/overview` exists to serve two clients while serving one.
 
 ## What exists
 
-**Screen 1 of four: "Can I spend?"** — the question the app opens on. Renders `monthOutlook`'s
-discretionary verdict, and renders `authoritative` and the freshness caveat *beside* it rather than
-under a tap. That is not decoration: `monthOutlook.state` has seven values and `nothing-to-score`
-is not `on-track`, so a guardrail that says "you have room" over a feed that stopped importing has
-turned missing data into permission to spend.
+**Screen 1: "Can I spend?"** — the question the app opens on. Renders `monthOutlook`'s
+discretionary verdict, with `authoritative` and the freshness caveat *beside* it rather than under a
+tap. That is not decoration: `monthOutlook.state` has seven values and `nothing-to-score` is not
+`on-track`, so a guardrail that says "you have room" over a feed that stopped importing has turned
+missing data into permission to spend.
 
-Not built yet: screens 2–4 (did that land right / chat / quick entry), and **native passkey
-enrolment**. Today the app expects a device token to already be in the keychain.
+Below the verdict, two sections — **Stop spending here** and **Room left** — worst first in each,
+and the big number is **what is left**, because that is the figure a person in a shop needs.
+`spentRatio` is deliberately never rendered: the contract's own note warns it means three
+incomparable things across the six statuses, so one column would print "250% of December" above
+"71% of April". Money subtracts the same way in every status. The first version merged both sections
+into one flat list, and it took the owner reading it on a phone to see that the verdict then left
+you to work out *which* category was the problem.
+
+**Screen 2: "Did that land right?"** — `watchlist` and `recentArrivals`, with uncategorised charges
+flagged amber. Tap a row for a category picker; tapping a category writes it and invalidates the
+overview, so screen 1's verdict cannot disagree with it. **This is a direct write, not a proposal** —
+the propose/confirm gate exists to stop the MODEL acting on its own, and the owner tapping a
+category on their own phone is the authority that gate defers to. Routing a human decision through a
+confirmation is ceremony, and ceremony teaches people to tap without reading.
+
+Navigation is two hand-rolled tabs, not react-navigation: two screens with no stack, no params and
+no deep links do not justify a navigator and its peer dependencies. When screen 3 or 4 needs a
+stack, that is the moment.
+
+Not built yet: screens 3–4 (chat / quick entry), push notifications (step 25), and **native passkey
+enrolment** — the app expects a device token in the keychain, which `PasteToken.tsx` exists to put
+there until enrolment lands.
 
 ## Running it
 
