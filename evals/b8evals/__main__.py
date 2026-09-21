@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .client import ChatClient, ChatError
+from .preflight import check as preflight_check, describe as preflight_describe
 from .fixtures import load_questions
 from .report import to_json, to_text
 from .runner import DAILY_CEILING, planned_requests, run_suite
@@ -27,9 +28,20 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--token-env", default="B8_EVAL_TOKEN")
     run.add_argument("--json", type=Path, default=None, help="also write a JSON report here")
     run.add_argument("--quiet", action="store_true")
+    run.add_argument(
+        "--skip-preflight", action="store_true",
+        help="run even if the fixture database does not match the golden figures (not advised)",
+    )
 
     estimate = sub.add_parser("estimate", help="what a run would cost, before spending it")
     common(estimate)
+
+    pre = sub.add_parser(
+        "preflight",
+        help="check the fixture database still matches the golden figures (no model calls)",
+    )
+    pre.add_argument("--base-url", default=None)
+    pre.add_argument("--token-env", default="B8_EVAL_TOKEN")
 
     listing = sub.add_parser("list", help="show the golden set")
     common(listing)
@@ -37,12 +49,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        questions = load_questions(args.questions)
+        questions = load_questions(getattr(args, "questions", None))
     except (OSError, ValueError) as exc:
         print(f"Could not load the golden set: {exc}", file=sys.stderr)
         return 2
 
-    if args.filter:
+    if getattr(args, "filter", None):
         questions = tuple(q for q in questions if args.filter in q.id)
         if not questions:
             print(f"No question id contains {args.filter!r}", file=sys.stderr)
@@ -71,6 +83,27 @@ def main(argv: list[str] | None = None) -> int:
     except ChatError as exc:
         print(f"\n{exc}\n", file=sys.stderr)
         return 2
+
+    if args.command == "preflight":
+        try:
+            problems = preflight_check(client)
+        except ChatError as exc:
+            print(f"\n{exc}\n", file=sys.stderr)
+            return 2
+        if problems:
+            print(preflight_describe(problems), file=sys.stderr)
+            return 1
+        print("\n  preflight OK — the fixture database matches the golden figures\n")
+        return 0
+
+    # BEFORE the first question, always. A wiped database produces confident wrong answers rather
+    # than errors, so without this the run costs 48 requests and reports a regression that is not
+    # one — which is exactly what happened on 2026-09-21.
+    if args.command == "run" and not args.skip_preflight:
+        problems = preflight_check(client)
+        if problems:
+            print(preflight_describe(problems), file=sys.stderr)
+            return 2
 
     emit = (lambda _m: None) if args.quiet else (lambda m: print(m, flush=True))
     if not args.quiet:

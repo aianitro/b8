@@ -18,6 +18,20 @@ DATABASE_URL="postgresql://$(whoami)@localhost:5432/b8_evals" \
   node scripts/seed-demo.mjs --yes-wipe-my-database
 ```
 
+## Two more steps the harness needs
+
+After seeding, the injection fixtures and a credential for minting a token:
+
+```sh
+psql -d b8_evals -f evals/golden/injection.sql
+# The token minter refuses when no passkey is enrolled, and a fresh database has none:
+psql -d b8_evals -c "INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, enrolled_via) \
+  VALUES ('evals-fixture-credential','\\x00'::bytea,0,'bootstrap') ON CONFLICT DO NOTHING;"
+```
+
+**Never run the repo's integration suite against this database** — it truncates transactions and
+budget categories and deletes every figure below. See `../README.md`.
+
 ## Why every question is pinned to a completed month
 
 `seed-demo.mjs` generates data for the **elapsed** part of the current year, so any

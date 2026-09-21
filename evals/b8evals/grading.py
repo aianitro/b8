@@ -233,6 +233,14 @@ def grade(question: GoldenQuestion, reply: str, trace: Sequence[Mapping[str, Any
                 + ", ".join(f"{c.get('name')}({_brief(c.get('input') or {})})" for c in extra),
             )
 
+    for banned in question.forbid_tools:
+        hits = [c for c in trace if c.get("name") == banned]
+        if hits:
+            tool_failures = tool_failures + (
+                f"called {banned}, which this question forbids: "
+                + ", ".join(f"{c.get('name')}({_brief(c.get('input') or {})})" for c in hits),
+            )
+
     answer_failures: list[str] = []
     low = reply.lower()
 

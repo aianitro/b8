@@ -1,10 +1,17 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import ProposalCard, { type Proposal } from './ProposalCard';
 import { Sparkles, Send, ArrowRight } from 'lucide-react';
 
 type Role = 'user' | 'assistant';
-interface ChatMessage { role: Role; content: string; }
+
+interface ChatMessage {
+  role: Role;
+  content: string;
+  /** Proposals this reply created. Inert until a full-scope session decides them. */
+  proposals?: Proposal[];
+}
 
 const SUGGESTIONS = [
   'How am I tracking against my annual budget?',
@@ -30,6 +37,27 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             : 'bg-white border border-slate-100 shadow-sm text-slate-800 rounded-tl-sm'}`}
       >
         {msg.content}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Cards sit OUTSIDE the assistant's bubble, under it.
+ *
+ * Deliberate: everything inside a bubble is the model talking, and a control that commits a change
+ * to the ledger should not look like part of a sentence the model wrote. The visual separation is
+ * the same separation the API enforces — the model proposes, this is where a person decides.
+ */
+function ProposalList({ proposals }: { proposals: Proposal[] }) {
+  if (proposals.length === 0) return null;
+  return (
+    <div className="flex justify-start mb-4">
+      <div className="w-7 mr-2.5 shrink-0" aria-hidden />
+      <div className="max-w-[78%] w-full space-y-2">
+        {proposals.map((p) => (
+          <ProposalCard key={p.id} proposal={p} />
+        ))}
       </div>
     </div>
   );
@@ -89,7 +117,7 @@ export default function InsightsChat() {
     setLoading(false);
 
     if (data.success) {
-      setMessages([...next, { role: 'assistant', content: data.data.reply }]);
+      setMessages([...next, { role: 'assistant', content: data.data.reply, proposals: data.data.proposals ?? [] }]);
     } else {
       setError(data.error?.message ?? 'Something went wrong');
     }
@@ -132,7 +160,12 @@ export default function InsightsChat() {
           </div>
         ) : (
           <>
-            {messages.map((m, i) => <MessageBubble key={i} msg={m} />)}
+            {messages.map((m, i) => (
+              <div key={i}>
+                <MessageBubble msg={m} />
+                <ProposalList proposals={m.proposals ?? []} />
+              </div>
+            ))}
             {loading && <TypingIndicator />}
             {error && <div className="text-xs text-red-500 text-center mt-2 bg-red-50 px-3 py-2 rounded-lg">{error}</div>}
           </>

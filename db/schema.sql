@@ -494,3 +494,69 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   CONSTRAINT auth_sessions_personal_lifetime
     CHECK (kind <> 'personal' OR expires_at <= created_at + INTERVAL '366 days')
 );
+
+-- ROADMAP.md §5 step 16. The gate between what the agent ASKS for and what happens.
+--
+-- A write tool returns a PROPOSAL, not an effect: the model records a row here and the change lands
+-- only when a full-scope session POSTs to the decide endpoint. That separation is the one
+-- mitigation that survives the model being fully persuaded by a prompt injection, because it does
+-- not rely on the model at all (docs/agent-authorization.md §4).
+--
+-- This is the audit trail for agent-originated change — what §3's `mutation_audit_log` was deferred
+-- for. It deliberately does NOT record mutations the owner makes directly in the UI; naming that
+-- limit so the gap is visible rather than assumed covered.
+CREATE TABLE IF NOT EXISTS agent_proposals (
+  -- Opaque and CSPRNG, not a serial: this id travels to the browser and comes back as the thing
+  -- being confirmed, and a guessable one would let anyone reaching the endpoint confirm a proposal
+  -- they never saw.
+  id TEXT PRIMARY KEY CONSTRAINT agent_proposals_id_format CHECK (id ~ '^[A-Za-z0-9_-]{22,64}$'),
+
+  -- The list of effects the gate knows how to apply. Adding a write tool is a migration, which is
+  -- the point — a new effect must not be reachable by a handler improvising on an unfamiliar string.
+  kind TEXT NOT NULL CONSTRAINT agent_proposals_kind_check CHECK (kind IN ('categorize_transaction')),
+
+  -- `transactions.id` for this kind. No foreign key on purpose: a proposal about a row since
+  -- deleted must stay readable as history, and the apply path re-checks existence anyway.
+  subject_id INTEGER NOT NULL,
+
+  proposed JSONB NOT NULL,
+
+  -- THE WORLD AS THE PROPOSAL ASSUMED IT. Optimistic concurrency, and the difference between a gate
+  -- and a rubber stamp: if the owner edits the same transaction between seeing the card and
+  -- confirming it, applying blind would silently undo that edit and perform a change they were
+  -- never shown. Apply compares and refuses on mismatch.
+  observed JSONB NOT NULL,
+
+  -- Shown to the human verbatim. A confirmation with no reason is a button people learn to click.
+  rationale TEXT,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- Short by design: a proposal is a sentence in a conversation, not a standing instruction.
+  expires_at TIMESTAMPTZ NOT NULL
+    CONSTRAINT agent_proposals_expires_after_created CHECK (expires_at > created_at),
+
+  -- NULL `decided_at` is the only definition of "pending", so the two can never disagree.
+  decided_at TIMESTAMPTZ,
+  decision TEXT CONSTRAINT agent_proposals_decision_check CHECK (decision IN ('confirmed', 'rejected')),
+  CONSTRAINT agent_proposals_decision_iff_decided CHECK ((decided_at IS NULL) = (decision IS NULL)),
+
+  -- Separate from `decision`, because a confirmed proposal can still fail to apply and "the owner
+  -- said yes" and "the ledger changed" are different facts an audit trail must not conflate.
+  applied BOOLEAN NOT NULL DEFAULT FALSE,
+  failure_reason TEXT,
+  CONSTRAINT agent_proposals_applied_only_when_confirmed CHECK (NOT applied OR decision = 'confirmed'),
+
+  -- Which credential ASKED and which AGREED are different questions, and the design rests on them
+  -- being allowed to differ: a read-only script may propose, only a full-scope session may confirm.
+  proposed_by TEXT REFERENCES auth_sessions(token_hash) ON DELETE SET NULL,
+  decided_by TEXT REFERENCES auth_sessions(token_hash) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS agent_proposals_pending
+  ON agent_proposals (created_at DESC) WHERE decided_at IS NULL;
+
+-- At most one pending proposal per subject: three cards for one transaction, two of which must
+-- fail the `observed` check, reads to the owner as the feature being broken.
+CREATE UNIQUE INDEX IF NOT EXISTS agent_proposals_one_pending_per_subject
+  ON agent_proposals (kind, subject_id) WHERE decided_at IS NULL;

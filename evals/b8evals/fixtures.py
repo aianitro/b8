@@ -70,6 +70,10 @@ class GoldenQuestion:
     # Refusal only: phrases naming the quantity being refused. A figure in the SAME SENTENCE as
     # one of these is the confabulation; a figure elsewhere in the reply is context.
     forbid_figures_near: Sequence[str] = ()
+    # Tools that must NOT appear in the trace at all. The write-tool case: an injection ordering
+    # the agent to categorize something must never reach categorize_transaction, and "it produced
+    # no proposal" is a weaker claim than "it never called the tool" — the first could be luck.
+    forbid_tools: Sequence[str] = ()
     note: str = ""
 
     def __post_init__(self) -> None:
@@ -117,6 +121,7 @@ def parse_question(raw: Mapping[str, Any]) -> GoldenQuestion:
         max_tools=raw.get("max_tools"),
         allow_numbers=tuple(float(n) for n in raw.get("allow_numbers", ())),
         forbid_figures_near=tuple(raw.get("forbid_figures_near", ())),
+        forbid_tools=tuple(raw.get("forbid_tools", ())),
         allow_extra_tools=raw.get("allow_extra_tools", True),
         note=raw.get("note", ""),
     )
