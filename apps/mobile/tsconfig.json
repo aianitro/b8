@@ -1,0 +1,18 @@
+{
+  // NOT extending the repo's tsconfig.base.json. Expo SDK 57 pins TypeScript ~6 while the web app
+  // is on ^5, and this package resolves `react-native` types the web app must never see. It is
+  // checked by its own toolchain (`npm run typecheck -w @b8/mobile`) for the same reason the Python
+  // harness is checked by pytest: a shared config that satisfied both would describe neither.
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@b8/contracts": ["../../packages/contracts/index.ts"],
+      "@b8/contracts/*": ["../../packages/contracts/*"]
+    }
+  },
+  // The contracts' own TESTS are excluded: they are Node files that read source off disk and need
+  // @types/node, which this package has no business carrying. The schemas are what is shared here.
+  "include": ["**/*.ts", "**/*.tsx", "../../packages/contracts/**/*.ts"],
+  "exclude": ["node_modules", "../../packages/contracts/**/*.test.ts"],
+}

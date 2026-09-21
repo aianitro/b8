@@ -1,9 +1,27 @@
 {
   "name": "@b8/mobile",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "PLACEHOLDER. Phase 3 step 23 puts an Expo app here; it exists now so the workspace shape is real rather than promised.",
+  "main": "index.ts",
+  "description": "The guardrail in your pocket. ROADMAP.md §5 Phase 3.",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "android": "expo start --android",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
-    "@b8/contracts": "*"
+    "@b8/contracts": "*",
+    "@tanstack/react-query": "^5.103.2",
+    "expo": "~57.0.24",
+    "expo-secure-store": "~57.0.4",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
   }
 }

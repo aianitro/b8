@@ -58,3 +58,12 @@ ops/daily-job.log
 # that were committed once by accident; under app/api each one is a second route file.
 *[0-9].ts
 *[0-9].tsx
+
+# Expo (apps/mobile)
+.expo/
+apps/*/.expo/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision

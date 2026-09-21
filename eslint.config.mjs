@@ -32,6 +32,11 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "apps/web/next-env.d.ts",
     "evals/**",
+    // apps/mobile is checked by its OWN toolchain (`npm run typecheck -w @b8/mobile`), for the
+    // same reason it has its own tsconfig: Expo pins TypeScript ~6 against the web's ^5, and
+    // `metro.config.js` must be CommonJS, which this config forbids. Linting React Native with
+    // eslint-config-next asserts the wrong rules about the wrong runtime.
+    "apps/mobile/**",
   ]),
 ]);
 
