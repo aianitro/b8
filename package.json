@@ -17,8 +17,8 @@
     "job:daily": "npm run job:daily -w @b8/web",
     "tokens": "npm run tokens -w @b8/web",
     "seed:demo": "npm run seed:demo -w @b8/web",
-    "migrate:up": "node-pg-migrate up --envPath .env.local",
-    "migrate:down": "node-pg-migrate down --envPath .env.local",
+    "migrate:up": "node-pg-migrate up --envPath apps/web/.env.local",
+    "migrate:down": "node-pg-migrate down --envPath apps/web/.env.local",
     "migrate:create": "node-pg-migrate create -j sql",
     "prepare": "husky"
   },

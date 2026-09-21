@@ -35,4 +35,7 @@ export HOSTNAME=127.0.0.1
 # 3000 on this machine; that was removed on 2026-09-17. B8_PORT overrides it if anything claims 3000
 # again.
 export PORT="${B8_PORT:-3000}"
-exec "$HOME/opt/node/bin/node" --env-file="$APP/.env.local" server.js
+# `$WEB/.env.local`, not `$APP/.env.local`. P1-10a moved it into the web workspace because Next
+# loads it from the app root — and this line was missed in that change, which took the app down:
+# launchd restarted it every ten seconds and node exited each time with ".env.local: not found".
+exec "$HOME/opt/node/bin/node" --env-file="$WEB/.env.local" server.js

@@ -274,9 +274,28 @@ both rows in the same `auth_sessions` table:
 >    is now `apps/web/.next/standalone/apps/web/server.js` with `node_modules` hoisted beside it at
 >    `apps/web/.next/standalone/node_modules`. `ops/server/start-web.sh` already reflects this and
 >    the plists need no change — they call the script, not the path.
-> 3. **Root commands still work unchanged.** `npm run build`, `npm test`, `npm run migrate:up`,
->    `npm run tokens -- ...` all delegate to the right workspace from `~/b8`, argument passthrough
->    included (verified). `npm ci` at the root installs all three packages.
+> 3. **Root commands still work unchanged.** `npm run build`, `npm test`, `npm run tokens -- ...`
+>    all delegate to the right workspace from `~/b8`, argument passthrough included (verified).
+>    `npm ci` at the root installs all three packages.
+>
+> **DONE 2026-09-21, and it took the app down for two minutes.** This list was written from reading
+> the code and it was INCOMPLETE. Two defects, both in paths, neither findable without deploying:
+>
+> - **`npm run migrate:up` still passed `--envPath .env.local`.** Every local test had supplied
+>   `DATABASE_URL` explicitly and bypassed the flag, so the move was never exercised. Fixed to
+>   `--envPath apps/web/.env.local`.
+> - **`ops/server/start-web.sh` still passed `--env-file="$APP/.env.local"`** on its last line. The
+>   standalone path two lines above HAD been updated; its twin was missed in the same file. launchd
+>   restarted the service every ten seconds and node exited each time with `.env.local: not found`.
+>
+> **The check that would have caught both in five seconds, and was not run:**
+>
+> ```sh
+> grep -rn '\.env\.local' ops/ package.json apps/*/package.json
+> ```
+>
+> Run that after any change to where configuration lives. A path is not covered by a typecheck, a
+> test suite, or a careful reading of the file you are editing.
 
 ```bash
 ssh -i ~/.ssh/b8_server aanpilogov@<server>
