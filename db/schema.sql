@@ -560,3 +560,46 @@ CREATE INDEX IF NOT EXISTS agent_proposals_pending
 -- fail the `observed` check, reads to the owner as the feature being broken.
 CREATE UNIQUE INDEX IF NOT EXISTS agent_proposals_one_pending_per_subject
   ON agent_proposals (kind, subject_id) WHERE decided_at IS NULL;
+
+-- ROADMAP.md §5 Phase 3 step 25. Where to send a ping — and deliberately nothing about what is in it.
+--
+-- THE PAYLOAD DECISION IS RECORDED, NOT IMPLIED. `plan/tasks/P3-25-push-ping/DECISION.md` is the
+-- BUILD.md §5.1 escalation that §5's outbound carve-out requires every time the destination changes,
+-- and `alert_sends.kind` above already anticipated it: "the *message* kind, not the transport; a
+-- second destination re-triggers the BUILD.md §5.1 escalation."
+--
+-- The owner chose a CONTENT-FREE ping: no category, no figure, no merchant, no balance. Push adds two
+-- intermediaries email does not have — Expo's servers and Apple's APNs — and lands on a lock screen
+-- readable without unlocking the phone. The value of push is the INTERRUPT; the figures still travel
+-- only over the tailnet. So this table holds no financial data and must never grow a column that does.
+CREATE TABLE IF NOT EXISTS push_devices (
+  -- The ExpoPushToken. It ADDRESSES A DEVICE, which makes it credential-shaped: anyone holding it can
+  -- make this owner's phone buzz. Primary key rather than a serial, because the token IS the identity
+  -- and a second row for one device would send two pings for one event.
+  token TEXT PRIMARY KEY
+    CONSTRAINT push_devices_token_format CHECK (token ~ '^Expo(nent)?PushToken\[[A-Za-z0-9_-]+\]$'),
+
+  -- Which phone, in the owner's words. The same argument as `auth_sessions.label`: a list is how a
+  -- device that should no longer be notified gets found.
+  label TEXT
+    CONSTRAINT push_devices_label_length CHECK (label IS NULL OR length(label) BETWEEN 1 AND 60),
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- Set on every accepted send: "is anything still listening on this token?", answerable before
+  -- somebody revokes one.
+  last_sent_at TIMESTAMPTZ,
+
+  -- Expo's CLASSIFICATION of the last failure, never its message. A provider's rejection quotes the
+  -- request back, and a table holding no financial data should not start holding it in an error
+  -- string. Same reasoning as `alert_sends.failure_reason`.
+  last_error TEXT
+    CONSTRAINT push_devices_last_error_check CHECK (last_error IN ('unregistered', 'transport', 'rejected')),
+
+  -- A lost phone is one UPDATE, like a revoked session. Kept rather than deleted, so what was
+  -- registered survives the revocation.
+  revoked_at TIMESTAMPTZ
+);
+
+-- The send path's only read: every device still listening.
+CREATE INDEX IF NOT EXISTS push_devices_active ON push_devices (created_at) WHERE revoked_at IS NULL;

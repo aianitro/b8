@@ -13,6 +13,7 @@ import { fetchOverview } from './lib/api';
 import { clearToken, readToken } from './lib/config';
 import PasteToken from './PasteToken';
 import DidThatLandRight from './DidThatLandRight';
+import PingSetup from './PingSetup';
 
 /**
  * TanStack Query rather than a hand-rolled `useEffect` + `useState`, and step 23 names it for a
@@ -193,6 +194,7 @@ function CanISpend() {
           <>
             <Verdict overview={data} />
             <Categories overview={data} />
+            <PingSetup />
           </>
         )}
       </ScrollView>

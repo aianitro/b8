@@ -29,6 +29,12 @@ describe('a read-only token', () => {
     expect(scopePermits('read', 'POST', '/api/v1/chatx')).toBe(false);
   });
 
+  it('may NOT register a device for push', () => {
+    // Registering makes the owner's phone addressable — anyone holding an Expo push token can make
+    // it buzz. That is a write, and a read-only token minted for a script has no business doing it.
+    expect(scopePermits('read', 'POST', '/api/v1/push/devices')).toBe(false);
+  });
+
   it('may still read anything', () => {
     expect(scopePermits('read', 'GET', '/api/v1/overview')).toBe(true);
   });
@@ -37,5 +43,9 @@ describe('a read-only token', () => {
 describe('a full-scope session', () => {
   it('may decide a proposal', () => {
     expect(scopePermits('full', 'POST', DECIDE)).toBe(true);
+  });
+
+  it('may register a device for push', () => {
+    expect(scopePermits('full', 'POST', '/api/v1/push/devices')).toBe(true);
   });
 });

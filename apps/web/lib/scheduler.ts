@@ -1,5 +1,6 @@
 import { runSync } from './sync';
 import { runDailyDigest } from './dailyDigest';
+import { sendPingIfDelivered } from './push';
 import { writeNetWorthSnapshot } from './netWorth';
 import { createLogger } from './logger';
 
@@ -87,7 +88,14 @@ export async function runDailyJob() {
   //      thing available today.
   //   2. Phase 2 step 20's OS cron, which starts a process per run and therefore cannot hold a
   //      stale anything. That is the cure, and this is now a reason to bring it forward.
-  await runDailyDigest();
+  const delivered = await runDailyDigest();
+
+  // LAST, and after the digest, because the ping exists to make the owner OPEN the app and the thing
+  // they open it for must already be there. It carries no content at all — see
+  // `plan/tasks/P3-25-push-ping/DECISION.md`, the §5.1 escalation for this destination — and it
+  // resolves rather than rejects, like the mail above it: a push outage must never cost the sync, the
+  // snapshot, or a digest that already went out.
+  await sendPingIfDelivered(delivered);
 }
 
 // Runs inside the Next.js server process — only active while the server is up.

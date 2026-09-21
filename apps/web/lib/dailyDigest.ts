@@ -5,6 +5,7 @@ import { loadDigest } from './digestRead';
 import { renderDigest, type DigestData, type DigestMessage } from './domain/digest';
 import { BUBBLES_CID, CHART_CID, renderBubblesPng, renderChartPng } from './digestImage';
 import { alertsEnabled, describeSmtp, smtpSettings, type SmtpSettings } from './mailConfig';
+import type { AlertKind } from './domain/pushPing';
 
 const log = createLogger('dailyDigest');
 
@@ -36,11 +37,19 @@ const log = createLogger('dailyDigest');
  * `alertsEnabled` is checked FIRST, before a query runs and long before a transport exists, and it
  * demands the literal string `true`. A checked-out repo cannot send.
  */
-export async function runDailyDigest(): Promise<void> {
+/**
+ * RETURNS WHAT IT DELIVERED, so step 25's ping can inherit this function's suppression instead of
+ * inventing a second notion of what counts as news. An empty array means nothing went out — alerts
+ * disabled, suppressed as "not news twice", or a failed send — and `shouldPing` reads it directly.
+ *
+ * Still resolves rather than rejects. The return value is additive; every existing `return` below
+ * becomes `return []`, which is the honest answer in each of those branches.
+ */
+export async function runDailyDigest(): Promise<AlertKind[]> {
   try {
     if (!alertsEnabled(process.env)) {
       log.info('alerts disabled, nothing attempted');
-      return;
+      return [];
     }
 
     // The one clock read, converted once and passed down — `loadDigest` derives "this month" and
@@ -65,16 +74,19 @@ export async function runDailyDigest(): Promise<void> {
 
     if (priors.rows.some((row) => row.delivered)) {
       log.info('today\'s digest already delivered, suppressed');
-      return;
+      return [];
     }
 
-    await attempt(message, data);
+    // `['digest']` only when it actually went out. `runDailyJob` hands this to `sendPingIfDelivered`,
+    // so the ping inherits this function's suppression rather than deciding newsworthiness twice.
+    return (await attempt(message, data)) ? ['digest'] : [];
   } catch (err) {
     // Anything that escaped the classified paths below — a database that would not answer, a bug.
     // Logged and dropped, because the alternative is an unhandled rejection inside the daily job
     // that also runs the Plaid sync and writes the net worth snapshot.
     log.error('daily digest failed', { error: err instanceof Error ? err.message : String(err) });
   }
+  return [];
 }
 
 /**
@@ -89,7 +101,8 @@ export async function runDailyDigest(): Promise<void> {
  * a dollar figure. The detail goes to the log, which is where an operator looks and is not the row
  * that gets pasted into a report.
  */
-async function attempt(message: DigestMessage, data: DigestData): Promise<void> {
+/** Returns whether the mail was actually delivered — the input to step 25's ping decision. */
+async function attempt(message: DigestMessage, data: DigestData): Promise<boolean> {
   let settings: SmtpSettings;
   try {
     settings = smtpSettings(process.env);
@@ -98,7 +111,7 @@ async function attempt(message: DigestMessage, data: DigestData): Promise<void> 
     // transport failure and must not be classified as one — they have different fixes.
     log.error('mail configuration rejected', { error: err instanceof Error ? err.message : String(err) });
     await record(message, false, 'config');
-    return;
+    return false;
   }
 
   try {
@@ -139,6 +152,7 @@ async function attempt(message: DigestMessage, data: DigestData): Promise<void> 
 
     log.info('digest delivered', { smtp: describeSmtp(settings) });
     await record(message, true, null);
+    return true;
   } catch (err) {
     // `responseCode` is present when the provider answered and declined; its absence means the
     // conversation never got that far. Those are the two failure shapes worth telling apart.
@@ -148,6 +162,7 @@ async function attempt(message: DigestMessage, data: DigestData): Promise<void> 
       error: err instanceof Error ? err.message : String(err),
     });
     await record(message, false, answered ? 'rejected' : 'transport');
+    return false;
   }
 }
 

@@ -58,6 +58,14 @@ async function authed(path: string, init: RequestInit = {}): Promise<Response> {
   return response;
 }
 
+/** A POST that carries the device credential. Used by push registration. */
+export async function authedPost(path: string, body: unknown): Promise<void> {
+  const response = await authed(path, { method: 'POST', body: JSON.stringify(body) });
+  if (!response.ok) throw new ApiError(`The server answered ${response.status}.`);
+  const parsed = await response.json();
+  if (!parsed.success) throw new ApiError(parsed.error?.message ?? 'The server refused that.');
+}
+
 /** The budget category names, for the picker. */
 export async function fetchCategoryNames(): Promise<string[]> {
   const response = await authed('/api/v1/categories');

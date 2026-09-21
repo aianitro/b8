@@ -20,7 +20,7 @@ echo "runs:      06:00 daily, while logged in"
 echo "log:       $APP_DIR/ops/daily-job.log"
 echo
 echo "IMPORTANT — turn the in-process timer off, or the job runs twice:"
-echo "  echo 'SCHEDULER_IN_PROCESS=false' >> $APP_DIR/.env.local"
+echo "  echo 'SCHEDULER_IN_PROCESS=false' >> $APP_DIR/apps/web/.env.local"
 echo "  then restart the dev server"
 echo
 echo "to remove:  launchctl bootout gui/$(id -u)/$LABEL && rm $TARGET"
