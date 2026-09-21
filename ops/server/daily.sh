@@ -13,7 +13,10 @@ export PATH="$HOME/opt/node/bin:$HOME/opt/pg16/bin:/usr/bin:/bin:/usr/sbin:/sbin
 # as the macOS user and fail — every night, silently, with no backup kept.
 export PGHOST=127.0.0.1 PGUSER=b8
 
-cd "$APP"
+# The scripts live in the web workspace after P1-10a; `npm run job:daily` at the root would
+# also work (it delegates with -w @b8/web) but this keeps the process's cwd where its
+# relative imports and .env.local resolution expect it.
+cd "$APP/apps/web"
 until pg_isready -q; do sleep 2; done
 npm run backup
 npm run job:daily

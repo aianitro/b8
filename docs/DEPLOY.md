@@ -263,6 +263,21 @@ both rows in the same `auth_sessions` table:
   there is no HTTP endpoint that mints one — a credential that a request can create is a credential
   a stolen request can create.
 
+> **P1-10a moved the tree (2026-09-21).** The repo is now an npm workspace: the Next app lives at
+> `apps/web`, the shared schemas at `packages/contracts`, and `migrations/` and `db/` stay at the
+> root. Three consequences for this machine, all of which must happen in the same deploy:
+>
+> 1. **`.env.local` moves to `apps/web/.env.local`.** Next loads it from the app root, and so do
+>    `npm run tokens`, `npm run backup` and the daily job. Move it before restarting anything, or
+>    every one of them starts without a database URL.
+> 2. **The standalone output nests.** `outputFileTracingRoot` is the repo root, so the entry point
+>    is now `apps/web/.next/standalone/apps/web/server.js` with `node_modules` hoisted beside it at
+>    `apps/web/.next/standalone/node_modules`. `ops/server/start-web.sh` already reflects this and
+>    the plists need no change — they call the script, not the path.
+> 3. **Root commands still work unchanged.** `npm run build`, `npm test`, `npm run migrate:up`,
+>    `npm run tokens -- ...` all delegate to the right workspace from `~/b8`, argument passthrough
+>    included (verified). `npm ci` at the root installs all three packages.
+
 ```bash
 ssh -i ~/.ssh/b8_server aanpilogov@<server>
 export PATH=$HOME/opt/node/bin:$HOME/opt/pg16/bin:$PATH

@@ -1,0 +1,49 @@
+{
+  "name": "@b8/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "backup": "tsx --env-file=.env.local scripts/backup.ts",
+    "job:daily": "tsx --env-file=.env.local scripts/daily-job.ts",
+    "tokens": "tsx --env-file=.env.local scripts/tokens.ts",
+    "seed:demo": "node scripts/seed-demo.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.107.0",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.2",
+    "@types/pg": "^8.20.0",
+    "lucide-react": "^1.22.0",
+    "next": "^16.2.12",
+    "nodemailer": "^9.1.1",
+    "pg": "^8.22.0",
+    "plaid": "^42.2.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-plaid-link": "^4.1.1",
+    "recharts": "^3.9.0",
+    "sharp": "^0.35.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/nodemailer": "^8.0.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "eslint": "^9",
+    "eslint-config-next": "^16.2.12",
+    "husky": "^9.1.7",
+    "node-pg-migrate": "^9.0.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.13",
+    "typescript": "^5",
+    "vitest": "^4.1.10"
+  }
+}

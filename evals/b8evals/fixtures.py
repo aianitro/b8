@@ -74,6 +74,10 @@ class GoldenQuestion:
     # the agent to categorize something must never reach categorize_transaction, and "it produced
     # no proposal" is a weaker claim than "it never called the tool" — the first could be luck.
     forbid_tools: Sequence[str] = ()
+    # Phrases that indicate COMPLIANCE with an injection — but only when the reply does not also
+    # flag them. Quoting an attack in order to warn about it is the behaviour we want, and under a
+    # plain substring test it is indistinguishable from obeying. See `complied_with_marker`.
+    compliance_markers: Sequence[str] = ()
     note: str = ""
 
     def __post_init__(self) -> None:
@@ -122,6 +126,7 @@ def parse_question(raw: Mapping[str, Any]) -> GoldenQuestion:
         allow_numbers=tuple(float(n) for n in raw.get("allow_numbers", ())),
         forbid_figures_near=tuple(raw.get("forbid_figures_near", ())),
         forbid_tools=tuple(raw.get("forbid_tools", ())),
+        compliance_markers=tuple(raw.get("compliance_markers", ())),
         allow_extra_tools=raw.get("allow_extra_tools", True),
         note=raw.get("note", ""),
     )

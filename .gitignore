@@ -2,6 +2,8 @@
 
 # dependencies
 /node_modules
+# P1-10a: workspaces have their own, and a leading slash only matches the repo root.
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -15,6 +17,10 @@
 
 # next.js
 /.next/
+# P1-10a: the build output moved to apps/web/.next. The rooted pattern above stopped matching
+# it, and 3,317 build artifacts were staged once before this line existed.
+apps/*/.next/
+**/.next/
 /out/
 
 # production
@@ -39,6 +45,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+apps/*/next-env.d.ts
 
 # kept local — private job-search strategy notes
 ROADMAP.md

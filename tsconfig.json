@@ -1,34 +1,27 @@
 {
+  // ONE config that checks the whole repo, so `npx tsc --noEmit` at the root means what it meant
+  // before the workspace split. A `references` solution file was tried first and was worse than
+  // useless: project references require `composite`, which these packages do not set, so
+  // `tsc -b` reported "up to date" and checked nothing.
+  //
+  // Each package still has its own tsconfig — `apps/web` needs the Next plugin and the DOM lib,
+  // `packages/contracts` needs neither — and those are what an editor and a per-package check use.
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
-    "allowJs": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "jsx": "react-jsx",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "plugins": [{ "name": "next" }],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./apps/web/*"],
+      "@b8/contracts": ["./packages/contracts/index.ts"],
+      "@b8/contracts/*": ["./packages/contracts/*"]
     }
   },
   "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "apps/web/next-env.d.ts",
+    "apps/web/**/*.ts",
+    "apps/web/**/*.tsx",
+    "apps/web/**/*.mts",
+    "apps/web/.next/types/**/*.ts",
+    "packages/contracts/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "**/node_modules", "apps/web/.next", "evals"]
 }

@@ -1,0 +1,9 @@
+{
+  "name": "@b8/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PLACEHOLDER. Phase 3 step 23 puts an Expo app here; it exists now so the workspace shape is real rather than promised.",
+  "dependencies": {
+    "@b8/contracts": "*"
+  }
+}

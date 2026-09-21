@@ -33,7 +33,7 @@ Built as a hobby project to get hands-on with a production-grade Plaid integrati
 
 ## Design notes
 
-- **Pure core, I/O shell.** The money logic — net-worth composition, drift detection, property equity, Plaid account/transaction matching, sync-health classification — lives in `lib/domain/*` as pure functions with no database access, and the query that feeds each one sits at the call site. That is what makes the arithmetic testable without a database, and it is why the test suite runs in under a second
+- **Pure core, I/O shell.** The money logic — net-worth composition, drift detection, property equity, Plaid account/transaction matching, sync-health classification — lives in `apps/web/lib/domain/*` as pure functions with no database access, and the query that feeds each one sits at the call site. That is what makes the arithmetic testable without a database, and it is why the test suite runs in under a second
 - **Derived reads, not stored columns.** Balances, equity and drift are computed at read time from data that is already persisted. A stored copy would only ever be a cache that goes stale between syncs
 
 ## Stack
@@ -78,7 +78,7 @@ That includes the screenshots above. They were produced by backing up the databa
 
 ### Regenerating the screenshots
 
-`scripts/seed-demo.mjs` produces that dataset. It is anchored to the day it runs, so the figures always look current rather than frozen at whenever the screenshots were last taken.
+`apps/web/scripts/seed-demo.mjs` produces that dataset. It is anchored to the day it runs, so the figures always look current rather than frozen at whenever the screenshots were last taken.
 
 **It truncates every table before writing**, and the `DATABASE_URL` in `.env.local` is normally the real database — so it refuses to run without an explicit flag, and there is no default-yes path:
 

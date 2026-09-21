@@ -15,7 +15,7 @@ From the repo root. The `DATABASE_URL` override is what keeps this off the real 
 psql -d postgres -c 'DROP DATABASE IF EXISTS b8_evals;' -c 'CREATE DATABASE b8_evals;'
 DATABASE_URL="postgresql://$(whoami)@localhost:5432/b8_evals" npx node-pg-migrate up
 DATABASE_URL="postgresql://$(whoami)@localhost:5432/b8_evals" \
-  node scripts/seed-demo.mjs --yes-wipe-my-database
+  node apps/web/scripts/seed-demo.mjs --yes-wipe-my-database
 ```
 
 ## Two more steps the harness needs
@@ -43,7 +43,7 @@ compared against a seed made in September:
 
 ```sh
 sed 's/^const TODAY = new Date();/const TODAY = new Date(new Date().getFullYear(), 6, 31, 12);/' \
-  scripts/seed-demo.mjs > scripts/.seed-july-probe.mjs
+  apps/web/scripts/seed-demo.mjs > apps/web/scripts/.seed-july-probe.mjs
 # ...seed a second database with it, then:
 Q="SELECT EXTRACT(MONTH FROM date)::int m, mapped_category, SUM(amount)::numeric(12,2)
    FROM transactions WHERE EXTRACT(MONTH FROM date)<=6 GROUP BY 1,2 ORDER BY 1,2;"

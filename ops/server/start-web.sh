@@ -8,15 +8,26 @@ set -eu
 APP="$HOME/b8"
 "$APP/ops/server/wait-for-clock.sh"
 
+# P1-10a MOVED ALL OF THESE. The Next app is a workspace at `apps/web`, and because
+# `outputFileTracingRoot` is the repo root, the standalone output nests the app under its own path
+# and hoists node_modules beside it:
+#
+#   apps/web/.next/standalone/apps/web/server.js      <- the entry point
+#   apps/web/.next/standalone/node_modules/           <- hoisted, shared
+#
+# Verified by building and booting it: /login answered 200 and /api/v1/overview answered 401.
+WEB="$APP/apps/web"
+STANDALONE="$WEB/.next/standalone/apps/web"
+
 # Standalone output omits these two directories by design; they must sit beside server.js.
-rm -rf "$APP/.next/standalone/public" "$APP/.next/standalone/.next/static"
-cp -R "$APP/public" "$APP/.next/standalone/public"
-cp -R "$APP/.next/static" "$APP/.next/standalone/.next/static"
+rm -rf "$STANDALONE/public" "$STANDALONE/.next/static"
+cp -R "$WEB/public" "$STANDALONE/public"
+cp -R "$WEB/.next/static" "$STANDALONE/.next/static"
 
 # Wait for the database, so the first request after a power cut is not a 500.
 until "$HOME/opt/pg16/bin/pg_isready" -h 127.0.0.1 -q; do sleep 2; done
 
-cd "$APP/.next/standalone"
+cd "$STANDALONE"
 # Loopback only. Phones reach this through `tailscale serve`, which terminates TLS — passkeys need a
 # secure context, so the app must never be reached over plain http from another machine.
 export HOSTNAME=127.0.0.1

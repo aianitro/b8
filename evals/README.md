@@ -3,7 +3,7 @@
 `ROADMAP.md` §5 step 14 (Month 4, "Python, for real").
 
 The agent at `POST /api/v1/chat` picks a tool, calls it, and writes prose around the result.
-Nothing tested any of that: the 759 unit tests cover `lib/domain/`, which is pure functions with
+Nothing tested any of that: the 759 unit tests cover `apps/web/lib/domain/`, which is pure functions with
 fixed answers, and an agent has no fixed answer. Change a line of the system prompt and it might
 start calling the wrong tool, or start guessing instead of declining — findable only by noticing
 a wrong figure, weeks later, if at all.
@@ -66,7 +66,7 @@ of one non-model request. `--skip-preflight` exists and should not be used.
 ## Cost, and the ceiling it runs into
 
 Each request may make up to five model calls, and the app refuses past **200 chat requests per
-local-time day** (`lib/rateLimit.ts`, `DAILY_CEILING`). A full run at 3 repeats is 39 requests,
+local-time day** (`apps/web/lib/rateLimit.ts`, `DAILY_CEILING`). A full run at 3 repeats is 39 requests,
 just under 20% of the day's allowance. `run_suite` refuses to start a run that would exceed the
 ceiling rather than dying halfway and spending it for nothing.
 
@@ -75,9 +75,9 @@ ceiling rather than dying halfway and spending it for nothing.
 Run the repo's integration suite against `b8_evals` and **it destroys this harness's fixtures.**
 Two separate tests do it:
 
-- `app/api/v1/auth/bearer.test.ts:80` — `TRUNCATE auth_sessions, webauthn_credentials CASCADE`,
+- `apps/web/app/api/v1/auth/bearer.test.ts:80` — `TRUNCATE auth_sessions, webauthn_credentials CASCADE`,
   which revokes the eval token mid-run. Every question then returns `401`.
-- `app/api/v1/overview/route.test.ts:54` — `TRUNCATE transactions, account_valuations,
+- `apps/web/app/api/v1/overview/route.test.ts:54` — `TRUNCATE transactions, account_valuations,
   account_balances, budget_categories, accounts`, which deletes **every expected figure this
   harness asserts**. 515 transactions become 7 and June groceries becomes `0`.
 
@@ -89,7 +89,7 @@ So the integration suite gets **`b8_integration`**, never `b8_evals`:
 ```sh
 psql -d postgres -c 'CREATE DATABASE b8_integration;'
 DATABASE_URL="postgresql://$(whoami)@localhost:5432/b8_integration" npx node-pg-migrate up
-DATABASE_URL="postgresql://$(whoami)@localhost:5432/b8_integration" \
+cd apps/web && DATABASE_URL="postgresql://$(whoami)@localhost:5432/b8_integration" \
   npx vitest run --config vitest.integration.config.mts
 ```
 

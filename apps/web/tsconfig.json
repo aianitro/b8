@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      // `@/*` stays the WEB APP's own alias and still means "from this package's root". That is why
+      // this conversion touched 11 imports instead of 153: every `@/lib/...`, `@/components/...`
+      // and `@/shared/types` import resolves exactly as it did before the move.
+      "@/*": ["./*"],
+      // The contracts are a PACKAGE now, not a folder. Importing them by package name is the whole
+      // point — the phone will import the same name, and a relative path could not be shared.
+      "@b8/contracts": ["../../packages/contracts/index.ts"],
+      "@b8/contracts/*": ["../../packages/contracts/*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.mts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "../../packages/contracts/**/*.ts"
+  ],
+  "exclude": ["node_modules", ".next"]
+}

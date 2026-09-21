@@ -19,10 +19,19 @@ const eslintConfig = defineConfig([
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
+    // P1-10a: these are relative to the directory eslint RUNS IN, which is the repo root. The
+    // `apps/web/` prefixes matter — without them eslint walks the build output. Measured: running
+    // it from inside `apps/web` with the unprefixed patterns produced 27,941 problems, all of them
+    // in `.next` and `node_modules`.
     ".next/**",
+    "apps/web/.next/**",
+    "apps/*/node_modules/**",
+    "packages/*/node_modules/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "apps/web/next-env.d.ts",
+    "evals/**",
   ]),
 ]);
 

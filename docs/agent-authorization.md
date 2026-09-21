@@ -72,7 +72,7 @@ decision to widen the attack surface, and it should be visible as one.**
 This one is real, it is this repo's, and it was found by security review before merge rather than by
 anyone clever.
 
-`proxy.ts` is the boundary: it authenticates every request and applies the scope check that makes a
+`apps/web/proxy.ts` is the boundary: it authenticates every request and applies the scope check that makes a
 read-only token read-only. Five paths are allowlisted through it as pre-auth, because they have to
 be — you cannot require a session on the endpoint that creates the first session.
 
@@ -88,7 +88,7 @@ full-scope session. A read-only token could mint permanent full access.
 > which is a tautology worth saying out loud, because the mental model it produces is "the boundary
 > handles it."
 
-The fix moved the scope check into `credentialFrom` in `lib/requestAuth.ts` — the function both
+The fix moved the scope check into `credentialFrom` in `apps/web/lib/requestAuth.ts` — the function both
 callers share — so the check travels with the act of identifying a caller instead of with the path
 the caller took.
 
@@ -115,7 +115,7 @@ for authorized users"* — and a sentence is a derived boolean with extra steps.
 
 ## 3. "Read-only" bounds writes, not harm
 
-`/api/v1/chat` is in `READ_SAFE_POSTS` (`lib/bearerAuth.ts`), so a read-scoped token may POST to it.
+`/api/v1/chat` is in `READ_SAFE_POSTS` (`apps/web/lib/bearerAuth.ts`), so a read-scoped token may POST to it.
 That is correct and deliberate — the eval runner needs it, and chat writes no row.
 
 But one such request makes **up to five model calls**. A read-only credential can therefore spend
@@ -123,7 +123,7 @@ money without limit, and a token bucket alone permits roughly 72,000 model calls
 
 The scope system answers *may this caller change data*. It does not answer *may this caller cost me
 something*, and those are different questions that happen to be asked at the same door. Hence the
-separate daily ceiling of 200 requests in `lib/rateLimit.ts` — a bucket caps the rate, and only a
+separate daily ceiling of 200 requests in `apps/web/lib/rateLimit.ts` — a bucket caps the rate, and only a
 ceiling caps the bill.
 
 > **Authorization models inherited from CRUD think in reads and writes. An agent adds a third axis —

@@ -1,0 +1,11 @@
+{
+  "name": "@b8/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Request/response schemas shared by the web app and the phone. The reason Phase 1 exists.",
+  "main": "index.ts",
+  "types": "index.ts",
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}
