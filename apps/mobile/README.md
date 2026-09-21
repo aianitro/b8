@@ -39,17 +39,35 @@ npm run tokens -- create "iphone" --days 30
 
 ## Three things that are load-bearing and easy to break
 
-**`metro.config.js`** teaches Metro about the monorepo — `watchFolders` at the workspace root and
-`nodeModulesPaths` local-first. Without it `@b8/contracts` is unresolvable **at runtime** even when
-TypeScript is happy, and the failure arrives as a red screen on the device rather than an error in
-CI. Local-first matters because Expo pins React 19.2.3 while `apps/web` is on 19.2.4; the phone must
-get the versions Expo tested against.
+**`metro.config.js`** teaches Metro about the monorepo. **Corrected 2026-09-21:** an earlier
+version of this README said that without it `@b8/contracts` is unresolvable at runtime. That was
+asserted without testing and is false — npm workspaces symlinks `node_modules/@b8/contracts` and
+Metro follows it, so a gutted config still bundles. What it actually buys is `watchFolders`, so an
+edit to `packages/contracts` reloads the app, and which also moves Metro's server root to the
+workspace root (hence the bundle URL below). `nodeModulesPaths` local-first states an order npm's
+layout already produces — verified: `require.resolve('react')` from here finds Expo's nested 19.2.3
+while `apps/web` gets the hoisted 19.2.4.
 
 **Its own tsconfig**, not the repo base: Expo SDK 57 pins TypeScript ~6 against the web's ^5, and
 this package resolves `react-native` types the web app must never see.
 
 **Excluded from the root eslint**, because `metro.config.js` must be CommonJS and
 `eslint-config-next` asserts the wrong rules about the wrong runtime.
+
+## Smoke-testing the bundle without a device
+
+```sh
+npm run smoke -w @b8/mobile            # ios
+npm run smoke:android -w @b8/mobile
+```
+
+Starts Metro, asks it for a real bundle over HTTP, and asserts both a 200 **and** that the bundle
+carries a symbol that could only come from `packages/contracts`. That second assertion is the
+point: a bundle built without the shared package would still be a valid 200.
+
+**It catches** a cross-package import Metro cannot resolve — proven by pointing `lib/api.ts` at
+`@b8/contracts/no-such-module` and watching it exit non-zero. **It does not catch** a broken
+`metro.config.js`, for the reason above. No device, no simulator, no Xcode.
 
 ## Every response is parsed, never cast
 

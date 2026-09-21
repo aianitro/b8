@@ -8,7 +8,9 @@
     "start": "expo start",
     "ios": "expo start --ios",
     "android": "expo start --android",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "smoke": "sh scripts/bundle-smoke.sh",
+    "smoke:android": "sh scripts/bundle-smoke.sh android"
   },
   "dependencies": {
     "@b8/contracts": "*",

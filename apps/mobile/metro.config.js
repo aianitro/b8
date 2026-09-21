@@ -1,6 +1,26 @@
-// Metro, taught about the monorepo. Without this the bundler resolves from `apps/mobile` only and
-// `@b8/contracts` is unresolvable at RUNTIME even when TypeScript is perfectly happy — the failure
-// arrives as a red screen on the device rather than an error in CI, which is the worst place for it.
+// Metro, taught about the monorepo.
+//
+// CORRECTED 2026-09-21, having tested it. An earlier version of this comment claimed that without
+// this file `@b8/contracts` is "unresolvable at runtime". That is FALSE and was asserted without
+// checking: npm workspaces creates `node_modules/@b8/contracts` as a symlink to
+// `packages/contracts`, and Metro follows it through ordinary node_modules lookup. Gutting this
+// file — watchFolders and nodeModulesPaths both removed — still produced a working 5.6MB bundle
+// with the shared schemas in it.
+//
+// What it actually buys, in descending order of how much it matters:
+//
+//   1. watchFolders — Metro only watches files under the project root by default, so without this
+//      an edit to `packages/contracts` does not reload the app. This is the real reason the file
+//      exists. It is also what moves Metro's SERVER ROOT to the workspace root, which is why the
+//      bundle URL is `/apps/mobile/index.bundle` and not `/index.bundle`.
+//
+//   2. disableHierarchicalLookup — stops Metro walking above the workspace for modules, so a stray
+//      install in a parent directory cannot silently become a dependency.
+//
+//   3. nodeModulesPaths — makes explicit what npm's install layout already does. Verified:
+//      `require.resolve('react')` from `apps/mobile` already finds the nested 19.2.3 that Expo
+//      pins, while `apps/web` gets the hoisted 19.2.4. Belt-and-braces, not load-bearing — kept
+//      because the resolution order should be stated rather than inherited from an install.
 const path = require('node:path');
 const { getDefaultConfig } = require('expo/metro-config');
 
@@ -9,19 +29,13 @@ const workspaceRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
-// 1. Watch the whole workspace, so editing `packages/contracts` reloads the app.
 config.watchFolders = [workspaceRoot];
 
-// 2. Resolve from the local node_modules FIRST, then the hoisted root. Order matters: Expo pins
-//    react 19.2.3 and react-native 0.86.3, while `apps/web` is on react 19.2.4. Local-first means
-//    the phone gets the versions Expo tested against rather than whichever npm hoisted.
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// 3. Do not walk up past the workspace root looking for modules — that is how a stray install in a
-//    parent directory silently becomes a dependency.
 config.resolver.disableHierarchicalLookup = true;
 
 module.exports = config;
