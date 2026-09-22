@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import type { ApiResponse } from '@b8/contracts/types';
 import { createLogger } from '@/lib/logger';
-import { monthsBudget } from '@/lib/domain/budgetPlan';
+import { monthsBudget, monthsUpcoming } from '@/lib/domain/budgetPlan';
 import { loadYearEnd } from '@/lib/yearEndRead';
 import { BudgetGridDataSchema, type BudgetGridData, type BudgetGridRow } from '@b8/contracts/budgetGrid';
 
@@ -83,14 +83,19 @@ export async function GET(req: NextRequest) {
     for (const r of grid.rows) {
       if (!byId.has(r.id)) {
         const annual = Number(r.annual_budget);
+        const schedule = r.monthly_amounts ? r.monthly_amounts.map(Number) : null;
         byId.set(r.id, {
           id: r.id,
           category: r.name,
           isIncome: r.is_income,
           annualBudget: annual,
           // The SHARED rule, not a fifth copy of the even spread. See lib/domain/budgetPlan.ts.
-          plan: monthsBudget(annual, r.monthly_amounts ? r.monthly_amounts.map(Number) : null),
+          plan: monthsBudget(annual, schedule),
           actual: new Array(12).fill(0),
+          // Filled below, once each row's full YTD is known — the projection spreads what is LEFT,
+          // so it cannot be computed until the year so far has been summed.
+          upcoming: new Array(12).fill(0),
+          hasSchedule: schedule !== null,
           ytd: 0,
         });
       }
@@ -98,6 +103,17 @@ export async function GET(req: NextRequest) {
       const amount = Number(r.amount);
       row.actual[r.month - 1] = amount;
       row.ytd += amount;
+    }
+
+    for (const row of byId.values()) {
+      row.upcoming = monthsUpcoming(
+        row.annualBudget,
+        row.hasSchedule ? row.plan : null,
+        row.plan,
+        row.ytd,
+        currentMonth,
+        row.isIncome
+      );
     }
 
     const rows = Array.from(byId.values());

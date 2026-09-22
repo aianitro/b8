@@ -1,17 +1,18 @@
-// The budget page, at phone width.
+// The budget page, at phone width — the coloured grid, as a grid.
 //
-// THE FORM HAD TO CHANGE AND THAT IS THE WHOLE DESIGN PROBLEM. The web renders a 12-column grid —
-// category down the side, months across, plan and actual in every cell. At 400px twelve columns give
-// 30px each, which fits neither "$1,040" nor a plan figure beneath it. A horizontally scrolling table
-// was the obvious port and is the wrong one: it hides eleven twelfths of the page behind a gesture
-// and makes comparing March with October a memory test.
+// A DESIGN CALL WAS MADE HERE AND IT WAS WRONG, so the reasoning is kept rather than quietly
+// replaced. The first version showed ONE CATEGORY AT A TIME with its twelve months down the page,
+// arguing that twelve columns at 400px give 30px each and that horizontal scrolling hides eleven
+// twelfths of a page behind a gesture. Both facts are true. The conclusion was not: the grid's value
+// is reading ACROSS a row and DOWN a column, and a single-category view destroys the second
+// entirely — you cannot see that three categories all went red in June.
 //
-// So the phone inverts it. ONE CATEGORY AT A TIME, its twelve months down the screen as rows, with a
-// picker to change category. The same numbers, read the way a tall screen reads — and the question a
-// phone actually gets asked about a budget is "how is Dining Out doing", not "show me the matrix".
+// The owner asked for the web's grid and got a reinterpretation of it. The answer at this width is
+// the one spreadsheets have always used: a frozen category column and the months scrolling under it,
+// with COLOUR carrying the grading so a 58px cell does not have to spell out a ratio.
 //
-// The dataviz skill's first step is to pick the form from the data's job rather than reproduce a
-// shape. This is that, applied.
+// Below the grid, the detail view survives as a second section — it was not wasted, and "how is
+// Dining Out doing" is still a question worth answering without arithmetic.
 
 import { useState } from 'react';
 import {
@@ -22,6 +23,7 @@ import type { BudgetGridRow } from '@b8/contracts/budgetGrid';
 import { fetchBudgetGrid } from './lib/api';
 import { C, money, signed } from './widgets/tokens';
 import { Kpi, KpiRow } from './widgets/Kpi';
+import BudgetGrid from './widgets/BudgetGrid';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -147,8 +149,17 @@ export default function Budget() {
               />
             </KpiRow>
 
+            <View style={styles.gridBlock}>
+              <Text style={styles.sectionTitle}>The year, by category</Text>
+              <Text style={styles.gridHint}>
+                top figure is actual, below it the plan · scroll sideways for the rest of the year
+              </Text>
+              <BudgetGrid rows={data.rows} currentMonth={data.currentMonth} />
+            </View>
+
             {selected && (
               <View style={styles.categoryBlock}>
+                <Text style={styles.sectionTitle}>One category, in full</Text>
                 <Pressable style={styles.categoryHeader} onPress={() => setPicking(true)}>
                   <View style={styles.categoryLeft}>
                     <Text style={styles.categoryName}>{selected.category}</Text>
@@ -210,7 +221,10 @@ const styles = StyleSheet.create({
   toggleActive: { backgroundColor: C.ink },
   toggleText: { fontSize: 13, color: C.muted, fontWeight: '600', textTransform: 'capitalize' },
   toggleTextActive: { color: '#fff' },
-  categoryBlock: { marginTop: 30 },
+  gridBlock: { marginTop: 28 },
+  gridHint: { fontSize: 11, color: C.faint, marginBottom: 12, lineHeight: 16 },
+  sectionTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.6, color: C.muted, textTransform: 'uppercase', marginBottom: 8 },
+  categoryBlock: { marginTop: 34 },
   categoryHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: C.line, borderRadius: 10, padding: 14 },
   categoryLeft: { flexShrink: 1 },
   categoryName: { fontSize: 18, fontWeight: '700', color: C.ink },

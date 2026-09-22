@@ -11,6 +11,8 @@
 
 import { z } from 'zod';
 
+export type { CellState } from './budgetCellState';
+
 const money = z.number();
 /** Twelve entries, January first. Positional, like `monthlySpending`. */
 const twelve = z.array(money).length(12, 'positional, January first — twelve entries');
@@ -25,6 +27,20 @@ export const BudgetGridRowSchema = z.object({
   plan: twelve,
   /** What each month ACTUALLY was. Zero for months that have not happened. */
   actual: twelve,
+  /**
+   * What each month AFTER the current one is projected to be. Zero for the current month and every
+   * past one, so a client can render a future cell without deciding which months are future.
+   */
+  upcoming: twelve,
+  /**
+   * Whether this category has an EXPLICIT twelve-month schedule.
+   *
+   * Carried because the cell grading needs it and cannot infer it: an off-cycle month — spend where
+   * the plan is zero — is a finding only for a scheduled category. For an unscheduled one a zero
+   * plan means "no budget configured", which is neutral. Without this flag the phone would paint
+   * every unbudgeted category's every month as a breach.
+   */
+  hasSchedule: z.boolean(),
   ytd: money,
 });
 

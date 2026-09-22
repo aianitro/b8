@@ -1,6 +1,6 @@
 import db from '@/lib/db';
 import type { Landscape } from '@b8/contracts/types';
-import { monthsBudget } from '@/lib/domain/budgetPlan';
+import { monthsBudget, monthsUpcoming } from '@/lib/domain/budgetPlan';
 import BudgetMonthlyGridClient from './BudgetMonthlyGridClient';
 
 export type GridRow = {
@@ -34,38 +34,8 @@ type DbRow = {
 // `monthsBudget` moved to `lib/domain/budgetPlan.ts` when the phone's budget endpoint needed the
 // same rule. Extracted rather than copied — see that file's note on adherence.ts's four implementations.
 
-// Projected amount for months after the current one. A category with an explicit monthly
-// schedule just uses its own scheduled amount per future month. Otherwise the remaining
-// annual budget (annual - YTD realized) is spread evenly across the months still to come —
-// current month included in that count — so the projection self-corrects as the year goes
-// (spent less than pace so far -> higher projected months ahead, and vice versa).
-function monthsUpcoming(
-  annual: number,
-  monthlyAmounts: number[] | null,
-  monthsBudgetArr: number[],
-  ytd: number,
-  currentMonth: number,
-  isIncome: boolean
-): number[] {
-  const upcoming = new Array(12).fill(0);
-  if (monthlyAmounts) {
-    for (let i = currentMonth + 1; i < 12; i++) upcoming[i] = monthsBudgetArr[i];
-    return upcoming;
-  }
-  const remainingMonths = 12 - currentMonth;
-  if (remainingMonths <= 0) return upcoming;
-  // Negative is meaningful on an expense — the budget is spent, no room is left, and the cell
-  // grades itself red on it. On INCOME it is nonsense: `Other income (O)` carries no budget and no
-  // schedule, so a year's $862 of receipts projected (0 − 862) / 4 = −$215.50 into each remaining
-  // month, money flowing backwards out of a category that has only ever taken it in. The cell then
-  // printed `fmt(Math.abs(upcoming))`, showing $215 while the totals row subtracted $215.50 — the
-  // sign on screen contradicting the sign in the sum, three months running. A category with
-  // nothing planned projects nothing.
-  const perMonth = (annual - ytd) / remainingMonths;
-  const projected = isIncome && perMonth < 0 ? 0 : perMonth;
-  for (let i = currentMonth + 1; i < 12; i++) upcoming[i] = projected;
-  return upcoming;
-}
+// `monthsUpcoming` moved to `lib/domain/budgetPlan.ts` alongside `monthsBudget`, when the phone's
+// budget endpoint needed the same projection for the future cells of the same grid.
 
 async function getGridData(landscape: Landscape, currentMonth: number): Promise<GridRow[]> {
   const result = await db.query<DbRow>(`

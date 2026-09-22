@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { monthPct, expenseCellStyle, expenseCellText, incomeCellStyle, incomeCellText } from './budgetColors';
+import { expenseCellState, incomeCellState } from './domain/budgetCellState';
 
 // These thresholds are the app's only signal for "is this category in trouble" in the
 // monthly grid, and they're shared across the grid and the category detail page — so the
@@ -100,5 +101,66 @@ describe('incomeCellText', () => {
     expect(incomeCellText(500, true)).toBe('text-slate-300');
     expect(incomeCellText(0, false)).toBe('text-slate-300');
     expect(incomeCellText(500, false)).toBe('text-emerald-700 font-medium');
+  });
+});
+
+
+// ─── ADDED when the thresholds were split from the class names ────────────────────────────────
+//
+// `budgetColors.ts` once held both. The phone needed the same grading and Tailwind classes do not
+// exist in React Native, so the rule moved to `@b8/contracts/budgetCellState` and this file became
+// the web's palette for its answers. The fixtures below pin the MAPPING — every state to the class
+// it produced before the split — because that refactor touched rendering code and the tests above
+// pin the thresholds rather than the classes.
+//
+// (They also exist because the first version of this block was written over the file above by
+// mistake, destroying it. It was recovered from git; these are additive.)
+
+describe('the state → class mapping, pinned across the split', () => {
+  const expenseCases: Array<[string, [number, number, boolean, boolean], string, string]> = [
+    ['a future month',       [0, 100, true, false],    'bg-slate-50',   'text-slate-300'],
+    ['nothing spent',        [0, 100, false, false],   'bg-white',      'text-slate-300'],
+    ['over 110%',            [111, 100, false, false], 'bg-red-100',    'text-red-700 font-semibold'],
+    ['just over 100%',       [105, 100, false, false], 'bg-amber-50',   'text-amber-700 font-medium'],
+    ['exactly 100%',         [100, 100, false, false], 'bg-emerald-50', 'text-slate-700'],
+    ['exactly half',         [50, 100, false, false],  'bg-green-50',   'text-slate-700'],
+    ['off-cycle',            [40, 0, false, true],     'bg-red-100',    'text-red-700 font-semibold'],
+    ['no budget configured', [40, 0, false, false],    'bg-green-50',   'text-slate-700'],
+  ];
+  for (const [name, args, bg, text] of expenseCases) {
+    it(`expense: ${name}`, () => {
+      expect(expenseCellStyle(...args)).toBe(bg);
+      expect(expenseCellText(...args)).toBe(text);
+    });
+  }
+
+  const incomeCases: Array<[string, [number, number, boolean, boolean], string]> = [
+    ['a future month',   [0, 100, true, false],    'bg-slate-50'],
+    ['nothing received', [0, 100, false, false],   'bg-white'],
+    ['off-cycle',        [50, 0, false, true],     'bg-amber-50'],
+    ['at target',        [100, 100, false, false], 'bg-emerald-100'],
+    ['half',             [50, 100, false, false],  'bg-emerald-50'],
+    ['below half',       [20, 100, false, false],  'bg-amber-50'],
+    ['no target set',    [500, 0, false, false],   'bg-emerald-100'],
+  ];
+  for (const [name, args, bg] of incomeCases) {
+    it(`income: ${name}`, () => expect(incomeCellStyle(...args)).toBe(bg));
+  }
+});
+
+describe('the state names themselves, which the phone binds to', () => {
+  it('puts 100% on the on-plan side and 100.1% on the watch side', () => {
+    expect(expenseCellState(100, 100, false, false)).toBe('on-plan');
+    expect(expenseCellState(100.1, 100, false, false)).toBe('watch');
+  });
+
+  it('puts 110% on the watch side and 110.1% on the over side', () => {
+    expect(expenseCellState(110, 100, false, false)).toBe('watch');
+    expect(expenseCellState(110.1, 100, false, false)).toBe('over');
+  });
+
+  it('income meets its target at exactly 100%, not above it', () => {
+    expect(incomeCellState(100, 100, false, false)).toBe('income-met');
+    expect(incomeCellState(99.9, 100, false, false)).toBe('income-part');
   });
 });

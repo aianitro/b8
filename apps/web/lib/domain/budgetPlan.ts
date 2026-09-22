@@ -25,3 +25,38 @@ export function monthsBudget(annual: number, monthlyAmounts: number[] | null): n
   if (monthlyAmounts && monthlyAmounts.length === 12) return monthlyAmounts;
   return new Array(12).fill(annual / 12);
 }
+
+/**
+ * What each month AFTER the current one is projected to be.
+ *
+ * A scheduled category uses its schedule. Everything else spreads the REMAINING annual budget across
+ * the months still to come — the current month included in the count — so the projection
+ * self-corrects: under pace so far raises the months ahead, over pace lowers them.
+ *
+ * NEGATIVE IS MEANINGFUL ON AN EXPENSE — the budget is spent, no room is left, and the cell grades
+ * itself on that. ON INCOME IT IS NONSENSE, and the web's comment records what it cost: a category
+ * with no budget and no schedule projected (0 − 862) / 4 = −$215.50 into each remaining month, money
+ * flowing backwards out of something that had only ever taken it in. The cell printed $215 while the
+ * totals row subtracted $215.50 — the sign on screen contradicting the sign in the sum, three months
+ * running. A category with nothing planned projects nothing.
+ */
+export function monthsUpcoming(
+  annual: number,
+  monthlyAmounts: number[] | null,
+  monthsBudgetArr: number[],
+  ytd: number,
+  currentMonth: number,
+  isIncome: boolean
+): number[] {
+  const upcoming = new Array(12).fill(0);
+  if (monthlyAmounts) {
+    for (let i = currentMonth + 1; i < 12; i++) upcoming[i] = monthsBudgetArr[i];
+    return upcoming;
+  }
+  const remainingMonths = 12 - currentMonth;
+  if (remainingMonths <= 0) return upcoming;
+  const perMonth = (annual - ytd) / remainingMonths;
+  const projected = isIncome && perMonth < 0 ? 0 : perMonth;
+  for (let i = currentMonth + 1; i < 12; i++) upcoming[i] = projected;
+  return upcoming;
+}

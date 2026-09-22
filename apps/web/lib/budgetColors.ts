@@ -1,44 +1,67 @@
-// Shared month-cell status coloring for anywhere spend-vs-budget is shown per month
-// (the monthly budget grid, the category detail page's monthly allocation panel, ...).
-// Keeping this in one place means tuning the thresholds once instead of drifting apart.
+// Month-cell colours for the web, mapped from the shared state in `lib/domain/budgetCellState.ts`.
+//
+// THE THRESHOLDS LEFT THIS FILE and the class names stayed. They were together until the phone
+// needed the same grid: Tailwind classes do not exist in React Native, so a port had to either
+// duplicate "over budget" or split the rule from the paint. The rule is now one function both
+// clients call, and this file is the web's palette for its answers.
+//
+// `budgetColors.test.ts` asserts every state still maps to the class it mapped to before the split,
+// so the grid renders identically.
 
-// offCycle: this month has $0 expected AND real activity, for a category that DOES have an
-// explicit schedule — i.e. spend landed outside its expected window. Distinct from
-// "no budget configured at all" (monthlyBudget === 0 with no schedule), which stays neutral.
-export function monthPct(spent: number, monthlyBudget: number, offCycle: boolean): number {
-  if (offCycle) return Infinity;
-  if (monthlyBudget > 0) return spent / monthlyBudget;
-  return 0;
-}
+import {
+  expenseCellState, incomeCellState, monthPct, type CellState,
+} from './domain/budgetCellState';
 
-// On budget (0-100%) is green. 100-110% over is the amber "watch it" zone. >110% is red.
+export { monthPct };
+
+const EXPENSE_BG: Record<CellState, string> = {
+  future: 'bg-slate-50',
+  empty: 'bg-white',
+  over: 'bg-red-100',
+  watch: 'bg-amber-50',
+  'on-plan': 'bg-emerald-50',
+  'well-under': 'bg-green-50',
+  // Off-cycle reaches the expense grading as `over`, because `monthPct` returns Infinity for it.
+  // Present for exhaustiveness rather than because the expense path produces it.
+  'off-cycle': 'bg-red-100',
+  'income-met': 'bg-emerald-100',
+  'income-part': 'bg-emerald-50',
+  'income-short': 'bg-amber-50',
+  inverted: 'bg-red-100',
+};
+
+const EXPENSE_TEXT: Record<CellState, string> = {
+  future: 'text-slate-300',
+  empty: 'text-slate-300',
+  over: 'text-red-700 font-semibold',
+  watch: 'text-amber-700 font-medium',
+  'on-plan': 'text-slate-700',
+  'well-under': 'text-slate-700',
+  'off-cycle': 'text-red-700 font-semibold',
+  'income-met': 'text-emerald-700 font-medium',
+  'income-part': 'text-emerald-700 font-medium',
+  'income-short': 'text-emerald-700 font-medium',
+  inverted: 'text-red-700 font-semibold',
+};
+
 export function expenseCellStyle(spent: number, monthlyBudget: number, isFuture: boolean, offCycle: boolean): string {
-  if (isFuture) return 'bg-slate-50';
-  if (spent === 0) return 'bg-white';
-  const pct = monthPct(spent, monthlyBudget, offCycle);
-  if (pct > 1.1) return 'bg-red-100';
-  if (pct > 1.0) return 'bg-amber-50';
-  if (pct > 0.5) return 'bg-emerald-50';
-  return 'bg-green-50';
+  return EXPENSE_BG[expenseCellState(spent, monthlyBudget, isFuture, offCycle)];
 }
 
 export function expenseCellText(spent: number, monthlyBudget: number, isFuture: boolean, offCycle: boolean): string {
-  if (isFuture) return 'text-slate-300';
-  if (spent === 0) return 'text-slate-300';
-  const pct = monthPct(spent, monthlyBudget, offCycle);
-  if (pct > 1.1) return 'text-red-700 font-semibold';
-  if (pct > 1.0) return 'text-amber-700 font-medium';
-  return 'text-slate-700';
+  return EXPENSE_TEXT[expenseCellState(spent, monthlyBudget, isFuture, offCycle)];
 }
 
+const INCOME_BG: Record<string, string> = {
+  future: 'bg-slate-50',
+  empty: 'bg-white',
+  'income-met': 'bg-emerald-100',
+  'income-part': 'bg-emerald-50',
+  'income-short': 'bg-amber-50',
+};
+
 export function incomeCellStyle(received: number, monthlyTarget: number, isFuture: boolean, offCycle: boolean): string {
-  if (isFuture) return 'bg-slate-50';
-  if (received === 0) return 'bg-white';
-  if (offCycle) return 'bg-amber-50';
-  const pct = monthlyTarget > 0 ? received / monthlyTarget : 1;
-  if (pct >= 1.0) return 'bg-emerald-100';
-  if (pct >= 0.5) return 'bg-emerald-50';
-  return 'bg-amber-50';
+  return INCOME_BG[incomeCellState(received, monthlyTarget, isFuture, offCycle)] ?? 'bg-white';
 }
 
 export function incomeCellText(received: number, isFuture: boolean): string {

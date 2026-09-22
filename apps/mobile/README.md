@@ -68,15 +68,26 @@ labels or a table view. So money in is drawn **above** the zero line and out **b
 carries identity with no colour vision at all), and the figures list beneath the plot is the table
 view. Neither is decoration; see `widgets/tokens.ts`.
 
-**Screen: "Budget"** — the web budget page, inverted. **The form had to change and that is the whole
-design problem.** The web renders a 12-column grid: category down the side, months across, plan and
-actual in every cell. At 400px twelve columns give 30px each, which fits neither `$1,040` nor a plan
-beneath it. A horizontally scrolling table was the obvious port and the wrong one — it hides eleven
-twelfths of the page behind a gesture and makes comparing March with October a memory test.
+**Screen: "Budget"** — the web's coloured grid, as a grid: a **frozen category column** with twelve
+month columns scrolling under it, each cell showing actual over plan and **graded by the same
+thresholds the web uses**.
 
-So the phone shows **one category at a time, its twelve months down the screen**, with a picker to
-switch. Same numbers, read the way a tall screen reads, and it matches the question a phone actually
-gets asked: "how is Dining Out doing", not "show me the matrix".
+**A design call was made here and it was wrong**, and the record is kept rather than quietly
+replaced. The first version showed one category at a time with its twelve months down the page,
+arguing that twelve columns at 400px give 30px each and that horizontal scrolling hides most of a
+page behind a gesture. Both facts are true; the conclusion was not. **A grid's value is reading
+across a row AND down a column**, and a single-category view destroys the second entirely — you
+cannot see that three categories all went red in June. Colour is what makes a 58px cell work, and
+dropping it was the mistake.
+
+The one-category view survives below the grid as a second section: "how is Dining Out doing" is
+still worth answering without arithmetic.
+
+**The grading is shared, the paint is not.** `apps/web/lib/budgetColors.ts` had the thresholds welded
+to Tailwind class names, which do not exist in React Native. The rule now lives in
+`@b8/contracts/budgetCellState` and both clients call it; the web maps its answers to Tailwind and
+the phone to hex (`widgets/cellColors.ts`). So the two cannot disagree about what "over budget"
+means — only about what colour to paint it.
 
 Two correctness rules carried over from the web's grid client: a **future month has no variance**
 (printing one invents a finding), and **over-plan is bad for an expense while under-plan is bad for
