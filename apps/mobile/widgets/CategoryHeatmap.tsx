@@ -38,6 +38,7 @@ import type { OverviewData } from '@b8/contracts/overview';
 import { bubbleState, type BubbleState } from '@b8/contracts/bubbleStatus';
 import { layoutTreemap } from './treemap';
 import { categoryIcon } from './categoryIcon';
+import CategorySheet from './CategorySheet';
 import { C, money } from './tokens';
 
 type MonthCategory = OverviewData['monthCategories'][number];
@@ -137,11 +138,33 @@ const MIN_H_AMOUNT = 42;
 const MIN_W_ICON = 15;
 const MIN_H_ICON = 13;
 
-export default function CategoryHeatmap({ categories, width }: {
+export default function CategoryHeatmap({ categories, width, month }: {
   categories: MonthCategory[];
   width: number;
+  /** 1–12, the month the map is showing. Passed in rather than read from a clock here: the map's
+   *  figures come from the payload's as-of, and a second clock read could name a different month
+   *  than the one the tiles were computed for. */
+  month: number;
 }) {
-  const [picked, setPicked] = useState<string | null>(null);
+  /**
+   * TWO TAPS, AND THE SECOND ONE IS OPTIONAL — the owner's flow, and the right one for a treemap.
+   *
+   * A map like this exists for COMPARISON: the question is never "what is Grocery", it is "which of
+   * these is the problem". Opening a sheet on every tap makes comparing two categories cost six
+   * gestures — tap, read, close, tap, read, close — to answer the question the map was supposed to
+   * answer without leaving it. First tap now writes one line above the map, so comparing is tap,
+   * read, tap, read.
+   *
+   * It also makes a MIS-TAP CHEAP, which matters more here than it would elsewhere: nine of fifteen
+   * tiles carry no text and several are under 40px, so taps land on the wrong tile often. Under the
+   * old flow that cost a full-screen modal to dismiss. Now it costs one line changing.
+   *
+   * `selected` is the tile whose figures are on the line; `drilling` is the one whose sheet is
+   * open. Two pieces of state rather than one enum, because closing the sheet must return to the
+   * selected state rather than to nothing — the reader is still looking at that tile.
+   */
+  const [selected, setSelected] = useState<string | null>(null);
+  const [drilling, setDrilling] = useState<string | null>(null);
 
   // Taller than wide would waste the phone's scroll; much shorter and twelve categories become
   // twelve bands. 0.78 puts a typical month's largest tile at roughly square.
@@ -160,7 +183,10 @@ export default function CategoryHeatmap({ categories, width }: {
     return <Text style={styles.empty}>No budgeted categories to plot this month.</Text>;
   }
 
-  const active = picked ? byKey.get(picked) ?? null : null;
+  const active = selected ? byKey.get(selected) ?? null : null;
+  // The tile's own figures are already on screen, so the sheet opens with them filled in and only
+  // the transaction list waits on the network.
+  const drillCat = drilling ? byKey.get(drilling) ?? null : null;
 
   return (
     <View>
@@ -168,9 +194,37 @@ export default function CategoryHeatmap({ categories, width }: {
         size = budget · icon = category · figure = spent · colour = spent or heading over
       </Text>
 
-      {/* Fixed height whether or not anything is selected, so tapping never shifts the map. */}
+      {/* Reserved whether or not anything is selected, so the first tap never shifts the map under
+          the finger that made it. */}
       <View style={styles.detail}>
-        {active ? <Detail cat={active} /> : <Text style={styles.detailIdle}>Tap a category.</Text>}
+        {active ? (
+          <Pressable
+            onPress={() => setDrilling(active.category)}
+            accessibilityRole="button"
+            accessibilityLabel={`${active.category}, ${money(active.actual)} of ${money(active.budgeted)}. Open its charges.`}
+            style={({ pressed }) => [styles.detailRow, pressed && styles.detailPressed]}
+          >
+            {/* THE LINE IS THE SECOND TARGET, and this is the part that makes the flow work. A
+                second tap on the tile is a hidden action on an unlabelled 30px square — nothing
+                announces it, so nobody finds it. Putting the same action on a line that visibly
+                invites it gives the gesture somewhere to be discovered; the tile's second tap
+                survives as a shortcut for those who do find it, and a screen reader gets a real
+                button rather than a control that silently changes meaning between taps. */}
+            <Text style={styles.detailIcon}>{categoryIcon(active.category)}</Text>
+            <Text style={styles.detailText} numberOfLines={1}>
+              <Text style={styles.detailName}>{active.category}</Text>
+              {` · ${money(active.actual)} of ${money(active.budgeted)}`}
+              {Number(active.actual) > Number(active.budgeted) && (
+                <Text style={styles.detailOver}>
+                  {` · ${money(Number(active.actual) - Number(active.budgeted))} over`}
+                </Text>
+              )}
+            </Text>
+            <Text style={styles.detailChevron}>›</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.detailIdle}>Tap a tile for its figures, again for its charges.</Text>
+        )}
       </View>
 
       <View style={[styles.map, { width, height }]}>
@@ -213,16 +267,20 @@ export default function CategoryHeatmap({ categories, width }: {
               accessible
               accessibilityRole="button"
               accessibilityLabel={`${cat.category}, ${money(cat.actual)} of ${money(cat.budgeted)}, ${LABEL[state]}`}
-              onPress={() => setPicked(picked === t.key ? null : t.key)}
+              // First tap selects; a second on the SAME tile opens it. Tapping a DIFFERENT tile
+              // always selects rather than opening — otherwise a stray tap next to an already
+              // selected tile would open a sheet for a category the reader never chose.
+              onPress={() => (selected === t.key ? setDrilling(t.key) : setSelected(t.key))}
+              accessibilityHint={selected === t.key ? 'Opens its charges' : 'Shows its figures'}
               style={[
                 styles.tile,
                 { left: t.x + GAP / 2, top: t.y + GAP / 2, width: w, height: h, backgroundColor: FILL[state] },
               ]}
             >
-              {/* The selection ring is drawn INSIDE the tile rather than as a border, because a
-                  border would resize it — and a tile whose size changes on tap is a tile whose
-                  size stopped meaning the budget. */}
-              {picked === t.key && <View style={[styles.ring, { borderColor: INK[state] }]} />}
+              {/* The ring is drawn INSIDE the tile rather than as a border, because a border would
+                  resize it — and a tile whose size changes on tap is a tile whose size stopped
+                  meaning the budget. It is what ties the line above the map to a square on it. */}
+              {selected === t.key && <View style={[styles.ring, { borderColor: INK[state] }]} />}
               {/* Glyph and figure are centred as one stack filling the tile, rather than flowing
                   from the top-left corner. A word had to start at a known edge to be read; a glyph
                   does not, and centring is what stops a 20px square looking like a mistake. */}
@@ -242,6 +300,12 @@ export default function CategoryHeatmap({ categories, width }: {
           );
         })}
       </View>
+
+      {drillCat && (
+        // Closing returns to the SELECTED state, not to nothing: the reader is still looking at
+        // that tile, and clearing the line would make the map forget where they were.
+        <CategorySheet category={drillCat} month={month} onClose={() => setDrilling(null)} />
+      )}
 
       <View style={styles.legend}>
         {LEGEND.map(([state, label]) => (
@@ -263,38 +327,21 @@ const LABEL: Record<BubbleState, string> = {
   'too-early': 'too early to call',
 };
 
-/**
- * What the web puts in its hover line, on tap.
- *
- * OVER means spent past the line, not projected to pass it. Those are different claims and only
- * one of them is money that has left: a category at 110 of 150 is heading over and is not over, and
- * printing an overage on it reports a forecast as a fact. So the overage and the projection are
- * separate clauses here, and the projection is labelled as one.
- */
-function Detail({ cat }: { cat: MonthCategory }) {
-  const over = Number(cat.actual) - Number(cat.budgeted);
-  return (
-    <Text style={styles.detailText} numberOfLines={2}>
-      <Text style={styles.detailName}>{cat.category}</Text>
-      {` · ${money(cat.actual)} of ${money(cat.budgeted)}`}
-      {over > 0 && <Text style={styles.detailOver}>{` · ${money(over)} over already`}</Text>}
-      {cat.tooEarly && ' · too early to project'}
-      {!cat.tooEarly && cat.projectedRatio !== null
-        && ` · projects to close at ${Math.round(cat.projectedRatio * 100)}%`}
-    </Text>
-  );
-}
-
 const styles = StyleSheet.create({
   caption: { fontSize: 11, color: C.faint, marginBottom: 8 },
-  detail: { height: 32, justifyContent: 'center' },
-  detailText: { fontSize: 12, color: C.muted, lineHeight: 15 },
+  // Fixed height so selecting, deselecting and switching tiles never move the map.
+  detail: { height: 34, justifyContent: 'center' },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 4, paddingRight: 2 },
+  detailPressed: { opacity: 0.55 },
+  detailIcon: { fontSize: 15 },
+  detailText: { flex: 1, fontSize: 12.5, color: C.muted },
   detailName: { fontWeight: '600', color: C.ink },
   detailOver: { color: C.over, fontWeight: '600' },
+  detailChevron: { fontSize: 18, color: C.faint, marginTop: -2 },
   detailIdle: { fontSize: 12, color: C.faint },
+  ring: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, borderWidth: 2, borderRadius: 3 },
   map: { position: 'relative', marginTop: 4 },
   tile: { position: 'absolute', borderRadius: 3, overflow: 'hidden' },
-  ring: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, borderWidth: 2, borderRadius: 3 },
   contents: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   icon: { textAlign: 'center' },
   amount: { fontSize: AMOUNT_SIZE, lineHeight: AMOUNT_LINE, opacity: 0.9 },

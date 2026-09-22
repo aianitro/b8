@@ -8,6 +8,9 @@
 import { OverviewResponseSchema, type OverviewData } from '@b8/contracts/overview';
 import { QuickEntryResponseSchema, type QuickEntryData } from '@b8/contracts/quickEntry';
 import { BudgetGridResponseSchema, type BudgetGridData } from '@b8/contracts/budgetGrid';
+import {
+  CategoryTransactionsResponseSchema, type CategoryTransactionsData,
+} from '@b8/contracts/categoryTransactions';
 import { BASE_URL, readToken } from './config';
 
 export class ApiError extends Error {}
@@ -136,6 +139,26 @@ export async function fetchBudgetGrid(landscape: 'operational' | 'capital'): Pro
   const response = await authed(`/api/v1/budget-grid?landscape=${landscape}`);
   if (!response.ok) throw new ApiError(`The server answered ${response.status}.`);
   const parsed = BudgetGridResponseSchema.parse(await response.json());
+  if (!parsed.success) throw new ApiError(parsed.error.message);
+  return parsed.data;
+}
+
+/**
+ * One category's month, transaction by transaction — what a heatmap tile drills into.
+ *
+ * `encodeURIComponent` on the category, not template interpolation alone: these are names the owner
+ * typed, and this ledger has "Clothes/Beauty" and "Toys/Gifts/Flowers" in it. A raw slash turns one
+ * query parameter into a different path, and an ampersand would turn one parameter into two.
+ */
+export async function fetchCategoryTransactions(
+  category: string,
+  month: number,
+): Promise<CategoryTransactionsData> {
+  const response = await authed(
+    `/api/v1/transactions?category=${encodeURIComponent(category)}&month=${month}`
+  );
+  if (!response.ok) throw new ApiError(`The server answered ${response.status}.`);
+  const parsed = CategoryTransactionsResponseSchema.parse(await response.json());
   if (!parsed.success) throw new ApiError(parsed.error.message);
   return parsed.data;
 }

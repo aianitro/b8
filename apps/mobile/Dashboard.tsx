@@ -150,7 +150,13 @@ export default function Dashboard() {
                 It is also placed above the year chart on purpose: both are pictures, and this one
                 is about the month in progress, which is the only part of the year still actionable. */}
             <Section title="Where the month sits">
-              <CategoryHeatmap categories={data.monthCategories} width={chartWidth} />
+              <CategoryHeatmap
+                categories={data.monthCategories}
+                width={chartWidth}
+                // `asOf.month` is 0-based, as the payload's own schema documents; the drill-down
+                // endpoint takes 1-12 like the URL it is fetched with.
+                month={data.asOf.month + 1}
+              />
             </Section>
 
             <Section title="The year, month by month">
