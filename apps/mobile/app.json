@@ -21,6 +21,12 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "b8"
+    "scheme": "b8",
+    "extra": {
+      "eas": {
+        "projectId": "3f17f57e-43fe-48d6-9936-4f74c2b2b047"
+      }
+    },
+    "owner": "anpilog"
   }
 }

@@ -9,6 +9,7 @@
 // Nothing here chooses the text. The server holds it as a constant; this file only asks iOS for
 // permission and hands the resulting address to the server.
 
+import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
@@ -50,7 +51,17 @@ export async function registerForPing(label: string): Promise<PushStatus> {
       });
     }
 
-    const { data: token } = await Notifications.getExpoPushTokenAsync();
+    // THE PROJECT ID IS PASSED EXPLICITLY, not inferred. Since SDK 49 `getExpoPushTokenAsync`
+    // requires one, and in Expo Go the inference that used to cover for its absence is gone — the
+    // failure is a runtime "No projectId found", which is what this app did on its first attempt.
+    // Reading it from the config rather than hardcoding keeps one source of truth after `eas init`
+    // wrote it into app.json.
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    if (!projectId) {
+      return { state: 'failed', why: 'No EAS projectId in app.json — run `eas init` in apps/mobile.' };
+    }
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
     await authedPost('/api/v1/push/devices', { token, label });
     return { state: 'registered' };
   } catch (e) {

@@ -34,8 +34,23 @@ Navigation is two hand-rolled tabs, not react-navigation: two screens with no st
 no deep links do not justify a navigator and its peer dependencies. When screen 3 or 4 needs a
 stack, that is the moment.
 
-Not built yet: screens 3–4 (chat / quick entry), push notifications (step 25), and **native passkey
-enrolment** — the app expects a device token in the keychain, which `PasteToken.tsx` exists to put
+**Pings (step 25)** — a card at the bottom of screen 1 turns them on. What arrives is
+`"b8 — Something needs you. Open to see."` and **nothing else**: no category, no figure, no
+merchant. That is the owner's recorded decision (`plan/tasks/P3-25-push-ping/DECISION.md`), because
+push travels through Expo and Apple rather than one provider and lands on a lock screen readable
+without unlocking the phone. The figures still arrive only over the tailnet.
+
+Permission is asked from a button, never on launch: iOS asks once and remembers forever, and a
+denial cannot be re-asked from inside the app. `npm run ping:test` on the server sends one real ping
+using the same constant the daily job sends.
+
+Two things that bit on the way in, so they do not bite twice: `getExpoPushTokenAsync` has needed an
+**EAS project ID** since SDK 49 and Expo Go no longer infers one — `eas init` wrote it into
+`app.json` and `lib/push.ts` reads it explicitly. And **Metro must be running on the laptop** for the
+app to load at all in Expo Go; "could not connect to the server" on the phone usually means the dev
+server is down, not the API.
+
+Not built yet: screens 3–4 (chat / quick entry) and **native passkey enrolment** — the app expects a device token in the keychain, which `PasteToken.tsx` exists to put
 there until enrolment lands.
 
 ## Running it
