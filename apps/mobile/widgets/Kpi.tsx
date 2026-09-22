@@ -1,7 +1,7 @@
 // The dashboard's KPI cards, at phone width.
 //
 // TWO PER ROW, NOT THREE. The web puts three across a wide grid; at 400px three columns leave ~110px
-// each, which truncates "$12,480" and turns a figure into a guess. Two columns is the same
+// each, which truncates a five-figure amount and turns it into a guess. Two columns is the same
 // information at a size that can be read.
 
 import { StyleSheet, Text, View } from 'react-native';

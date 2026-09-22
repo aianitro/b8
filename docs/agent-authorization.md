@@ -130,8 +130,9 @@ ceiling caps the bill.
 > cost — and read-only says nothing about it.**
 
 A related point, smaller but the same shape: the model is not a calculator. Asked to total seven
-charges it stated `$181.48` for rows summing to `$180.48`, reproducibly, because it was predicting
-a plausible total rather than computing one. **Nothing that matters should rest on the model's
+charges from the demo seed it stated a figure a dollar above their sum, reproducibly, because it was
+predicting a plausible total rather than computing one. (The figures are in `evals/golden/`, which
+is where fabricated fixtures belong; they are not repeated here — see AGENTS.md.) **Nothing that matters should rest on the model's
 arithmetic** — totals now come from the database. Correctness, like authority, should live where it
 can be checked.
 

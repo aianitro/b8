@@ -57,7 +57,7 @@ endpoint, which is what that payload was built for.
 
 Three departures from the web, each for a reason: alerts are **flat rather than behind a bell** (a
 bell on a phone is a tap to discover whether anything is wrong, and the web hides them only because
-its header is wide); KPIs are **two per row, not three** (at 400px three columns truncate `$12,480`
+its header is wide); KPIs are **two per row, not three** (at 400px three columns truncate a five-figure amount
 and turn a figure into a guess); and it is **a separate tab rather than more of screen 1**, because
 screen 1 answers "can I spend?" in two seconds and a chart there would cost the thing it exists for.
 

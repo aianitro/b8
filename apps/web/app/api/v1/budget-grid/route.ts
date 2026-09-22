@@ -69,11 +69,14 @@ export async function GET(req: NextRequest) {
       // computed here any more."
       //
       // This endpoint DID compute it, briefly, as `beginningBalance + budgeted income − budgeted
-      // expense`. Measured against `loadYearEnd` on the same data that gave 202,300 against 144,578 —
-      // a $57,722 disagreement, because the real definition takes closed months on FACT and only the
-      // remainder on plan, while a plan-only figure ignores the year that has already happened. The
-      // phone would have shown a different Projected P/L from the dashboard and the budget page, on
-      // the same screen furniture, which is the defect this repo centralised the figure to prevent.
+      // expense`. Measured against `loadYearEnd` on the demo seed the two disagreed by roughly 40% of
+      // the figure, because the real definition takes closed months on FACT and only the remainder on
+      // plan, while a plan-only figure ignores the year that has already happened. The phone would
+      // have shown a different Projected P/L from the dashboard and the budget page, on the same
+      // screen furniture, which is the defect this repo centralised the figure to prevent.
+      //
+      // The measurement is not reproduced here. Figures belong in a database, not in a comment in a
+      // public repository — see AGENTS.md. Re-run it against `b8_evals` if the claim needs checking.
       loadYearEnd(landscape, { year, month: currentMonth }),
     ]);
 
