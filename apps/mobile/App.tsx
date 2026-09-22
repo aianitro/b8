@@ -17,6 +17,7 @@ import PingSetup from './PingSetup';
 import DeviceCard from './DeviceCard';
 import Chat from './Chat';
 import QuickEntry from './QuickEntry';
+import Month from './Month';
 
 /**
  * TanStack Query rather than a hand-rolled `useEffect` + `useState`, and step 23 names it for a
@@ -254,21 +255,27 @@ function Root() {
  * "ruthlessly" four screens. When screens 3 and 4 arrive and one of them needs a stack, that is the
  * moment to add a real navigator, not now.
  */
-type Tab = 'spend' | 'arrivals' | 'ask' | 'enter';
+type Tab = 'spend' | 'month' | 'arrivals' | 'ask' | 'enter';
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'spend', label: 'Spend?' },
+  { key: 'month', label: 'Month' },
   { key: 'arrivals', label: 'Arrivals' },
   { key: 'ask', label: 'Ask' },
   { key: 'enter', label: 'Enter' },
 ];
 
 /**
- * Four tabs, hand-rolled — step 24's list, "ruthlessly", complete.
+ * FIVE tabs now — step 24's four plus `Month`, added 2026-09-21 at the owner's request because the
+ * web dashboard is where that app's visibility lives. A deliberate amendment to "ruthlessly four",
+ * recorded rather than drifted into.
  *
- * STILL NOT react-navigation. Four screens, no stack, no params, no deep links: a navigator would
+ * STILL NOT react-navigation. Five screens, no stack, no params, no deep links: a navigator would
  * add peer dependencies and a gesture handler to solve a problem this app does not have. The moment
  * that changes is a screen that needs to push another on top of itself, and none of these do.
+ *
+ * FIVE IS THE CEILING FOR THIS TAB BAR, though. At 400px each label gets ~76px; a sixth would start
+ * truncating, and the answer then is grouping rather than a smaller font.
  */
 function Tabs() {
   const [tab, setTab] = useState<Tab>('spend');
@@ -277,6 +284,7 @@ function Tabs() {
       <StatusBar style="dark" />
       <View style={styles.tabBody}>
         {tab === 'spend' && <CanISpend />}
+        {tab === 'month' && <Month />}
         {tab === 'arrivals' && <DidThatLandRight />}
         {tab === 'ask' && <Chat />}
         {tab === 'enter' && <QuickEntry />}
@@ -326,7 +334,7 @@ const styles = StyleSheet.create({
   tabBody: { flex: 1 },
   tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingBottom: 26, paddingTop: 10 },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 6 },
-  tabText: { fontSize: 13, color: '#9ca3af', fontWeight: '600' },
+  tabText: { fontSize: 12, color: '#9ca3af', fontWeight: '600' },
   tabTextActive: { color: '#111827' },
   link: { marginTop: 14, alignSelf: 'flex-start' },
   linkText: { fontSize: 15, color: '#2563eb', textDecorationLine: 'underline' },
