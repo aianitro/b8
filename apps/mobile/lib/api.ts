@@ -6,6 +6,7 @@
 // not, and a finance app whose figures are silently one release out of date is worse than one that
 // fails to load.
 import { OverviewResponseSchema, type OverviewData } from '@b8/contracts/overview';
+import { QuickEntryResponseSchema, type QuickEntryData } from '@b8/contracts/quickEntry';
 import { BASE_URL, readToken } from './config';
 
 export class ApiError extends Error {}
@@ -56,6 +57,108 @@ async function authed(path: string, init: RequestInit = {}): Promise<Response> {
     throw new ApiError('This token is read-only. Changing a category needs a full-scope token.');
   }
   return response;
+}
+
+export interface ChatProposal {
+  id: string;
+  subjectId: number;
+  proposed: { category: string | null };
+  observed: { category: string | null };
+  rationale: string | null;
+  expiresAt: string;
+  subject: { date: string; amount: number; merchant: string | null } | null;
+}
+
+export interface ChatTurn {
+  reply: string;
+  proposals: ChatProposal[];
+  stoppedAtMaxTurns: boolean;
+}
+
+export class RateLimited extends ApiError {}
+
+/**
+ * Ask the agent.
+ *
+ * THE WHOLE CONVERSATION IS SENT EACH TIME, because the endpoint is stateless — it holds no thread
+ * of its own, which is why the eval harness can ask it a fixed question and get a comparable answer.
+ * The phone keeps the history; the server keeps none.
+ */
+export async function askChat(
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>
+): Promise<ChatTurn> {
+  const response = await authed('/api/v1/chat', { method: 'POST', body: JSON.stringify({ messages }) });
+
+  if (response.status === 429) {
+    // The app names the limit rather than saying "try later". `lib/rateLimit.ts` distinguishes a
+    // per-session bucket that refills in seconds from a DAILY CEILING that resets at midnight, and
+    // the server's message already says which — passing it through beats inventing a retry.
+    const body = await response.json().catch(() => null);
+    throw new RateLimited(body?.error?.message ?? 'Too many requests. Try again shortly.');
+  }
+  if (!response.ok) throw new ApiError(`The server answered ${response.status}.`);
+
+  const body = await response.json();
+  if (!body.success) throw new ApiError(body.error?.message ?? 'The agent could not answer.');
+  return {
+    reply: body.data.reply,
+    proposals: body.data.proposals ?? [],
+    stoppedAtMaxTurns: Boolean(body.data.stoppedAtMaxTurns),
+  };
+}
+
+/**
+ * Confirm or dismiss one agent proposal.
+ *
+ * The endpoint is deliberately outside `READ_SAFE_POSTS`: the agent may PROPOSE with any credential
+ * that can reach chat, and only a full-scope session can make the change happen. That separation is
+ * the gate — see `docs/agent-authorization.md` §4 — and this function is the only thing in the app
+ * that crosses it.
+ */
+export async function decideProposal(
+  id: string,
+  decision: 'confirmed' | 'rejected'
+): Promise<{ applied: boolean; message: string }> {
+  const response = await authed(`/api/v1/agent/proposals/${id}/decide`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body?.success) {
+    throw new ApiError(body?.error?.message ?? `Could not apply that (${response.status}).`);
+  }
+  return body.data;
+}
+
+/** Screen 4's lists: valuation-mode accounts and properties, with their latest value. */
+export async function fetchQuickEntry(): Promise<QuickEntryData> {
+  const response = await authed('/api/v1/quick-entry');
+  if (!response.ok) throw new ApiError(`The server answered ${response.status}.`);
+  const parsed = QuickEntryResponseSchema.parse(await response.json());
+  if (!parsed.success) throw new ApiError(parsed.error.message);
+  return parsed.data;
+}
+
+/**
+ * Record a new valuation.
+ *
+ * APPEND, NEVER OVERWRITE. Both endpoints POST a new row into `account_valuations` /
+ * `property_valuations` rather than updating a balance, so the history of what was believed and when
+ * survives — which is what `lib/domain/valuation.ts` reads to build a trend, and what makes a typo
+ * correctable by entering the right number rather than by editing the past.
+ */
+export async function postValuation(
+  target: { kind: 'account'; id: string } | { kind: 'property'; id: number },
+  value: number
+): Promise<void> {
+  const path = target.kind === 'account'
+    ? `/api/v1/accounts/${encodeURIComponent(target.id)}/valuation`
+    : `/api/v1/properties/${target.id}/valuation`;
+  const response = await authed(path, { method: 'POST', body: JSON.stringify({ value }) });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body?.success) {
+    throw new ApiError(body?.error?.message ?? `Could not save that (${response.status}).`);
+  }
 }
 
 /** A POST that carries the device credential. Used by push registration. */

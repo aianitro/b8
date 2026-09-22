@@ -14,6 +14,8 @@ import { clearToken, readToken } from './lib/config';
 import PasteToken from './PasteToken';
 import DidThatLandRight from './DidThatLandRight';
 import PingSetup from './PingSetup';
+import Chat from './Chat';
+import QuickEntry from './QuickEntry';
 
 /**
  * TanStack Query rather than a hand-rolled `useEffect` + `useState`, and step 23 names it for a
@@ -250,21 +252,39 @@ function Root() {
  * "ruthlessly" four screens. When screens 3 and 4 arrive and one of them needs a stack, that is the
  * moment to add a real navigator, not now.
  */
+type Tab = 'spend' | 'arrivals' | 'ask' | 'enter';
+
+const TABS: Array<{ key: Tab; label: string }> = [
+  { key: 'spend', label: 'Spend?' },
+  { key: 'arrivals', label: 'Arrivals' },
+  { key: 'ask', label: 'Ask' },
+  { key: 'enter', label: 'Enter' },
+];
+
+/**
+ * Four tabs, hand-rolled — step 24's list, "ruthlessly", complete.
+ *
+ * STILL NOT react-navigation. Four screens, no stack, no params, no deep links: a navigator would
+ * add peer dependencies and a gesture handler to solve a problem this app does not have. The moment
+ * that changes is a screen that needs to push another on top of itself, and none of these do.
+ */
 function Tabs() {
-  const [tab, setTab] = useState<'spend' | 'arrivals'>('spend');
+  const [tab, setTab] = useState<Tab>('spend');
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
       <View style={styles.tabBody}>
-        {tab === 'spend' ? <CanISpend /> : <DidThatLandRight />}
+        {tab === 'spend' && <CanISpend />}
+        {tab === 'arrivals' && <DidThatLandRight />}
+        {tab === 'ask' && <Chat />}
+        {tab === 'enter' && <QuickEntry />}
       </View>
       <View style={styles.tabBar}>
-        <Pressable style={styles.tab} onPress={() => setTab('spend')}>
-          <Text style={[styles.tabText, tab === 'spend' && styles.tabTextActive]}>Can I spend?</Text>
-        </Pressable>
-        <Pressable style={styles.tab} onPress={() => setTab('arrivals')}>
-          <Text style={[styles.tabText, tab === 'arrivals' && styles.tabTextActive]}>Arrivals</Text>
-        </Pressable>
+        {TABS.map((t) => (
+          <Pressable key={t.key} style={styles.tab} onPress={() => setTab(t.key)}>
+            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
+          </Pressable>
+        ))}
       </View>
     </View>
   );

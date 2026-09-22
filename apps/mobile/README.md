@@ -50,7 +50,28 @@ Two things that bit on the way in, so they do not bite twice: `getExpoPushTokenA
 app to load at all in Expo Go; "could not connect to the server" on the phone usually means the dev
 server is down, not the API.
 
-Not built yet: screens 3–4 (chat / quick entry) and **native passkey enrolment** — the app expects a device token in the keychain, which `PasteToken.tsx` exists to put
+**Screen 3: "Ask"** — chat over the real data, with **native confirmation cards** for anything the
+agent proposes. The cards sit OUTSIDE the message bubble deliberately: everything inside one is the
+model talking, and a control that changes the ledger should not look like part of a sentence the
+model wrote. The gate is step 16's — the agent proposes, only a full-scope session applies, and the
+model has no tool for the decide endpoint. Rate limits surface the server's own wording, which
+already distinguishes a bucket that clears in seconds from the daily ceiling.
+
+**Screen 4: "Enter"** — properties and valuation-mode accounts with their latest value; tap to
+record a new one. It filters to `valuation_mode = 'valuation'` because a ledger account's balance is
+derived from its transactions, so a hand-typed number there would be silently overwritten by the
+next sync — offering the entry would be offering a change that does not stick. Saving **appends** a
+valuation row rather than editing a balance, so what was believed and when survives; that history is
+what the net-worth trend reads, and it makes a typo correctable by entering the right number instead
+of editing the past.
+
+Screen 4 needed a new endpoint: neither `accounts` nor `properties` had a GET, because the web pages
+are server components reading the database directly — invisible until a second client wants the same
+data, which is what P1-11a meant by "the drift an endpoint nothing reads is exposed to".
+`/api/v1/quick-entry` returns both lists in one round trip, with a contract narrowed to the fields
+this screen renders rather than the whole rows.
+
+Not built yet: **native passkey enrolment** — the app expects a device token in the keychain, which `PasteToken.tsx` exists to put
 there until enrolment lands.
 
 ## Running it
