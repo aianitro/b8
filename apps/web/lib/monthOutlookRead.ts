@@ -98,6 +98,26 @@ async function getBudgetCategories(): Promise<CategoryRow[]> {
  * Matched on category NAME, not through a JOIN on it. `mapped_category` is not a foreign key and
  * `budget_categories` is UNIQUE(name, landscape), so a name defined in both landscapes matches
  * twice and a JOIN duplicates the transaction row into both.
+ *
+ * ─── Watched rows are excused, which is a SECOND meaning for that flag ────────────────────────
+ *
+ * The repo drew this line the other way once, and `app/transactions/page.tsx` still says so: hiding
+ * a row means "do not count this", watching one means "I am not finished with this". That
+ * distinction survives where it matters — `hidden` removes a row from every figure in the app,
+ * while this removes it from exactly one, the grading — but anyone reading that comment should
+ * know this exists.
+ *
+ * NOTHING ELSE MOVES. `stats.spent`, the year-end P/L, the budget grid and net worth all still
+ * count a watched charge, because the money has left the account and a figure that says otherwise
+ * is wrong rather than kind. What changes is whether the category is SCOLDED for it.
+ *
+ * THE COST, WRITTEN DOWN: a flag left on forever excuses its spend forever, so a return that never
+ * arrives quietly flatters this figure — and a flattering figure is the failure this file's own
+ * refund comment exists to prevent. `WATCHLIST_STALE_DAYS` is the natural bound, since the repo
+ * already holds that a return pending thirty days is one nobody is going to chase. It is
+ * deliberately NOT applied, because re-counting a genuinely pending return on its fifteenth day is
+ * a breach alert nobody asked for. Adding `AND t.watched_at > NOW() - INTERVAL '14 days'` beside
+ * the clause below is the whole change if that trade is reconsidered.
  */
 async function getMonthlyActuals(asOf: AsOf): Promise<Map<string, Map<number, number>>> {
   const result = await db.query<{ category: string; month: number; actual: string }>(`
@@ -121,6 +141,11 @@ async function getMonthlyActuals(asOf: AsOf): Promise<Map<string, Map<number, nu
       FROM transactions t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
      WHERE t.hidden = FALSE
+       -- ON KEEP AN EYE MEANS NOT YET COUNTED AGAINST THE BUDGET. Added 2026-09-22 at the owner's
+       -- request: a flagged row is one they expect back, and a category named in "say no" on the
+       -- strength of a charge being returned is the same false positive the refund fix above
+       -- removed, arriving a week earlier. See the function's docblock for what it costs.
+       AND t.watched_at IS NULL
        AND t.mapped_category IS NOT NULL
        AND t.date >= $1::date AND t.date <= $2::date
      GROUP BY 1, 2

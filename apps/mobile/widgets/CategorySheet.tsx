@@ -137,6 +137,15 @@ export default function CategorySheet({ category, month, onClose }: {
             {data && data.rows.length > 0 && (
               <Text style={styles.tapHint}>Tap a charge to change its category or note.</Text>
             )}
+            {/* WHY THE ROWS DO NOT ADD UP TO THE FIGURE ABOVE. Charges on Keep an eye stopped
+                counting toward the budget on 2026-09-22 — they are expected back — so a category
+                whose only charge is flagged grades at zero. Without this line that reads as a
+                broken total rather than as money being chased. */}
+            {data && Number(data.pending) !== 0 && (
+              <Text style={styles.pending}>
+                {exact(data.pending)} on Keep an eye — excluded from the figures above.
+              </Text>
+            )}
             {data && data.rows.length === 0 && (
               <Text style={styles.empty}>Nothing has posted to this category yet this month.</Text>
             )}
@@ -158,8 +167,8 @@ export default function CategorySheet({ category, month, onClose }: {
                   style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                 >
                   <View style={styles.rowTop}>
-                    <Text style={styles.label} numberOfLines={1}>{row.label}</Text>
-                    <Text style={[styles.amount, inbound && { color: C.moneyIn }]}>
+                    <Text style={[styles.label, row.watched && styles.excused]} numberOfLines={1}>{row.label}</Text>
+                    <Text style={[styles.amount, inbound && { color: C.moneyIn }, row.watched && styles.excused]}>
                       {inbound ? '+' : ''}{exact(Math.abs(Number(row.amount)))}
                     </Text>
                   </View>
@@ -170,7 +179,16 @@ export default function CategorySheet({ category, month, onClose }: {
                   {/* The note, where there is one. It is the reason the row was flagged, and a
                       watchlist entry whose reason is only visible somewhere else is a reason
                       nobody reads. */}
-                  {row.note && <Text style={styles.rowNote} numberOfLines={2}>{row.note}</Text>}
+                  {/* Flagged rows are struck through rather than hidden: they are still charges
+                      that happened, and the reader is reconciling against a statement. */}
+                  {row.watched && (
+                    <Text style={styles.rowNote} numberOfLines={2}>
+                      Keep an eye · not counted{row.note ? ` · ${row.note}` : ''}
+                    </Text>
+                  )}
+                  {!row.watched && row.note && (
+                    <Text style={styles.rowNote} numberOfLines={2}>{row.note}</Text>
+                  )}
                 </Pressable>
               );
             })}
@@ -178,6 +196,7 @@ export default function CategorySheet({ category, month, onClose }: {
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>
                   {data.count} {data.count === 1 ? 'transaction' : 'transactions'}
+                  {Number(data.pending) !== 0 ? ' · counted' : ''}
                 </Text>
                 <Text style={styles.totalAmount}>{exact(data.spent)}</Text>
               </View>
@@ -232,4 +251,6 @@ const styles = StyleSheet.create({
   error: { fontSize: 14, color: C.over, lineHeight: 20, marginTop: 16 },
   empty: { fontSize: 13, color: C.faint, marginTop: 16 },
   tapHint: { fontSize: 11, color: C.faint, marginBottom: 2 },
+  pending: { fontSize: 11, color: C.warn, marginTop: 4, marginBottom: 2 },
+  excused: { opacity: 0.45 },
 });

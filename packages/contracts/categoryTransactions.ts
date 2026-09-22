@@ -51,6 +51,8 @@ export const CategoryTransactionsDataSchema = z.object({
   /** Every row in the set, newest first. */
   rows: z.array(CategoryTransactionSchema),
   /**
+   * What COUNTS: the total excluding rows on Keep an eye, which is the figure the tile grades.
+   *
    * Summed by the database over the whole set — see the note above on why not by the client.
    *
    * UNCLAMPED, and so capable of being negative where the tile that led here shows zero. The
@@ -60,6 +62,15 @@ export const CategoryTransactionsDataSchema = z.object({
    * disagrees with the rows beneath it is the one number a reader can catch being wrong.
    */
   spent: moneyString,
+  /**
+   * The part on Keep an eye, excluded from `spent` and from the tile's grading since 2026-09-22.
+   *
+   * CARRIED SEPARATELY RATHER THAN OMITTED, because on this ledger it is not a rounding detail: a
+   * category whose only charge is flagged grades at zero, and a drill-down that showed the rows
+   * without saying why they do not add up to the headline would look like a bug in the total. The
+   * money has not gone anywhere — it is being chased — and the reader is owed both numbers.
+   */
+  pending: moneyString,
   /** How many rows the set holds, whether or not all of them were returned. */
   count: z.int().min(0),
 });

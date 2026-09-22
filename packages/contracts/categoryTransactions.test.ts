@@ -10,7 +10,8 @@ const row = (over: Record<string, unknown> = {}) => ({
 });
 
 const data = (over: Record<string, unknown> = {}) => ({
-  category: 'Grocery', month: 9, year: 2026, rows: [row()], spent: '28.06', count: 1, ...over,
+  category: 'Grocery', month: 9, year: 2026, rows: [row()],
+  spent: '28.06', pending: '0.00', count: 1, ...over,
 });
 
 describe('CategoryTransactionsDataSchema', () => {
@@ -58,9 +59,18 @@ describe('CategoryTransactionsDataSchema', () => {
     )).toThrow();
   });
 
+  // The two totals must account for every row listed, or the sheet cannot explain why its rows do
+  // not add up to the headline.
+  it('carries the excused total separately from the counted one', () => {
+    expect(() => CategoryTransactionsDataSchema.parse(
+      data({ spent: '0.00', pending: '140.00', rows: [row({ watched: true, note: 'returning' })] })
+    )).not.toThrow();
+    expect(() => CategoryTransactionsDataSchema.parse(data({ pending: '12.5' }))).toThrow();
+  });
+
   it('allows an empty month, where the count and the total are zero', () => {
     expect(() => CategoryTransactionsDataSchema.parse(
-      data({ rows: [], spent: '0.00', count: 0 })
+      data({ rows: [], spent: '0.00', pending: '0.00', count: 0 })
     )).not.toThrow();
     expect(() => CategoryTransactionsDataSchema.parse(data({ count: -1 }))).toThrow();
   });

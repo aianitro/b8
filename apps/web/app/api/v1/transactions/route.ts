@@ -89,8 +89,14 @@ export async function GET(req: NextRequest) {
       // Counted and summed over the SAME set rather than over the rows above. They are identical
       // today because nothing is limited; they stop being identical the moment a limit is added,
       // and a total a reader can add up and find wrong is worse than no total at all.
-      db.query<{ spent: string; count: string }>(`
-        SELECT COALESCE(SUM(t.amount), 0)::numeric(14,2)::text AS spent, COUNT(*)::text AS count
+      // `spent` EXCLUDES rows on Keep an eye and `pending` is exactly those, so the two together
+      // account for every row listed above. The split mirrors `monthOutlookRead`'s grading query,
+      // which stopped counting watched rows on 2026-09-22 — if these two ever disagree about what
+      // is excused, the drill-down stops adding up to the tile that opened it.
+      db.query<{ spent: string; pending: string; count: string }>(`
+        SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.watched_at IS NULL), 0)::numeric(14,2)::text AS spent,
+               COALESCE(SUM(t.amount) FILTER (WHERE t.watched_at IS NOT NULL), 0)::numeric(14,2)::text AS pending,
+               COUNT(*)::text AS count
           FROM transactions t
           JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          WHERE t.mapped_category = $1
@@ -119,6 +125,7 @@ export async function GET(req: NextRequest) {
         note: r.note,
       })),
       spent: totals.rows[0]?.spent ?? '0.00',
+      pending: totals.rows[0]?.pending ?? '0.00',
       count: Number(totals.rows[0]?.count ?? 0),
     };
 
