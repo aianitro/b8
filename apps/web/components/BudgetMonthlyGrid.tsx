@@ -1,5 +1,6 @@
 import db from '@/lib/db';
 import type { Landscape } from '@b8/contracts/types';
+import { monthsBudget } from '@/lib/domain/budgetPlan';
 import BudgetMonthlyGridClient from './BudgetMonthlyGridClient';
 
 export type GridRow = {
@@ -30,10 +31,8 @@ type DbRow = {
 
 // monthly_amounts unset -> spread annual_budget evenly across all 12 months (legacy behavior);
 // otherwise each month uses its own explicit expected amount.
-function monthsBudget(annual: number, monthlyAmounts: number[] | null): number[] {
-  if (monthlyAmounts && monthlyAmounts.length === 12) return monthlyAmounts;
-  return new Array(12).fill(annual / 12);
-}
+// `monthsBudget` moved to `lib/domain/budgetPlan.ts` when the phone's budget endpoint needed the
+// same rule. Extracted rather than copied — see that file's note on adherence.ts's four implementations.
 
 // Projected amount for months after the current one. A category with an explicit monthly
 // schedule just uses its own scheduled amount per future month. Otherwise the remaining

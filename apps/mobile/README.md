@@ -68,6 +68,20 @@ labels or a table view. So money in is drawn **above** the zero line and out **b
 carries identity with no colour vision at all), and the figures list beneath the plot is the table
 view. Neither is decoration; see `widgets/tokens.ts`.
 
+**Screen: "Budget"** — the web budget page, inverted. **The form had to change and that is the whole
+design problem.** The web renders a 12-column grid: category down the side, months across, plan and
+actual in every cell. At 400px twelve columns give 30px each, which fits neither `$1,040` nor a plan
+beneath it. A horizontally scrolling table was the obvious port and the wrong one — it hides eleven
+twelfths of the page behind a gesture and makes comparing March with October a memory test.
+
+So the phone shows **one category at a time, its twelve months down the screen**, with a picker to
+switch. Same numbers, read the way a tall screen reads, and it matches the question a phone actually
+gets asked: "how is Dining Out doing", not "show me the matrix".
+
+Two correctness rules carried over from the web's grid client: a **future month has no variance**
+(printing one invents a finding), and **over-plan is bad for an expense while under-plan is bad for
+income** — one colour rule for both is how an income row ends up painted red for earning well.
+
 **Screen 3: "Ask"** — chat over the real data, with **native confirmation cards** for anything the
 agent proposes. The cards sit OUTSIDE the message bubble deliberately: everything inside one is the
 model talking, and a control that changes the ledger should not look like part of a sentence the

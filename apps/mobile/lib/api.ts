@@ -7,6 +7,7 @@
 // fails to load.
 import { OverviewResponseSchema, type OverviewData } from '@b8/contracts/overview';
 import { QuickEntryResponseSchema, type QuickEntryData } from '@b8/contracts/quickEntry';
+import { BudgetGridResponseSchema, type BudgetGridData } from '@b8/contracts/budgetGrid';
 import { BASE_URL, readToken } from './config';
 
 export class ApiError extends Error {}
@@ -128,6 +129,15 @@ export async function decideProposal(
     throw new ApiError(body?.error?.message ?? `Could not apply that (${response.status}).`);
   }
   return body.data;
+}
+
+/** The monthly budget grid for one landscape: twelve months by category, plan against actual. */
+export async function fetchBudgetGrid(landscape: 'operational' | 'capital'): Promise<BudgetGridData> {
+  const response = await authed(`/api/v1/budget-grid?landscape=${landscape}`);
+  if (!response.ok) throw new ApiError(`The server answered ${response.status}.`);
+  const parsed = BudgetGridResponseSchema.parse(await response.json());
+  if (!parsed.success) throw new ApiError(parsed.error.message);
+  return parsed.data;
 }
 
 /** Screen 4's lists: valuation-mode accounts and properties, with their latest value. */

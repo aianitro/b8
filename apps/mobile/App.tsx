@@ -18,6 +18,7 @@ import DeviceCard from './DeviceCard';
 import Chat from './Chat';
 import QuickEntry from './QuickEntry';
 import Month from './Month';
+import Budget from './Budget';
 
 /**
  * TanStack Query rather than a hand-rolled `useEffect` + `useState`, and step 23 names it for a
@@ -255,11 +256,12 @@ function Root() {
  * "ruthlessly" four screens. When screens 3 and 4 arrive and one of them needs a stack, that is the
  * moment to add a real navigator, not now.
  */
-type Tab = 'spend' | 'month' | 'arrivals' | 'ask' | 'enter';
+type Tab = 'spend' | 'month' | 'budget' | 'arrivals' | 'ask' | 'enter';
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'spend', label: 'Spend?' },
   { key: 'month', label: 'Month' },
+  { key: 'budget', label: 'Budget' },
   { key: 'arrivals', label: 'Arrivals' },
   { key: 'ask', label: 'Ask' },
   { key: 'enter', label: 'Enter' },
@@ -274,8 +276,9 @@ const TABS: Array<{ key: Tab; label: string }> = [
  * add peer dependencies and a gesture handler to solve a problem this app does not have. The moment
  * that changes is a screen that needs to push another on top of itself, and none of these do.
  *
- * FIVE IS THE CEILING FOR THIS TAB BAR, though. At 400px each label gets ~76px; a sixth would start
- * truncating, and the answer then is grouping rather than a smaller font.
+ * SIX NOW, AND THIS IS THE CEILING REACHED. The previous note said five was the limit at ~76px a
+ * label; at six each gets ~63px, which "Arrivals" only just survives. A seventh needs grouping — a
+ * "More" tab or a drawer — not a smaller font, because the labels are already at 12px.
  */
 function Tabs() {
   const [tab, setTab] = useState<Tab>('spend');
@@ -285,6 +288,7 @@ function Tabs() {
       <View style={styles.tabBody}>
         {tab === 'spend' && <CanISpend />}
         {tab === 'month' && <Month />}
+        {tab === 'budget' && <Budget />}
         {tab === 'arrivals' && <DidThatLandRight />}
         {tab === 'ask' && <Chat />}
         {tab === 'enter' && <QuickEntry />}
