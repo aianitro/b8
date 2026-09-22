@@ -17,7 +17,7 @@ import PingSetup from './PingSetup';
 import DeviceCard from './DeviceCard';
 import Chat from './Chat';
 import QuickEntry from './QuickEntry';
-import Month from './Month';
+import Dashboard from './Dashboard';
 import Budget from './Budget';
 
 /**
@@ -256,11 +256,11 @@ function Root() {
  * "ruthlessly" four screens. When screens 3 and 4 arrive and one of them needs a stack, that is the
  * moment to add a real navigator, not now.
  */
-type Tab = 'spend' | 'month' | 'budget' | 'arrivals' | 'ask' | 'enter';
+type Tab = 'spend' | 'dashboard' | 'budget' | 'arrivals' | 'ask' | 'enter';
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: 'spend', label: 'Spend?' },
-  { key: 'month', label: 'Month' },
+  { key: 'dashboard', label: 'Dashboard' },
   { key: 'budget', label: 'Budget' },
   { key: 'arrivals', label: 'Arrivals' },
   { key: 'ask', label: 'Ask' },
@@ -268,7 +268,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
 ];
 
 /**
- * FIVE tabs now — step 24's four plus `Month`, added 2026-09-21 at the owner's request because the
+ * FIVE tabs now — step 24's four plus `Dashboard`, added 2026-09-21 at the owner's request because the
  * web dashboard is where that app's visibility lives. A deliberate amendment to "ruthlessly four",
  * recorded rather than drifted into.
  *
@@ -279,6 +279,13 @@ const TABS: Array<{ key: Tab; label: string }> = [
  * SIX NOW, AND THIS IS THE CEILING REACHED. The previous note said five was the limit at ~76px a
  * label; at six each gets ~63px, which "Arrivals" only just survives. A seventh needs grouping — a
  * "More" tab or a drawer — not a smaller font, because the labels are already at 12px.
+ *
+ * "Dashboard" (renamed from "Month" on 2026-09-22) is the longest label here and it is the one that
+ * proves the ceiling: nine characters at 12px semibold is ~63px, which fits a 393pt screen with
+ * about a point to spare either side and does NOT fit a 375pt one. Hence `adjustsFontSizeToFit` on
+ * the label below — it shrinks the one label that overflows on the one screen size where it does,
+ * rather than making all six smaller everywhere, and `numberOfLines` stops a long label wrapping
+ * to a second line and changing the height of the bar.
  */
 function Tabs() {
   const [tab, setTab] = useState<Tab>('spend');
@@ -287,7 +294,7 @@ function Tabs() {
       <StatusBar style="dark" />
       <View style={styles.tabBody}>
         {tab === 'spend' && <CanISpend />}
-        {tab === 'month' && <Month />}
+        {tab === 'dashboard' && <Dashboard />}
         {tab === 'budget' && <Budget />}
         {tab === 'arrivals' && <DidThatLandRight />}
         {tab === 'ask' && <Chat />}
@@ -296,7 +303,14 @@ function Tabs() {
       <View style={styles.tabBar}>
         {TABS.map((t) => (
           <Pressable key={t.key} style={styles.tab} onPress={() => setTab(t.key)}>
-            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
+            <Text
+              style={[styles.tabText, tab === t.key && styles.tabTextActive]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
+              {t.label}
+            </Text>
           </Pressable>
         ))}
       </View>

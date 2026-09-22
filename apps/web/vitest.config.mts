@@ -29,6 +29,12 @@ export default defineConfig({
       'lib/**/*.test.ts',
       '../../packages/contracts/**/*.test.ts',
       '../../.claude/hooks/**/*.test.mts',
+      // The phone has pure logic and no runner of its own. Rather than stand a second vitest up
+      // in `apps/mobile` — a second config, a second CI step, a second place for the alias table
+      // below to drift — its pure modules run here. Only `*.test.ts` is matched, so nothing that
+      // imports `react-native` is picked up: a test needing a renderer is the signal to give the
+      // phone its own runner, not to widen this line.
+      '../mobile/**/*.test.ts',
     ],
     environment: 'node',
   },

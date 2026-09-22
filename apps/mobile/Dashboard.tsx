@@ -1,4 +1,6 @@
-// The web dashboard, at phone width.
+// The web dashboard, at phone width. The tab is called Dashboard too, as of 2026-09-22 — it was
+// "Month", which named the time range rather than the thing, and the web page it mirrors has
+// always been the dashboard.
 //
 // ROADMAP.md §5 Phase 3 step 24 named four screens "ruthlessly", and this is a fifth — added
 // 2026-09-21 at the owner's request, because the dashboard and the monthly budget are where the web
@@ -20,6 +22,7 @@ import { Kpi, KpiRow } from './widgets/Kpi';
 import Alerts from './widgets/Alerts';
 import PlChart, { PlFigures } from './widgets/PlChart';
 import BudgetTracks from './widgets/BudgetTracks';
+import CategoryHeatmap from './widgets/CategoryHeatmap';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -35,7 +38,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export default function Month() {
+export default function Dashboard() {
   const { width } = useWindowDimensions();
   const { data, error, isFetching, refetch } = useQuery({
     queryKey: ['overview'],
@@ -87,20 +90,14 @@ export default function Month() {
                 sub={`${money(data.stats.spent)} of ${money(data.stats.budget)}`}
                 tone={Number(data.stats.remaining) < 0 ? 'over' : undefined}
               />
-              <Kpi
-                label="Today"
-                value={money(data.today.spent)}
-                sub={
-                  Number(data.today.avgSameWeekday) > 0
-                    ? `avg ${money(data.today.avgSameWeekday)} this weekday`
-                    : undefined
-                }
-              />
-              <Kpi
-                label="This week"
-                value={money(data.week.spent)}
-                sub={`${signed(Number(data.week.spent) - Number(data.week.spentComparableLastWeek))} vs last week`}
-              />
+              {/* NO "Today" and NO "This week" — removed from the phone on 2026-09-22 at the owner's
+                  request, and still on the web, which is the point rather than an inconsistency.
+                  Both are short-horizon spending questions, and the phone already answers those on
+                  screen 1, in two seconds, as a verdict. Repeating them here as figures made this
+                  tab answer the guardrail's question worse than the guardrail does.
+
+                  `today` and `week` stay in the overview contract: the web dashboard still renders
+                  them, and a payload field with one client fewer is not a field to delete. */}
               {/* Uncategorized is a COUNT, and it is last because it is the only actionable-by-you
                   item here — everything above is a figure to read. */}
               <Kpi
@@ -110,6 +107,17 @@ export default function Month() {
                 tone={data.stats.uncategorized > 0 ? 'warn' : 'ok'}
               />
             </KpiRow>
+
+            {/* The month's map. On the web this LEADS the dashboard, above the stat cards; here it
+                sits under them, because a 300px picture at the top of a phone pushes Projected P/L
+                and Budget remaining below the fold — and those are the figures the owner opens this
+                tab for. The map is what you look at second, once a number has made you curious.
+
+                It is also placed above the year chart on purpose: both are pictures, and this one
+                is about the month in progress, which is the only part of the year still actionable. */}
+            <Section title="Where the month sits">
+              <CategoryHeatmap categories={data.monthCategories} width={chartWidth} />
+            </Section>
 
             <Section title="The year, month by month">
               <PlChart points={data.monthlySpending} width={chartWidth} />
