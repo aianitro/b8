@@ -37,6 +37,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { OverviewData } from '@b8/contracts/overview';
 import { bubbleState, type BubbleState } from '@b8/contracts/bubbleStatus';
 import { layoutTreemap } from './treemap';
+import { categoryIcon } from './categoryIcon';
 import { C, money } from './tokens';
 
 type MonthCategory = OverviewData['monthCategories'][number];
@@ -96,24 +97,45 @@ const LEGEND: ReadonlyArray<[BubbleState, string]> = [
 
 /** 2px of surface between fills, per the dataviz skill — half of it either side of every seam. */
 const GAP = 2;
-const PAD = 4;
-const NAME_SIZE = 11;
 const AMOUNT_SIZE = 10;
+const AMOUNT_LINE = 12;
 
-/**
- * Below these a label is a smear rather than a name. The web ellipsises to a minimum character
- * count for the same reason; React Native measures text itself via `numberOfLines`, so all that is
- * needed here is the floor under which no label is attempted at all.
- *
- * An unlabelled tile is not unreachable — it is still tappable, and the line above the map names
- * whatever was tapped. That is the same bargain the web makes with hover, and it is what keeps the
- * small tiles honest: the tail of the budget is exactly where an overspend hides, which is why
- * `layoutTreemap` refuses to bucket it into an "Other".
- */
-const MIN_W_NAME = 46;
-const MIN_H_NAME = 24;
+/** Below these the spent figure is dropped and the tile carries its glyph alone. */
 const MIN_W_AMOUNT = 60;
 const MIN_H_AMOUNT = 42;
+
+/**
+ * NO CATEGORY NAME ON ANY TILE — every one is named by its glyph. See `categoryIcon.ts`.
+ *
+ * It began as a fallback for tiles too small for a word, then replaced the words outright at the
+ * owner's request, and the second change is the better one for a reason the first exposed: a map
+ * whose labels change KIND with tile size is read twice — names here, glyphs there, nothing in the
+ * corner — while one alphabet is scanned once. The tail of a budget is genuinely small and this
+ * widget refuses to bucket it away, so the small tiles are not an edge case to be styled around;
+ * they are most of the map by count, and they set the vocabulary the rest should share.
+ *
+ * WHAT IT COSTS, STATED PLAINLY: recognition now rests entirely on the glyph, so a category with no
+ * keyword in that table shows a bare letter and is weaker than the truncated word it replaced. All
+ * twenty-one of this ledger's categories match today, and a test asserts it — that test is what
+ * keeps the cost at zero, and it will fail on the first category added without a keyword.
+ *
+ * The name has not gone anywhere the reader cannot reach: tapping any tile names it in the line
+ * above the map, and a screen reader announces the name rather than the glyph.
+ *
+ * The tier is chosen from the tile's measured size BEFORE it renders — `layoutTreemap` returns
+ * every rectangle up front, so nothing here is a guess or a second layout pass.
+ *
+ * The floor is what an 11px glyph actually occupies -- about 13px square -- plus a little air,
+ * measured against this ledger's own budget rather than guessed. At a 20px floor two real
+ * categories still came out blank: a tall narrow sliver and a wide 16px-high band, both with ample
+ * room for a glyph and neither with room for a word. BOTH dimensions are tested, because a 4x100
+ * sliver has the height for a glyph and nowhere to put it.
+ *
+ * Under this a tile stays empty rather than carrying a smudge, and it is still tappable; the line
+ * above the map names whatever was tapped.
+ */
+const MIN_W_ICON = 15;
+const MIN_H_ICON = 13;
 
 export default function CategoryHeatmap({ categories, width }: {
   categories: MonthCategory[];
@@ -143,7 +165,7 @@ export default function CategoryHeatmap({ categories, width }: {
   return (
     <View>
       <Text style={styles.caption}>
-        size = this month&apos;s budget · label = spent so far · colour = spent or heading over
+        size = budget · icon = category · figure = spent · colour = spent or heading over
       </Text>
 
       {/* Fixed height whether or not anything is selected, so tapping never shifts the map. */}
@@ -163,8 +185,19 @@ export default function CategoryHeatmap({ categories, width }: {
 
           const w = t.w - GAP;
           const h = t.h - GAP;
-          const showName = w >= MIN_W_NAME && h >= MIN_H_NAME;
-          const showAmount = showName && w >= MIN_W_AMOUNT && h >= MIN_H_AMOUNT;
+          // EVERY tile is named by its glyph, not only the ones too small for a word. The name text
+          // is gone entirely — see the note on the icon tiers above.
+          const showIcon = w >= MIN_W_ICON && h >= MIN_H_ICON;
+          const showAmount = w >= MIN_W_AMOUNT && h >= MIN_H_AMOUNT;
+          // The glyph is sized against the space LEFT AFTER the amount, not against the whole
+          // tile, or on a tile just over the amount threshold the two would be laid out for more
+          // room than they have and the pair would overflow.
+          const iconBox = Math.min(w, showAmount ? h - AMOUNT_LINE - 2 : h);
+          // Scaled rather than fixed, so a small tile and a large one each get a glyph proportioned
+          // to their space instead of one looking cramped and the other lost. The floor of 10 is a
+          // legible glyph inside the 13px minimum height above; the two are a pair and moving one
+          // without the other clips.
+          const iconSize = Math.round(Math.min(30, Math.max(10, iconBox * 0.55)));
 
           // Over means spent PAST the line, not projected to pass it, so the overage is only ever
           // printed on a tile that has actually breached. The colour carries the forecast.
@@ -174,6 +207,10 @@ export default function CategoryHeatmap({ categories, width }: {
           return (
             <Pressable
               key={t.key}
+              // `accessible` GROUPS the tile, so the label below is what is announced. Without it a
+              // screen reader reaches the glyph and reads its emoji name -- "graduation cap" for
+              // Education -- which is the one reading worse than saying nothing.
+              accessible
               accessibilityRole="button"
               accessibilityLabel={`${cat.category}, ${money(cat.actual)} of ${money(cat.budgeted)}, ${LABEL[state]}`}
               onPress={() => setPicked(picked === t.key ? null : t.key)}
@@ -186,16 +223,21 @@ export default function CategoryHeatmap({ categories, width }: {
                   border would resize it — and a tile whose size changes on tap is a tile whose
                   size stopped meaning the budget. */}
               {picked === t.key && <View style={[styles.ring, { borderColor: INK[state] }]} />}
-              {showName && (
-                <Text style={[styles.name, { color: INK[state] }]} numberOfLines={1}>
-                  {cat.category}
-                </Text>
-              )}
-              {showAmount && (
-                <Text style={[styles.amount, { color: INK[state] }]} numberOfLines={1}>
-                  {second}
-                </Text>
-              )}
+              {/* Glyph and figure are centred as one stack filling the tile, rather than flowing
+                  from the top-left corner. A word had to start at a known edge to be read; a glyph
+                  does not, and centring is what stops a 20px square looking like a mistake. */}
+              <View style={styles.contents} pointerEvents="none">
+                {showIcon && (
+                  <Text style={[styles.icon, { fontSize: iconSize, color: INK[state] }]}>
+                    {categoryIcon(cat.category)}
+                  </Text>
+                )}
+                {showAmount && (
+                  <Text style={[styles.amount, { color: INK[state] }]} numberOfLines={1}>
+                    {second}
+                  </Text>
+                )}
+              </View>
             </Pressable>
           );
         })}
@@ -251,10 +293,11 @@ const styles = StyleSheet.create({
   detailOver: { color: C.over, fontWeight: '600' },
   detailIdle: { fontSize: 12, color: C.faint },
   map: { position: 'relative', marginTop: 4 },
-  tile: { position: 'absolute', borderRadius: 3, overflow: 'hidden', padding: PAD },
+  tile: { position: 'absolute', borderRadius: 3, overflow: 'hidden' },
   ring: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, borderWidth: 2, borderRadius: 3 },
-  name: { fontSize: NAME_SIZE, lineHeight: 13, fontWeight: '600' },
-  amount: { fontSize: AMOUNT_SIZE, lineHeight: 12, opacity: 0.9 },
+  contents: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  icon: { textAlign: 'center' },
+  amount: { fontSize: AMOUNT_SIZE, lineHeight: AMOUNT_LINE, opacity: 0.9 },
   legend: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
   legendItem: { flexDirection: 'row', alignItems: 'center', marginRight: 14, marginTop: 4 },
   swatch: { width: 9, height: 9, borderRadius: 2, marginRight: 5 },
