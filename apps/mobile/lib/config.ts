@@ -8,6 +8,17 @@ import * as SecureStore from 'expo-secure-store';
 
 const TOKEN_KEY = 'b8.device.token';
 
+/**
+ * How the credential was obtained, stored beside it.
+ *
+ * The token itself does not say, and the server has no "whoami" endpoint — so rather than add one
+ * for a cosmetic label, the app records what it did when it wrote the token. It is only ever used to
+ * tell the owner which kind they are on, and to nudge from the weaker one to the better one.
+ */
+const KIND_KEY = 'b8.device.kind';
+
+export type CredentialKind = 'passkey' | 'pasted';
+
 export const BASE_URL = process.env.EXPO_PUBLIC_B8_BASE_URL ?? '';
 
 /**
@@ -20,10 +31,17 @@ export async function readToken(): Promise<string | null> {
   return SecureStore.getItemAsync(TOKEN_KEY);
 }
 
-export async function writeToken(token: string): Promise<void> {
+export async function writeToken(token: string, kind: CredentialKind): Promise<void> {
   await SecureStore.setItemAsync(TOKEN_KEY, token);
+  await SecureStore.setItemAsync(KIND_KEY, kind);
+}
+
+export async function readKind(): Promise<CredentialKind | null> {
+  const value = await SecureStore.getItemAsync(KIND_KEY);
+  return value === 'passkey' || value === 'pasted' ? value : null;
 }
 
 export async function clearToken(): Promise<void> {
   await SecureStore.deleteItemAsync(TOKEN_KEY);
+  await SecureStore.deleteItemAsync(KIND_KEY);
 }

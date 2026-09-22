@@ -71,7 +71,26 @@ data, which is what P1-11a meant by "the drift an endpoint nothing reads is expo
 `/api/v1/quick-entry` returns both lists in one round trip, with a contract narrowed to the fields
 this screen renders rather than the whole rows.
 
-Not built yet: **native passkey enrolment** — the app expects a device token in the keychain, which `PasteToken.tsx` exists to put
+**Linking this phone with a passkey.** The "This phone" card at the bottom of screen 1 offers
+**Link with passkey**: Safari opens inside the tailnet, the passkey ceremony runs, and the app comes
+back with a **30-day sliding device session**. Nothing typed, nothing pasted, and a lost phone is one
+`UPDATE` on the server. Pasting an SSH-minted token is kept as a collapsed fallback, not deleted.
+
+**Why it goes through a browser rather than a native ceremony**, since that looks like a detour:
+iOS passkeys are domain-bound, and Apple validates an app's associated domain by fetching
+`/.well-known/apple-app-site-association` **through its own CDN** — which cannot reach a tailnet-only
+host. Safari, already inside the tailnet, has no such problem. And the server deliberately refuses to
+hand a device token to a browser (`mayIssueDeviceToken` checks for absent `Sec-Fetch-*` headers), so
+the browser earns a **single-use code, dead in 60 seconds**, and the app exchanges it from outside a
+browser where it is permitted. That is the OAuth authorization-code shape for the OAuth reason: a
+bearer token in a redirect URL ends up in history; a code worthless once spent does not. The redirect
+target is scheme-allowlisted (`b8://`, `exp://`) because an open redirect carrying a secret is the
+OAuth vulnerability.
+
+Not built yet: **step 26 (a standalone build)**, which is what would free the app from needing Metro
+running on the laptop — and which needs either an Apple Developer account or Xcode. Native passkey
+enrolment is **not** planned: the associated-domain requirement above makes it unreachable while the
+server is tailnet-only, and the browser handoff gets the same credential without it. — the app expects a device token in the keychain, which `PasteToken.tsx` exists to put
 there until enrolment lands.
 
 ## Running it

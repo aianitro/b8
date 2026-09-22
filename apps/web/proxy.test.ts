@@ -180,10 +180,34 @@ describe('the request boundary', () => {
     expect(letsThrough(await proxy(requestFor('/login')))).toBe(true);
     expect(letsThrough(await proxy(requestFor('/login/')))).toBe(true);
 
-    // FIVE AND NO MORE. `logout` sits under the same directory and is NOT admitted — the allowlist
+    // ─── TWO ADDED BY P3-23a, AND THIS CONTROL IS WHY THEY ARE DOCUMENTED ─────────────────────
+    //
+    // The count below was 5 and this fixture FAILED when they were added, which is the control
+    // doing its job: `docs/agent-authorization.md` §2 is about an allowlist creating its holes at
+    // exactly the special paths, and one of these mints a 30-day credential. So each is admitted
+    // deliberately, with what guards it INSTEAD of the boundary written down here.
+    //
+    //   `/api/v1/auth/device-claim` — the app has no session yet; getting one is the point. Its
+    //   guards are in the handler: the body must carry a single-use code, dead in sixty seconds and
+    //   stored only as a SHA-256, and `mayIssueDeviceToken` refuses any caller carrying
+    //   `Sec-Fetch-*` headers — so a browser cannot exchange a code even holding one.
+    //
+    //   `/link-device` — a page with no privilege of its own. It runs the passkey ceremony and can
+    //   mint nothing unless one succeeds.
+    for (const path of ['/api/v1/auth/device-claim', '/link-device']) {
+      const response = await proxy(requestFor(path));
+      expect({ path, through: letsThrough(response) }).toEqual({ path, through: true });
+    }
+
+    // AND THE HANDOFF MINTER IS NOT AMONG THEM. `/api/v1/auth/device-handoff` requires a signed-in
+    // BROWSER — it is the thing that turns a completed ceremony into a code, so admitting it
+    // pre-auth would let anyone mint one. It stays behind the boundary.
+    expect(letsThrough(await proxy(requestFor('/api/v1/auth/device-handoff')))).toBe(false);
+
+    // SEVEN AND NO MORE. `logout` sits under the same directory and is NOT admitted — the allowlist
     // is a set of exact paths rather than a prefix, and a prefix would have let it and every future
     // endpoint under `/api/v1/auth/` through by default.
-    expect(PRE_AUTH_PATHS.size).toBe(5);
+    expect(PRE_AUTH_PATHS.size).toBe(7);
     expect((await proxy(requestFor('/api/v1/auth/logout'))).status).toBe(401);
     // Nor does a path that merely extends an allowlisted one.
     expect((await proxy(requestFor('/api/v1/auth/register/options/anything'))).status).toBe(401);

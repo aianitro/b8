@@ -603,3 +603,41 @@ CREATE TABLE IF NOT EXISTS push_devices (
 
 -- The send path's only read: every device still listening.
 CREATE INDEX IF NOT EXISTS push_devices_active ON push_devices (created_at) WHERE revoked_at IS NULL;
+
+-- ROADMAP.md §5 Phase 3, step 23's remaining piece: how the phone gets a real credential.
+--
+-- THE PROBLEM IS ONE THE AUTH DESIGN CREATED ON PURPOSE. `mayIssueDeviceToken` refuses to hand a
+-- device token to anything carrying `Sec-Fetch-*` headers — a browser. So the browser can complete
+-- the passkey ceremony and cannot receive the token; the app can receive the token and cannot do the
+-- ceremony, because iOS passkeys are domain-bound and Apple's CDN cannot reach a tailnet-only host to
+-- validate an associated domain. The browser therefore hands the app a short-lived single-use code,
+-- and the app exchanges it from outside a browser, where it is allowed to.
+--
+-- The OAuth authorization-code shape, for the OAuth reason: a bearer token in a redirect URL ends up
+-- in history and in anything logging between here and there, while a code useless once spent and
+-- dead in a minute is worth little to whoever finds it.
+CREATE TABLE IF NOT EXISTS device_handoffs (
+  -- SHA-256 of the code, never the code — the rule `auth_sessions.token_hash` follows. The CHECK
+  -- makes storing a raw code a statement Postgres refuses rather than a convention to remember.
+  code_hash TEXT PRIMARY KEY
+    CONSTRAINT device_handoffs_code_hash_format CHECK (code_hash ~ '^[0-9a-f]{64}$'),
+
+  -- Which credential completed the ceremony; the device session inherits it, so the phone's session
+  -- traces back to the passkey that authorised it rather than to a code from nowhere.
+  credential_id TEXT NOT NULL REFERENCES webauthn_credentials(credential_id) ON DELETE CASCADE,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- Sixty seconds. The code is in flight between a browser redirect and one app request; longer is a
+  -- window with no purpose, and the short expiry is most of what makes the redirect acceptable.
+  expires_at TIMESTAMPTZ NOT NULL
+    CONSTRAINT device_handoffs_expires_after_created CHECK (expires_at > created_at),
+
+  -- Single use. A replay is refused on this column rather than on the clock, so a second claim inside
+  -- the sixty seconds fails too — the distinction `agent_proposals.decided_at` draws between
+  -- "already decided" and "expired".
+  claimed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS device_handoffs_unclaimed
+  ON device_handoffs (expires_at) WHERE claimed_at IS NULL;

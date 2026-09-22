@@ -60,6 +60,20 @@ export const PRE_AUTH_PATHS: ReadonlySet<string> = new Set([
   '/api/v1/auth/login/options',
   '/api/v1/auth/login/verify',
   '/login',
+  // P3-23a. THE APP HAS NO SESSION YET — getting one is the point, so this cannot sit behind the
+  // boundary. What makes it safe to leave open is not the boundary but the endpoint's own two gates:
+  // the body must carry a SINGLE-USE code that is dead in sixty seconds and stored only as a SHA-256,
+  // and `mayIssueDeviceToken` refuses any caller carrying `Sec-Fetch-*` headers, so a browser cannot
+  // exchange a code even if it obtained one.
+  //
+  // Added with `docs/agent-authorization.md` §2 open on the desk: that write-up's whole point is that
+  // an allowlist creates its holes at the special paths, and the special paths are usually the
+  // powerful ones. This one mints a 30-day credential. Its checks are therefore IN THE HANDLER, not
+  // inherited from a boundary it deliberately skips.
+  '/api/v1/auth/device-claim',
+  // The browser half of the same flow. A page, no privilege of its own: it runs the passkey ceremony
+  // and cannot mint anything without one succeeding first.
+  '/link-device',
 ]);
 
 /**

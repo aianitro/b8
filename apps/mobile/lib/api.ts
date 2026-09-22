@@ -161,6 +161,27 @@ export async function postValuation(
   }
 }
 
+/**
+ * Exchange a one-minute handoff code for a device session.
+ *
+ * DELIBERATELY NOT THROUGH `authed`: there is no credential yet — the code IS the credential, and
+ * obtaining a session is the point. The server refuses this call from anything that looks like a
+ * browser, which is what makes the endpoint safe to leave pre-auth.
+ */
+export async function claimDeviceSession(code: string): Promise<{ token: string; expiresAt: string }> {
+  if (!BASE_URL) throw new ApiError('EXPO_PUBLIC_B8_BASE_URL is not set.');
+  const response = await fetch(`${BASE_URL}/api/v1/auth/device-claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body?.success) {
+    throw new ApiError(body?.error?.message ?? `Could not link this device (${response.status}).`);
+  }
+  return body.data;
+}
+
 /** A POST that carries the device credential. Used by push registration. */
 export async function authedPost(path: string, body: unknown): Promise<void> {
   const response = await authed(path, { method: 'POST', body: JSON.stringify(body) });
