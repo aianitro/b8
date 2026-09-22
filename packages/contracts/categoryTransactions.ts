@@ -31,6 +31,16 @@ export const CategoryTransactionSchema = z.object({
   amount: moneyString,
   /** Which account it landed on. The one piece of context a phone reader cannot infer. */
   account: z.string(),
+  /**
+   * Whether this row is on the watchlist, and the owner's reason if they gave one.
+   *
+   * CARRIED SO AN EDITOR CAN OPEN WITH THE CURRENT VALUES. A note field that opens blank on a row
+   * that already has a note does not look like missing data — it looks like an empty box — and the
+   * first save silently replaces what was there. The pair travels together because the database
+   * will not hold one without the other: `transactions_watch_note_needs_flag`.
+   */
+  watched: z.boolean(),
+  note: z.string().nullable(),
 });
 
 export const CategoryTransactionsDataSchema = z.object({

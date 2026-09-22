@@ -1,3 +1,4 @@
+import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
 /**
  * The write-path rules for "keep an eye on this one", as pure functions.
  *
@@ -20,7 +21,9 @@
  */
 
 /** The longest note the column will hold, and the longest one the digest can render on a line. */
-export const MAX_NOTE = 200;
+// Moved to `@b8/contracts/overview` when the phone started writing notes as well. Re-exported so
+// this module's existing importers keep working and the move stays one file.
+export const MAX_NOTE = MAX_WATCH_NOTE;
 
 export type WatchInput = { watched: boolean; note: string | null };
 

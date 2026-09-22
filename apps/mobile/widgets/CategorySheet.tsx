@@ -25,12 +25,14 @@
 // limit arrives they stop being, and a total a reader can add up and find wrong is worse than no
 // total at all.
 
+import { useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import type { OverviewData } from '@b8/contracts/overview';
 import { bubbleState } from '@b8/contracts/bubbleStatus';
 import { fetchCategoryTransactions } from '../lib/api';
 import { categoryIcon } from './categoryIcon';
+import TransactionEditor, { type EditableTransaction } from './TransactionEditor';
 import { C, money } from './tokens';
 
 type MonthCategory = OverviewData['monthCategories'][number];
@@ -61,6 +63,8 @@ export default function CategorySheet({ category, month, onClose }: {
   month: number;
   onClose: () => void;
 }) {
+  const [editing, setEditing] = useState<EditableTransaction | null>(null);
+
   const { data, error, isLoading } = useQuery({
     queryKey: ['categoryTransactions', category.category, month],
     queryFn: () => fetchCategoryTransactions(category.category, month),
@@ -130,6 +134,9 @@ export default function CategorySheet({ category, month, onClose }: {
                 {error instanceof Error ? error.message : 'Could not load these transactions.'}
               </Text>
             )}
+            {data && data.rows.length > 0 && (
+              <Text style={styles.tapHint}>Tap a charge to change its category or note.</Text>
+            )}
             {data && data.rows.length === 0 && (
               <Text style={styles.empty}>Nothing has posted to this category yet this month.</Text>
             )}
@@ -138,7 +145,18 @@ export default function CategorySheet({ category, month, onClose }: {
               // list of charges reads as another charge to anyone moving quickly.
               const inbound = Number(row.amount) < 0;
               return (
-                <View key={row.id} style={styles.row}>
+                // Tappable, so the row the reader is already looking at is the row they change.
+                // The alternative is finding it again on Arrivals, which only lists what is new.
+                <Pressable
+                  key={row.id}
+                  onPress={() => setEditing({
+                    id: row.id, label: row.label, date: row.date, amount: row.amount,
+                    category: category.category, watched: row.watched, note: row.note,
+                  })}
+                  accessibilityRole="button"
+                  accessibilityHint="Change its category or note"
+                  style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                >
                   <View style={styles.rowTop}>
                     <Text style={styles.label} numberOfLines={1}>{row.label}</Text>
                     <Text style={[styles.amount, inbound && { color: C.moneyIn }]}>
@@ -149,7 +167,11 @@ export default function CategorySheet({ category, month, onClose }: {
                     <Text style={styles.account} numberOfLines={1}>{row.account}</Text>
                     <Text style={styles.date}>{shortDate(row.date)}</Text>
                   </View>
-                </View>
+                  {/* The note, where there is one. It is the reason the row was flagged, and a
+                      watchlist entry whose reason is only visible somewhere else is a reason
+                      nobody reads. */}
+                  {row.note && <Text style={styles.rowNote} numberOfLines={2}>{row.note}</Text>}
+                </Pressable>
               );
             })}
             {data && data.rows.length > 0 && (
@@ -161,6 +183,8 @@ export default function CategorySheet({ category, month, onClose }: {
               </View>
             )}
           </ScrollView>
+
+          {editing && <TransactionEditor row={editing} onClose={() => setEditing(null)} />}
         </View>
       </View>
     </Modal>
@@ -193,6 +217,8 @@ const styles = StyleSheet.create({
   list: { flexShrink: 1, paddingHorizontal: 20 },
   listContent: { paddingTop: 4, paddingBottom: 8 },
   row: { paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: C.hair },
+  rowPressed: { opacity: 0.5 },
+  rowNote: { fontSize: 12, color: C.warn, marginTop: 3 },
   rowTop: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
   rowBottom: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginTop: 2 },
   label: { flex: 1, fontSize: 15, color: C.ink },
@@ -205,4 +231,5 @@ const styles = StyleSheet.create({
   spinner: { marginTop: 28 },
   error: { fontSize: 14, color: C.over, lineHeight: 20, marginTop: 16 },
   empty: { fontSize: 13, color: C.faint, marginTop: 16 },
+  tapHint: { fontSize: 11, color: C.faint, marginBottom: 2 },
 });

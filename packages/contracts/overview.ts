@@ -684,6 +684,15 @@ export const MonthCategorySchema = z.object({
  */
 export const WATCHLIST_STALE_DAYS = 14;
 
+/**
+ * The longest note the database will store — `transactions_watch_note_length` is the same 200.
+ *
+ * Shared because the phone now writes notes too, and a client that does not know the limit finds it
+ * as a 400 after the owner has typed past it. Counted in JavaScript string length, matching both
+ * `parseWatchInput` and the CHECK it mirrors.
+ */
+export const MAX_WATCH_NOTE = 200;
+
 /** Whether a flag has been open long enough to have stopped being a process. */
 export function watchlistIsStale(daysOpen: number): boolean {
   return daysOpen >= WATCHLIST_STALE_DAYS;

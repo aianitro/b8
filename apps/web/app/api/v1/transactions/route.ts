@@ -69,12 +69,14 @@ export async function GET(req: NextRequest) {
     const args = [category, year, month];
 
     const [rows, totals] = await Promise.all([
-      db.query<{ id: number; date: string; label: string; amount: string; account: string }>(`
+      db.query<{ id: number; date: string; label: string; amount: string; account: string; watched: boolean; note: string | null }>(`
         SELECT t.id,
                t.date::text AS date,
                COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
                t.amount::text AS amount,
-               a.name AS account
+               a.name AS account,
+               (t.watched_at IS NOT NULL) AS watched,
+               t.watch_note AS note
           FROM transactions t
           JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          WHERE t.mapped_category = $1
@@ -110,6 +112,11 @@ export async function GET(req: NextRequest) {
         // `db.query<T>`'s type parameter is an unchecked cast that would happily claim otherwise.
         amount: r.amount,
         account: r.account,
+        // A BOOLEAN, not the timestamp. The phone's editor needs to know whether the flag is set;
+        // when it was set is the digest's question, and it is answered from `watchlist` where the
+        // age is the column that matters.
+        watched: r.watched,
+        note: r.note,
       })),
       spent: totals.rows[0]?.spent ?? '0.00',
       count: Number(totals.rows[0]?.count ?? 0),

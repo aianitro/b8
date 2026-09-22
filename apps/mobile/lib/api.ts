@@ -252,6 +252,31 @@ export async function setCategory(transactionId: number, category: string | null
   if (!response.ok) throw new ApiError(`Could not change that category (${response.status}).`);
 }
 
+/**
+ * Flag or unflag a transaction, and set the reason.
+ *
+ * THERE IS NO FREE-FLOATING "COMMENT" ON A TRANSACTION IN THIS APP, and that is a schema fact
+ * rather than an omission: `watch_note` is constrained by `transactions_watch_note_needs_flag` to
+ * exist only alongside `watched_at`. So writing a note IS putting the row on the watchlist — where
+ * it shows up in "Keep an eye" and in the daily email — and clearing the flag discards the note,
+ * which is the server's rule (`parseWatchInput`) rather than this client's.
+ */
+export async function setWatchNote(
+  transactionId: number,
+  watched: boolean,
+  note: string | null,
+): Promise<void> {
+  const response = await authed(`/api/v1/transactions/${transactionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ watched, watch_note: note }),
+  });
+  if (!response.ok) {
+    // The server's message is the useful one here — it names the limit when a note is too long.
+    const body = await response.json().catch(() => null);
+    throw new ApiError(body?.error?.message ?? `Could not save that note (${response.status}).`);
+  }
+}
+
 export async function fetchOverview(): Promise<OverviewData> {
   const response = await authed('/api/v1/overview');
   if (!response.ok) throw new ApiError(`The server answered ${response.status}.`);

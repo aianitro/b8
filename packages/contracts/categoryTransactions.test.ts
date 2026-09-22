@@ -5,7 +5,8 @@ import {
 } from './categoryTransactions';
 
 const row = (over: Record<string, unknown> = {}) => ({
-  id: 1, date: '2026-09-14', label: 'Safeway', amount: '28.06', account: 'Chase Checking', ...over,
+  id: 1, date: '2026-09-14', label: 'Safeway', amount: '28.06', account: 'Chase Checking',
+  watched: false, note: null, ...over,
 });
 
 const data = (over: Record<string, unknown> = {}) => ({
@@ -41,6 +42,20 @@ describe('CategoryTransactionsDataSchema', () => {
     expect(() => CategoryTransactionsDataSchema.parse(
       data({ spent: '-40.00', rows: [row({ amount: '-40.00' })] })
     )).not.toThrow();
+  });
+
+  // The pair travels together because the database will not hold one without the other, and an
+  // editor opening on a row must show the note that is already there rather than an empty box.
+  it('carries the watch flag and the note', () => {
+    expect(() => CategoryTransactionsDataSchema.parse(
+      data({ rows: [row({ watched: true, note: 'returning this' })] })
+    )).not.toThrow();
+    expect(() => CategoryTransactionsDataSchema.parse(
+      data({ rows: [row({ watched: false, note: null })] })
+    )).not.toThrow();
+    expect(() => CategoryTransactionsDataSchema.parse(
+      data({ rows: [row({ watched: 'yes' })] })
+    )).toThrow();
   });
 
   it('allows an empty month, where the count and the total are zero', () => {

@@ -9,9 +9,10 @@ import {
   ActivityIndicator, Modal, Pressable, RefreshControl,
   ScrollView, StyleSheet, Text, View,
 } from 'react-native';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { OverviewData } from '@b8/contracts/overview';
-import { fetchCategoryNames, fetchOverview, setCategory } from './lib/api';
+import { fetchOverview } from './lib/api';
+import TransactionEditor, { type EditableTransaction } from './widgets/TransactionEditor';
 
 const money = (v: string | number) =>
   `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -32,73 +33,6 @@ interface Row {
 
 function asRow(t: Arrival | Watched): Row {
   return t as Row;
-}
-
-function CategoryPicker({
-  row, onClose,
-}: { row: Row; onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const { data: names, isLoading } = useQuery({
-    queryKey: ['categoryNames'],
-    queryFn: fetchCategoryNames,
-    staleTime: 10 * 60_000,
-  });
-
-  const mutation = useMutation({
-    mutationFn: (category: string | null) => setCategory(row.id, category),
-    onSuccess: async () => {
-      // The overview carries the figures this change moves — the dashboard's included.
-      // Invalidating rather than patching the cache keeps one definition of what the month says.
-      await queryClient.invalidateQueries({ queryKey: ['overview'] });
-      onClose();
-    },
-  });
-
-  return (
-    <Modal visible animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modal}>
-        <Text style={styles.modalLabel}>{row.label}</Text>
-        <Text style={styles.modalSub}>
-          {row.date} · {money(row.amount)} · currently {row.category ?? 'uncategorized'}
-        </Text>
-
-        {mutation.isError && (
-          <Text style={styles.error}>
-            {mutation.error instanceof Error ? mutation.error.message : 'Could not change it.'}
-          </Text>
-        )}
-
-        <ScrollView style={styles.pickerList}>
-          {isLoading && <ActivityIndicator style={styles.spinner} />}
-          {names?.map((name) => {
-            const current = name === row.category;
-            return (
-              <Pressable
-                key={name}
-                style={[styles.pickerRow, current && styles.pickerRowCurrent]}
-                disabled={mutation.isPending}
-                onPress={() => mutation.mutate(name)}
-              >
-                <Text style={[styles.pickerText, current && styles.pickerTextCurrent]}>{name}</Text>
-                {current && <Text style={styles.pickerTick}>current</Text>}
-              </Pressable>
-            );
-          })}
-          <Pressable
-            style={styles.pickerRow}
-            disabled={mutation.isPending}
-            onPress={() => mutation.mutate(null)}
-          >
-            <Text style={styles.pickerClear}>Clear the category</Text>
-          </Pressable>
-        </ScrollView>
-
-        <Pressable style={styles.cancel} onPress={onClose} disabled={mutation.isPending}>
-          <Text style={styles.cancelText}>{mutation.isPending ? 'Saving…' : 'Cancel'}</Text>
-        </Pressable>
-      </View>
-    </Modal>
-  );
 }
 
 function TransactionRow({ row, onPress }: { row: Row; onPress: () => void }) {
@@ -124,7 +58,7 @@ function TransactionRow({ row, onPress }: { row: Row; onPress: () => void }) {
 }
 
 export default function DidThatLandRight() {
-  const [editing, setEditing] = useState<Row | null>(null);
+  const [editing, setEditing] = useState<EditableTransaction | null>(null);
   const { data, error, isFetching, refetch } = useQuery({
     queryKey: ['overview'],
     queryFn: fetchOverview,
@@ -152,7 +86,8 @@ export default function DidThatLandRight() {
           <>
             <Text style={styles.sectionHeading}>Watching</Text>
             {watched.map((t) => (
-              <TransactionRow key={`w${t.id}`} row={t} onPress={() => setEditing(t)} />
+              <TransactionRow key={`w${t.id}`} row={t}
+                onPress={() => setEditing({ ...asRow(t), watched: true, note: t.note ?? null })} />
             ))}
           </>
         )}
@@ -163,7 +98,10 @@ export default function DidThatLandRight() {
               Just arrived
             </Text>
             {arrivals.map((t) => (
-              <TransactionRow key={`a${t.id}`} row={t} onPress={() => setEditing(t)} />
+              <TransactionRow key={`a${t.id}`} row={t}
+                // An arrival is not on the watchlist — `recentArrivals` and `watchlist` are
+                // separate reads, and a row that is both appears in the section above.
+                onPress={() => setEditing({ ...asRow(t), watched: false, note: null })} />
             ))}
           </>
         )}
@@ -173,7 +111,7 @@ export default function DidThatLandRight() {
         )}
       </ScrollView>
 
-      {editing && <CategoryPicker row={editing} onClose={() => setEditing(null)} />}
+      {editing && <TransactionEditor row={editing} onClose={() => setEditing(null)} />}
     </View>
   );
 }
@@ -195,16 +133,4 @@ const styles = StyleSheet.create({
   empty: { fontSize: 14, color: '#9ca3af' },
   error: { fontSize: 14, color: '#dc2626', lineHeight: 20, marginBottom: 10 },
   spinner: { marginTop: 40 },
-  modal: { flex: 1, backgroundColor: '#fff', paddingTop: 64, paddingHorizontal: 20 },
-  modalLabel: { fontSize: 20, fontWeight: '700', color: '#111827' },
-  modalSub: { fontSize: 13, color: '#6b7280', marginTop: 6, marginBottom: 18 },
-  pickerList: { flex: 1 },
-  pickerRow: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', flexDirection: 'row', justifyContent: 'space-between' },
-  pickerRowCurrent: { backgroundColor: '#f9fafb' },
-  pickerText: { fontSize: 17, color: '#111827' },
-  pickerTextCurrent: { fontWeight: '600' },
-  pickerTick: { fontSize: 12, color: '#9ca3af', alignSelf: 'center' },
-  pickerClear: { fontSize: 17, color: '#dc2626' },
-  cancel: { paddingVertical: 18, alignItems: 'center' },
-  cancelText: { fontSize: 16, color: '#6b7280' },
 });
