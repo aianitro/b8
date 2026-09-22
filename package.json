@@ -25,9 +25,9 @@
   },
   "devDependencies": {
     "node-pg-migrate": "^9.0.0",
-    "eslint": "^9",
-    "eslint-config-next": "^16.2.12",
-    "typescript": "^5",
-    "@types/node": "^20"
+    "eslint": "^10",
+    "eslint-config-next": "^16.3.5",
+    "typescript": "^7",
+    "@types/node": "^26"
   }
 }
