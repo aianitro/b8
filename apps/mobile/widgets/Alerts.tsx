@@ -1,4 +1,4 @@
-// The three things the dashboard's alert bell holds: the job, the feed, and ledger drift.
+// Two of the three things the dashboard's alert bell holds: the job and the feed.
 //
 // FLAT, NOT BEHIND A BELL. A bell icon on a phone is a tap to discover whether anything is wrong, and
 // the web's own note says the count is "how many things there are to read". At this width there is
@@ -14,7 +14,6 @@ import { C } from './tokens';
 
 export interface JobHealth { status: string; daysSince: number | null; message: string }
 export interface FeedFinding { institution: string; accountCount: number; state: string; hoursStale: number | null }
-export interface DriftFinding { name: string; drift: string }
 
 function Strip({ tone, text }: { tone: 'warn' | 'over'; text: string }) {
   const colour = tone === 'over' ? C.over : C.warn;
@@ -25,10 +24,9 @@ function Strip({ tone, text }: { tone: 'warn' | 'over'; text: string }) {
   );
 }
 
-export default function Alerts({ jobHealth, feedHealth, driftFindings }: {
+export default function Alerts({ jobHealth, feedHealth }: {
   jobHealth: JobHealth;
   feedHealth: FeedFinding[];
-  driftFindings: DriftFinding[];
 }) {
   const strips: React.ReactNode[] = [];
 
@@ -47,16 +45,6 @@ export default function Alerts({ jobHealth, feedHealth, driftFindings }: {
       />
     );
   }
-  if (driftFindings.length > 0) {
-    strips.push(
-      <Strip
-        key="drift"
-        tone="warn"
-        text={`${driftFindings.length} account${driftFindings.length === 1 ? '' : 's'} drifting from the ledger.`}
-      />
-    );
-  }
-
   if (strips.length === 0) return null;
   return <View style={styles.wrap}>{strips}</View>;
 }

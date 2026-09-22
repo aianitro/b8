@@ -89,11 +89,22 @@ const INK: Record<BubbleState, string> = {
  * That floor exists so a categorical series does not read as grey; this slot is not a series, it
  * is the ABSENCE of a verdict for a month too young to judge, and reading as grey is the job.
  */
+/**
+ * Four swatches on one line, which is the constraint that shapes the wording.
+ *
+ * "already over" and "heading over" keep their length: the pair IS the distinction the colours
+ * encode — one is money that has left, the other is a forecast — and shortening either to "over"
+ * collapses a fact and a guess into the same word. "too early to call" shortens to "too early"
+ * because the dropped words add nothing the two remaining ones do not carry.
+ *
+ * The screen-reader text in `LABEL` is not shortened. It has no width to fit into, and "too early
+ * to call" is the better sentence when it is read aloud rather than scanned.
+ */
 const LEGEND: ReadonlyArray<[BubbleState, string]> = [
   ['over', 'already over'],
   ['heading-over', 'heading over'],
-  ['inside', 'inside budget'],
-  ['too-early', 'too early to call'],
+  ['inside', 'in budget'],
+  ['too-early', 'too early'],
 ];
 
 /** 2px of surface between fills, per the dataviz skill — half of it either side of every seam. */
@@ -311,7 +322,20 @@ export default function CategoryHeatmap({ categories, width, month }: {
         {LEGEND.map(([state, label]) => (
           <View key={state} style={styles.legendItem}>
             <View style={[styles.swatch, { backgroundColor: FILL[state] }]} />
-            <Text style={styles.legendText}>{label}</Text>
+            {/* Shrink-to-fit rather than wrap. Shortening the labels buys room on the phones
+                measured, but "fits on mine" is not a layout rule — a larger accessibility text
+                size, or a narrower device, would wrap the row again and the reader would be left
+                with a ragged second line under the map. This cannot wrap: the row has no
+                `flexWrap`, each item may shrink, and the one label that runs out of room loses a
+                little size instead of taking the whole legend to two lines. */}
+            <Text
+              style={styles.legendText}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
+            >
+              {label}
+            </Text>
           </View>
         ))}
       </View>
@@ -323,7 +347,7 @@ export default function CategoryHeatmap({ categories, width, month }: {
 const LABEL: Record<BubbleState, string> = {
   over: 'already over budget',
   'heading-over': 'heading over budget',
-  inside: 'inside budget',
+  inside: 'in budget',
   'too-early': 'too early to call',
 };
 
@@ -345,9 +369,11 @@ const styles = StyleSheet.create({
   contents: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   icon: { textAlign: 'center' },
   amount: { fontSize: AMOUNT_SIZE, lineHeight: AMOUNT_LINE, opacity: 0.9 },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', marginRight: 14, marginTop: 4 },
+  // No `flexWrap`: the row is one line by construction. `gap` rather than a margin on every item,
+  // so there is no trailing space fighting the last label for the width it needs.
+  legend: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  legendItem: { flexDirection: 'row', alignItems: 'center', flexShrink: 1 },
   swatch: { width: 9, height: 9, borderRadius: 2, marginRight: 5 },
-  legendText: { fontSize: 10, color: C.faint },
+  legendText: { flexShrink: 1, fontSize: 10, color: C.faint },
   empty: { fontSize: 13, color: C.faint },
 });

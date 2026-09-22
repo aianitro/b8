@@ -92,16 +92,32 @@ export default function Dashboard() {
 
         {data && (
           <>
-            <Text style={styles.heading}>
-              {MONTHS[data.asOf.month]} {data.asOf.year}
-            </Text>
-            <Text style={styles.subheading}>day {data.asOf.day}</Text>
+            {/* THE EMAIL'S MASTHEAD, at phone width: the drawn mark, the name, the date under it.
+                The tab already says "Dashboard" in the bar below, so a second heading saying the
+                month was the largest text on the screen carrying the least — and the figures under
+                it are month-scoped, which is exactly what a quiet date line is for.
 
-            <Alerts
-              jobHealth={data.jobHealth}
-              feedHealth={data.feedHealth}
-              driftFindings={data.driftFindings}
-            />
+                The mark is DRAWN, not an image, for the same reason the email draws it in a table
+                cell: it is a rounded square with two characters in it, and shipping an asset to say
+                that costs a file, a bundle entry and a resolution to get wrong. */}
+            <View style={styles.masthead}>
+              <View style={styles.mark}>
+                <Text style={styles.markText}>b8</Text>
+              </View>
+              <View>
+                <Text style={styles.wordmark}>b8</Text>
+                <Text style={styles.mastheadDate}>
+                  {MONTHS[data.asOf.month]} {data.asOf.day}, {data.asOf.year}
+                </Text>
+              </View>
+            </View>
+            {/* A hairline under the row, so it reads as a header rather than as the first item in
+                the list — the email's own reasoning, and it applies unchanged. */}
+            <View style={styles.mastheadRule} />
+
+            {/* `driftFindings` is deliberately not passed — see Alerts.tsx. It stays in the
+                payload because the web renders it. */}
+            <Alerts jobHealth={data.jobHealth} feedHealth={data.feedHealth} />
 
             <KpiRow>
               {/* Projected P/L leads, as it does on the web, because it is the only one of these
@@ -236,8 +252,13 @@ export default function Dashboard() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#fff' },
   content: { padding: 20, paddingBottom: 48 },
-  heading: { fontSize: 24, fontWeight: '700', color: C.ink },
-  subheading: { fontSize: 13, color: C.faint, marginTop: 2, marginBottom: 20 },
+  masthead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // 28px and a 7px radius, the email's own numbers, so the two mastheads are recognisably one mark.
+  mark: { width: 28, height: 28, borderRadius: 7, backgroundColor: C.ink, alignItems: 'center', justifyContent: 'center' },
+  markText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  wordmark: { fontSize: 15, fontWeight: '700', color: C.ink, letterSpacing: 0.2 },
+  mastheadDate: { fontSize: 11, color: C.faint, marginTop: 1 },
+  mastheadRule: { height: 1, backgroundColor: C.hair, marginTop: 14, marginBottom: 20 },
   section: { marginTop: 30 },
   sectionTitle: { fontSize: 12, fontWeight: '700', letterSpacing: 0.6, color: C.muted, textTransform: 'uppercase', marginBottom: 12 },
   offCycle: { paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: C.hair },

@@ -50,10 +50,21 @@ Two things that bit on the way in, so they do not bite twice: `getExpoPushTokenA
 app to load at all in Expo Go; "could not connect to the server" on the phone usually means the dev
 server is down, not the API.
 
-**Screen: "Month"** — the web dashboard at phone width, added 2026-09-21 as a deliberate fifth tab.
-Header, the three alert strips, five KPIs, the money-in/money-out chart with its figures, off-cycle
-categories, and the year by category. **Every widget is fed by `/api/v1/overview`** — no new
-endpoint, which is what that payload was built for.
+**Screen: "Dashboard"** — the web dashboard at phone width, added 2026-09-21 and renamed from
+"Month" on 2026-09-22 (the old name described the time range rather than the thing). It is the tab
+the app opens on since "Spend?" was removed. A masthead carrying the mark and the date, two alert
+strips, four KPIs, the category heatmap, the money-in/money-out chart with its figures, off-cycle
+categories, the year by category, and — at the very foot — ping setup and the device card, which
+are settings rather than reading and came off the removed screen.
+
+**Every widget is fed by `/api/v1/overview`** — no new endpoint, which is what that payload was
+built for. The one exception is the heatmap's drill-down, which reads `/api/v1/transactions`.
+
+Two things the web shows and this does not, both deliberate and both the owner's call: **"Today" and
+"This week"**, and the **ledger-drift strip**. The drift finding is still computed and still in the
+payload; a drifting balance is a slow data-quality problem acted on at a laptop with the account
+open, and a strip that sits for days where it cannot be resolved is the kind people learn to scroll
+past — which costs the two alerts above it, not just itself.
 
 Three departures from the web, each for a reason: alerts are **flat rather than behind a bell** (a
 bell on a phone is a tap to discover whether anything is wrong, and the web hides them only because
