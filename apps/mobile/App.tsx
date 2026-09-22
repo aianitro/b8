@@ -1,4 +1,4 @@
-// The app's shell, and screen 1: "can I spend this?"
+// The app's shell and its tab bar.
 //
 // ROADMAP.md §5 Phase 3 step 24, rewritten 2026-09-21. Screen 1 is the question the app opens on —
 // not net worth, not last month — and it is the reason the app exists. Screen 2 lives in
@@ -13,8 +13,6 @@ import { fetchOverview } from './lib/api';
 import { clearToken, readToken } from './lib/config';
 import PasteToken from './PasteToken';
 import DidThatLandRight from './DidThatLandRight';
-import PingSetup from './PingSetup';
-import DeviceCard from './DeviceCard';
 import Chat from './Chat';
 import QuickEntry from './QuickEntry';
 import Dashboard from './Dashboard';
@@ -36,177 +34,6 @@ const queryClient = new QueryClient({
 
 const money = (v: string | number) =>
   `$${Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-
-/**
- * THE VERDICT AND ITS QUALIFIER, TOGETHER OR NOT AT ALL.
- *
- * `monthOutlook.state` has seven values and `nothing-to-score` is NOT `on-track` — §29a called a
- * green verdict over an empty scored set the worst thing the payload could assert. On a phone it is
- * worse: a guardrail that says "you have room" over transactions that stopped importing three weeks
- * ago has turned missing data into permission to spend. So `authoritative` and the staleness are
- * rendered beside the answer, never under a tap.
- */
-function Verdict({ overview }: { overview: OverviewData }) {
-  const { monthOutlook, feedHealth, jobHealth } = overview;
-  // `jobHealth.status`, not a boolean. The first version of this line guessed `.healthy` and the
-  // shared schema rejected it at typecheck — which is the argument for `packages/contracts` making
-  // itself, on the first screen that used it.
-  const stale = feedHealth.length > 0 || jobHealth.status !== 'fresh';
-
-  const tone =
-    monthOutlook.state === 'breach' || monthOutlook.state === 'projected-breach'
-      ? styles.bad
-      : monthOutlook.state === 'nothing-to-score'
-        ? styles.unknown
-        : styles.good;
-
-  return (
-    <View style={styles.verdict}>
-      <Text style={[styles.verdictText, tone]}>{label(monthOutlook.state)}</Text>
-      {!monthOutlook.authoritative && (
-        <Text style={styles.caveat}>
-          Confidence withdrawn — only {monthOutlook.coveragePercent}% of this month is categorised.
-        </Text>
-      )}
-      {stale && (
-        <Text style={styles.caveat}>
-          {jobHealth.status === 'fresh'
-            ? 'Some accounts are behind. This answer may be better than the truth.'
-            : `The nightly job is ${jobHealth.status}. This answer may be better than the truth.`}
-        </Text>
-      )}
-    </View>
-  );
-}
-
-function label(state: OverviewData['monthOutlook']['state']): string {
-  switch (state) {
-    case 'breach': return 'Over on something';
-    case 'projected-breach': return 'Heading over';
-    case 'on-track': return 'Holding';
-    case 'nothing-to-score': return 'Nothing scored yet';
-    default: return state;
-  }
-}
-
-type Row = OverviewData['monthOutlook']['sayingNo'][number];
-
-/**
- * THE NUMBER A PERSON IN A SHOP NEEDS IS WHAT IS LEFT, not a percentage.
- *
- * `spentRatio` is deliberately not rendered. The contract's own note on `OutlookCategorySchema`
- * warns that it means three incomparable things across the six statuses, so a consumer binding one
- * column across all of them prints "250% of December" above "71% of April". Money subtracts the
- * same way in every status.
- */
-function remaining(row: Row): number {
-  return Number(row.budgeted) - Number(row.actual);
-}
-
-function Category({ row, over }: { row: Row; over: boolean }) {
-  const left = remaining(row);
-  return (
-    <View style={styles.row}>
-      <Text style={[styles.category, over && styles.categoryOver]}>{row.category}</Text>
-      <View style={styles.right}>
-        <Text style={[styles.headlineAmount, over ? styles.bad : styles.neutral]}>
-          {over ? `${money(-left)} over` : `${money(left)} left`}
-        </Text>
-        <Text style={styles.sub}>
-          {money(row.actual)} of {money(row.budgeted)}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-/**
- * Two sections, not one list.
- *
- * The first version merged `sayingNo` and `holding` into a single flat list styled identically, so
- * the verdict said "over on something" and the list left you to work out which. That fails the test
- * step 24 sets for this screen — it has to answer in two seconds — and it was the owner reading it
- * on a phone that made it obvious, not anything visible from a diff.
- */
-function Categories({ overview }: { overview: OverviewData }) {
-  const discretionary = (rows: Row[]) => rows.filter((c) => c.controlMode === 'discretionary');
-  // Worst first within each section: the deepest overspend, then the tightest headroom.
-  const over = discretionary(overview.monthOutlook.sayingNo).sort(
-    (a, b) => remaining(a) - remaining(b)
-  );
-  const holding = discretionary(overview.monthOutlook.holding).sort(
-    (a, b) => remaining(a) - remaining(b)
-  );
-
-  if (over.length === 0 && holding.length === 0) {
-    return <Text style={styles.empty}>No discretionary category is scored this month.</Text>;
-  }
-
-  return (
-    <View>
-      {over.length > 0 && (
-        <>
-          <Text style={styles.sectionHeading}>Stop spending here</Text>
-          {over.map((c) => <Category key={c.categoryId} row={c} over />)}
-        </>
-      )}
-      {holding.length > 0 && (
-        <>
-          <Text style={[styles.sectionHeading, over.length > 0 && styles.sectionSpaced]}>
-            Room left
-          </Text>
-          {holding.map((c) => <Category key={c.categoryId} row={c} over={false} />)}
-        </>
-      )}
-    </View>
-  );
-}
-
-function CanISpend() {
-  const queryClient = useQueryClient();
-  const { data, error, isFetching, refetch } = useQuery({
-    queryKey: ['overview'],
-    queryFn: fetchOverview,
-  });
-
-  // A token expires — 30 days, or revoked from the server — and when it does the only useful thing
-  // this screen can offer is a way to replace it. Without this the app is bricked until someone
-  // deletes and reinstalls it, which is a poor answer for a credential doing its job.
-  async function forget() {
-    await clearToken();
-    await queryClient.invalidateQueries({ queryKey: ['token'] });
-  }
-
-  return (
-    <View style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={isFetching} onRefresh={() => void refetch()} />}
-      >
-        <Text style={styles.heading}>Can I spend?</Text>
-        {isFetching && !data && <ActivityIndicator style={styles.spinner} />}
-        {error && (
-          <>
-            <Text style={styles.error}>
-              {error instanceof Error ? error.message : 'Could not load.'}
-            </Text>
-            <Pressable onPress={forget} style={styles.link}>
-              <Text style={styles.linkText}>Use a different token</Text>
-            </Pressable>
-          </>
-        )}
-        {data && (
-          <>
-            <Verdict overview={data} />
-            <Categories overview={data} />
-            <PingSetup />
-            <DeviceCard />
-          </>
-        )}
-      </ScrollView>
-    </View>
-  );
-}
 
 /**
  * The gate: is there a credential on this phone at all?
@@ -256,10 +83,9 @@ function Root() {
  * "ruthlessly" four screens. When screens 3 and 4 arrive and one of them needs a stack, that is the
  * moment to add a real navigator, not now.
  */
-type Tab = 'spend' | 'dashboard' | 'budget' | 'arrivals' | 'ask' | 'enter';
+type Tab = 'dashboard' | 'budget' | 'arrivals' | 'ask' | 'enter';
 
 const TABS: Array<{ key: Tab; label: string }> = [
-  { key: 'spend', label: 'Spend?' },
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'budget', label: 'Budget' },
   { key: 'arrivals', label: 'Arrivals' },
@@ -268,32 +94,36 @@ const TABS: Array<{ key: Tab; label: string }> = [
 ];
 
 /**
- * FIVE tabs now — step 24's four plus `Dashboard`, added 2026-09-21 at the owner's request because the
- * web dashboard is where that app's visibility lives. A deliberate amendment to "ruthlessly four",
- * recorded rather than drifted into.
- *
  * STILL NOT react-navigation. Five screens, no stack, no params, no deep links: a navigator would
  * add peer dependencies and a gesture handler to solve a problem this app does not have. The moment
  * that changes is a screen that needs to push another on top of itself, and none of these do.
  *
- * SIX NOW, AND THIS IS THE CEILING REACHED. The previous note said five was the limit at ~76px a
- * label; at six each gets ~63px, which "Arrivals" only just survives. A seventh needs grouping — a
- * "More" tab or a drawer — not a smaller font, because the labels are already at 12px.
+ * BACK TO FIVE. "Spend?" was removed on 2026-09-22 at the owner's request. It was step 24's screen
+ * 1 and the tab the app opened on, so three things had to MOVE rather than go: `PingSetup`, which
+ * is the only way to turn notifications on; `DeviceCard`; and the "use a different token" recovery,
+ * without which an expired credential bricks the app until it is reinstalled. All three now sit at
+ * the foot of Dashboard, which is what the app opens on instead.
  *
- * "Dashboard" (renamed from "Month" on 2026-09-22) is the longest label here and it is the one that
- * proves the ceiling: nine characters at 12px semibold is ~63px, which fits a 393pt screen with
- * about a point to spare either side and does NOT fit a 375pt one. Hence `adjustsFontSizeToFit` on
- * the label below — it shrinks the one label that overflows on the one screen size where it does,
- * rather than making all six smaller everywhere, and `numberOfLines` stops a long label wrapping
- * to a second line and changing the height of the bar.
+ * WHAT WENT WITH IT, WRITTEN DOWN SO IT IS NOT REDISCOVERED AS A BUG: the phone no longer answers a
+ * short-horizon spending question anywhere. "Today" and "This week" came off the dashboard on the
+ * same day precisely because this screen answered them better as a verdict, and that reasoning is
+ * now void. Nothing on screen is wrong; the app is simply missing the question, and putting those
+ * two cards back is the smallest way to have it again.
+ *
+ * "Dashboard" is still the longest label and still proves the bar's width ceiling: nine characters
+ * at 12px semibold is ~63px, which fits a 393pt screen with about a point either side and does NOT
+ * fit a 375pt one at six tabs. `adjustsFontSizeToFit` below shrinks the one label that overflows on
+ * the one screen size where it does, rather than making all of them smaller everywhere, and
+ * `numberOfLines` stops a long label wrapping to a second line and changing the bar's height. At
+ * five there is room again; the guard stays, because the ceiling is a property of the bar rather
+ * than of today's tab count.
  */
 function Tabs() {
-  const [tab, setTab] = useState<Tab>('spend');
+  const [tab, setTab] = useState<Tab>('dashboard');
   return (
     <View style={styles.screen}>
       <StatusBar style="dark" />
       <View style={styles.tabBody}>
-        {tab === 'spend' && <CanISpend />}
         {tab === 'dashboard' && <Dashboard />}
         {tab === 'budget' && <Budget />}
         {tab === 'arrivals' && <DidThatLandRight />}
@@ -328,32 +158,10 @@ export default function App() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#fff' },
-  content: { padding: 20, paddingTop: 64 },
-  heading: { fontSize: 13, fontWeight: '600', letterSpacing: 0.8, color: '#9ca3af', textTransform: 'uppercase', marginBottom: 16 },
-  verdict: { marginBottom: 28 },
-  verdictText: { fontSize: 32, fontWeight: '700' },
-  good: { color: '#16a34a' },
-  bad: { color: '#dc2626' },
-  unknown: { color: '#d97706' },
-  caveat: { fontSize: 13, color: '#d97706', marginTop: 8, lineHeight: 18 },
-  sectionHeading: { fontSize: 12, fontWeight: '700', letterSpacing: 0.6, color: '#6b7280', textTransform: 'uppercase', marginBottom: 6 },
-  sectionSpaced: { marginTop: 28 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  category: { fontSize: 17, color: '#111827', flexShrink: 1, paddingRight: 12 },
-  categoryOver: { fontWeight: '600' },
-  right: { alignItems: 'flex-end' },
-  headlineAmount: { fontSize: 17, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  neutral: { color: '#111827' },
-  sub: { fontSize: 12, color: '#9ca3af', fontVariant: ['tabular-nums'], marginTop: 2 },
-  empty: { fontSize: 14, color: '#9ca3af' },
-  error: { fontSize: 14, color: '#dc2626', lineHeight: 20 },
-  spinner: { marginTop: 40 },
   centred: { alignItems: 'center', justifyContent: 'center' },
   tabBody: { flex: 1 },
   tabBar: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingBottom: 26, paddingTop: 10 },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 6 },
   tabText: { fontSize: 12, color: '#9ca3af', fontWeight: '600' },
   tabTextActive: { color: '#111827' },
-  link: { marginTop: 14, alignSelf: 'flex-start' },
-  linkText: { fontSize: 15, color: '#2563eb', textDecorationLine: 'underline' },
 });

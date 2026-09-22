@@ -4,7 +4,7 @@
 `expo-secure-store`, importing `@b8/contracts`.
 
 **Phase 3's hard gate was dropped on 2026-09-21** — deliberately, with the reasoning recorded in
-`ROADMAP.md`. It was never a technical dependency: everything screen 1 needs already ships in one
+`ROADMAP.md`. It was never a technical dependency: everything the dashboard needs already ships in one
 payload, and `/api/v1/overview` exists to serve two clients while serving one.
 
 ## What exists
@@ -25,7 +25,7 @@ you to work out *which* category was the problem.
 
 **Screen 2: "Did that land right?"** — `watchlist` and `recentArrivals`, with uncategorised charges
 flagged amber. Tap a row for a category picker; tapping a category writes it and invalidates the
-overview, so screen 1's verdict cannot disagree with it. **This is a direct write, not a proposal** —
+overview, so the dashboard's figures cannot disagree with it. **This is a direct write, not a proposal** —
 the propose/confirm gate exists to stop the MODEL acting on its own, and the owner tapping a
 category on their own phone is the authority that gate defers to. Routing a human decision through a
 confirmation is ceremony, and ceremony teaches people to tap without reading.
@@ -34,7 +34,7 @@ Navigation is two hand-rolled tabs, not react-navigation: two screens with no st
 no deep links do not justify a navigator and its peer dependencies. When screen 3 or 4 needs a
 stack, that is the moment.
 
-**Pings (step 25)** — a card at the bottom of screen 1 turns them on. What arrives is
+**Pings (step 25)** — a card at the foot of the Dashboard tab turns them on. What arrives is
 `"b8 — Something needs you. Open to see."` and **nothing else**: no category, no figure, no
 merchant. That is the owner's recorded decision (`plan/tasks/P3-25-push-ping/DECISION.md`), because
 push travels through Expo and Apple rather than one provider and lands on a lock screen readable
@@ -58,8 +58,9 @@ endpoint, which is what that payload was built for.
 Three departures from the web, each for a reason: alerts are **flat rather than behind a bell** (a
 bell on a phone is a tap to discover whether anything is wrong, and the web hides them only because
 its header is wide); KPIs are **two per row, not three** (at 400px three columns truncate a five-figure amount
-and turn a figure into a guess); and it is **a separate tab rather than more of screen 1**, because
-screen 1 answers "can I spend?" in two seconds and a chart there would cost the thing it exists for.
+and turn a figure into a guess); and it was **a separate tab rather than more of the "Spend?" screen**, because that screen
+answered "can I spend?" in two seconds and a chart there would have cost the thing it existed for.
+That screen was removed on 2026-09-22 and the Dashboard is now the tab the app opens on.
 
 **The chart carries two reliefs the palette depends on.** `dataviz`'s `validate_palette.js` rates
 money-in green against money-out orange at ΔE 6.2 for deuteranopia — inside the 6–8 floor band,
@@ -114,7 +115,7 @@ data, which is what P1-11a meant by "the drift an endpoint nothing reads is expo
 `/api/v1/quick-entry` returns both lists in one round trip, with a contract narrowed to the fields
 this screen renders rather than the whole rows.
 
-**Linking this phone with a passkey.** The "This phone" card at the bottom of screen 1 offers
+**Linking this phone with a passkey.** The "This phone" card at the foot of the Dashboard offers
 **Link with passkey**: Safari opens inside the tailnet, the passkey ceremony runs, and the app comes
 back with a **30-day sliding device session**. Nothing typed, nothing pasted, and a lost phone is one
 `UPDATE` on the server. Pasting an SSH-minted token is kept as a collapsed fallback, not deleted.

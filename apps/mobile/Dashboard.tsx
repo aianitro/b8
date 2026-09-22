@@ -15,10 +15,13 @@
 // payload was built for.
 
 import { useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { watchlistIsStale } from '@b8/contracts/overview';
 import { fetchOverview } from './lib/api';
+import { clearToken } from './lib/config';
+import PingSetup from './PingSetup';
+import DeviceCard from './DeviceCard';
 import { C, money, signed } from './widgets/tokens';
 import { Kpi, KpiRow } from './widgets/Kpi';
 import Alerts from './widgets/Alerts';
@@ -43,6 +46,20 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function Dashboard() {
   const { width } = useWindowDimensions();
+  const queryClient = useQueryClient();
+
+  /**
+   * A token expires — 30 days, or revoked from the server — and when it does the only useful thing
+   * a screen can offer is a way to replace it. Without this the app is bricked until someone
+   * deletes and reinstalls it, which is a poor answer for a credential doing its job.
+   *
+   * It lived on the "Spend?" screen, which was removed on 2026-09-22. Moved rather than deleted:
+   * the recovery path has to exist SOMEWHERE, and this is now the tab the app opens on.
+   */
+  async function forget() {
+    await clearToken();
+    await queryClient.invalidateQueries({ queryKey: ['token'] });
+  }
   // Collapsed by default. The count is what earns permanent space; the rows are what you open when
   // the count is surprising.
   const [showWatchlist, setShowWatchlist] = useState(false);
@@ -63,9 +80,14 @@ export default function Dashboard() {
       >
         {isFetching && !data && <ActivityIndicator style={styles.spinner} />}
         {error && (
-          <Text style={styles.error}>
-            {error instanceof Error ? error.message : 'Could not load.'}
-          </Text>
+          <>
+            <Text style={styles.error}>
+              {error instanceof Error ? error.message : 'Could not load.'}
+            </Text>
+            <Pressable onPress={forget} style={styles.link}>
+              <Text style={styles.linkText}>Use a different token</Text>
+            </Pressable>
+          </>
         )}
 
         {data && (
@@ -97,13 +119,18 @@ export default function Dashboard() {
                 tone={Number(data.stats.remaining) < 0 ? 'over' : undefined}
               />
               {/* NO "Today" and NO "This week" — removed from the phone on 2026-09-22 at the owner's
-                  request, and still on the web, which is the point rather than an inconsistency.
-                  Both are short-horizon spending questions, and the phone already answers those on
-                  screen 1, in two seconds, as a verdict. Repeating them here as figures made this
-                  tab answer the guardrail's question worse than the guardrail does.
+                  request, and still on the web.
 
-                  `today` and `week` stay in the overview contract: the web dashboard still renders
-                  them, and a payload field with one client fewer is not a field to delete. */}
+                  THE REASON GIVEN FOR REMOVING THEM NO LONGER HOLDS, and saying so here is cheaper
+                  than letting someone rediscover it. It was that the "Spend?" screen answered
+                  short-horizon spending better, as a verdict rather than two figures. That screen
+                  was removed hours later, on the same day, so the phone now answers the question
+                  nowhere. Nothing on this tab is wrong; the app is missing a question it used to
+                  have, and putting these two cards back is the smallest way to have it again.
+
+                  `today` and `week` stay in the overview contract regardless: the web dashboard
+                  still renders them, and a payload field with one client fewer is not a field to
+                  delete. */}
               {/* Uncategorized is a COUNT, and it is last because it is the only actionable-by-you
                   item here — everything above is a figure to read. */}
               <Kpi
@@ -190,6 +217,15 @@ export default function Dashboard() {
                 yearElapsed={(data.asOf.month + data.asOf.day / 31) / 12}
               />
             </Section>
+
+            {/* Ping setup and the device card came off the removed "Spend?" screen. They are
+                settings rather than reading, so they sit at the very bottom of the one tab the app
+                opens on — reachable without being in the way. Turning pings on has no other home,
+                and a feature with no way to enable it is a feature nobody has. */}
+            <View style={styles.settings}>
+              <PingSetup />
+              <DeviceCard />
+            </View>
           </>
         )}
       </ScrollView>
@@ -208,5 +244,8 @@ const styles = StyleSheet.create({
   offCycleName: { fontSize: 15, color: C.ink },
   offCycleNote: { fontSize: 12, color: C.faint, marginTop: 2 },
   error: { fontSize: 14, color: C.over, lineHeight: 20 },
+  link: { marginTop: 14 },
+  linkText: { fontSize: 14, color: C.accent, textDecorationLine: 'underline' },
+  settings: { marginTop: 36 },
   spinner: { marginTop: 40 },
 });

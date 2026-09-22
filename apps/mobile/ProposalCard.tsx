@@ -31,7 +31,7 @@ export default function ProposalCard({ proposal }: { proposal: ChatProposal }) {
     try {
       const result = await decideProposal(proposal.id, decision);
       setDone(result.message);
-      // The overview carries the figures this change moves, screen 1's verdict included.
+      // The overview carries the figures this change moves, the dashboard's included.
       if (result.applied) await queryClient.invalidateQueries({ queryKey: ['overview'] });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not apply that.');

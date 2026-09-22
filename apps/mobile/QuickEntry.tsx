@@ -2,7 +2,7 @@
 //
 // ROADMAP.md §5 Phase 3 step 24, and DEMOTED there on 2026-09-21. This was once the whole
 // justification for building a phone app — "quarterly property valuation quick-entry", four data
-// entries a year — and the rewrite replaced that with the guardrail on screen 1. It is still
+// entries a year — and the rewrite replaced that with the guardrail screen. It is still
 // genuinely better on a phone than a laptop: you are at the property, or looking at a statement,
 // and the laptop is elsewhere.
 //

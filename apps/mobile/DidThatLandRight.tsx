@@ -47,7 +47,7 @@ function CategoryPicker({
   const mutation = useMutation({
     mutationFn: (category: string | null) => setCategory(row.id, category),
     onSuccess: async () => {
-      // The overview carries the figures this change moves — the verdict on screen 1 included.
+      // The overview carries the figures this change moves — the dashboard's included.
       // Invalidating rather than patching the cache keeps one definition of what the month says.
       await queryClient.invalidateQueries({ queryKey: ['overview'] });
       onClose();
