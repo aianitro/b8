@@ -25,7 +25,8 @@
     "expo-device": "~57.0.2",
     "expo-constants": "~57.0.19",
     "expo-web-browser": "~57.0.3",
-    "expo-linking": "~57.0.10"
+    "expo-linking": "~57.0.10",
+    "react-native-svg": "15.15.5"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

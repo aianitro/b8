@@ -50,6 +50,24 @@ Two things that bit on the way in, so they do not bite twice: `getExpoPushTokenA
 app to load at all in Expo Go; "could not connect to the server" on the phone usually means the dev
 server is down, not the API.
 
+**Screen: "Month"** — the web dashboard at phone width, added 2026-09-21 as a deliberate fifth tab.
+Header, the three alert strips, five KPIs, the money-in/money-out chart with its figures, off-cycle
+categories, and the year by category. **Every widget is fed by `/api/v1/overview`** — no new
+endpoint, which is what that payload was built for.
+
+Three departures from the web, each for a reason: alerts are **flat rather than behind a bell** (a
+bell on a phone is a tap to discover whether anything is wrong, and the web hides them only because
+its header is wide); KPIs are **two per row, not three** (at 400px three columns truncate `$12,480`
+and turn a figure into a guess); and it is **a separate tab rather than more of screen 1**, because
+screen 1 answers "can I spend?" in two seconds and a chart there would cost the thing it exists for.
+
+**The chart carries two reliefs the palette depends on.** `dataviz`'s `validate_palette.js` rates
+money-in green against money-out orange at ΔE 6.2 for deuteranopia — inside the 6–8 floor band,
+legal ONLY with secondary encoding — and both below 3:1 against the surface, which obligates visible
+labels or a table view. So money in is drawn **above** the zero line and out **below** it (position
+carries identity with no colour vision at all), and the figures list beneath the plot is the table
+view. Neither is decoration; see `widgets/tokens.ts`.
+
 **Screen 3: "Ask"** — chat over the real data, with **native confirmation cards** for anything the
 agent proposes. The cards sit OUTSIDE the message bubble deliberately: everything inside one is the
 model talking, and a control that changes the ledger should not look like part of a sentence the
