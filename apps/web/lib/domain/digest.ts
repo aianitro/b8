@@ -103,9 +103,21 @@ export interface DigestData {
     totalIn: number;
   };
 
-  yesterday: {
-    /** ISO date of the day being reported. Yesterday relative to the caller's clock, not this one. */
-    date: string;
+  /**
+   * When the previous digest was DELIVERED, ISO, or null if none ever was. Carried so the sender
+   * can apply `alreadySentToday` without a second query for a timestamp already read here.
+   */
+  lastDeliveredAt: string | null;
+
+  /**
+   * What LANDED since the last email, not what is dated yesterday. The distinction is the whole
+   * point — see `digestWindow.ts` for the measurement that forced it.
+   */
+  arrivals: {
+    /** ISO timestamp the window opens at: when the previous digest was delivered. */
+    since: string;
+    /** The same instant as a local `YYYY-MM-DD`, for captioning. */
+    sinceDate: string;
     rows: DigestTxn[];
     totalOut: number;
     totalIn: number;
@@ -427,7 +439,7 @@ function emptyState(message: string): string {
  */
 function counters(data: DigestData): string {
   const unfiled = data.uncategorized.totalCount;
-  const posted = data.yesterday.rows.length;
+  const posted = data.arrivals.rows.length;
 
   const card = (value: number, caption: string, alarming: boolean): string =>
     `<td width="50%" valign="top" style="padding:0">` +
@@ -448,7 +460,7 @@ function counters(data: DigestData): string {
     `<td width="12" style="font-size:0;line-height:0">&nbsp;</td>` +
     // Not "new transactions yesterday": the extra word wrapped the caption onto a second line
     // at phone width, which is where this is read.
-    card(posted, posted === 1 ? 'transaction yesterday' : 'transactions yesterday', false) +
+    card(posted, posted === 1 ? 'new transaction' : 'new transactions', false) +
     `</tr></table>`
   );
 }
@@ -546,19 +558,32 @@ function watchlistText(items: WatchedItem[]): string[] {
   });
 }
 
-/** Widget 3 — yesterday, in full. Short enough to list completely, so it is listed completely. */
-function yesterdayWidget(d: DigestData['yesterday']): string {
-  const day = esc(shortDate(d.date));
+/**
+ * Widget 3 — what has arrived since the last email, in full.
+ *
+ * Titled "Just arrived" rather than "Yesterday" because that is now what it contains, and the two
+ * differ by more than wording: a row dated five days ago that landed this morning belongs here and
+ * did not belong under the old title. Captioning arrivals as a day was the shape of the bug.
+ *
+ * The rail says WHEN the window opens, so the reader can see the section is cumulative rather than
+ * daily — and so a longer-than-usual list after a missed send explains itself instead of looking
+ * like a surge in spending.
+ *
+ * Listed completely, unlike the dashboard's twelve: a screen has a fold and an email does not, and
+ * a truncated list is one that cannot be reconciled against a statement.
+ */
+function arrivalsWidget(d: DigestData['arrivals']): string {
+  const since = esc(shortDate(d.sinceDate));
   if (d.rows.length === 0) {
-    return widget('Yesterday', day, emptyState('No transactions posted.'), SLATE_MARK);
+    return widget('Just arrived', `since ${since}`, emptyState('Nothing new has posted.'), SLATE_MARK);
   }
 
   const net = d.totalOut - d.totalIn;
   const rail =
-    `${day} ${MIDDOT} ${d.rows.length} record${d.rows.length === 1 ? '' : 's'} ${MIDDOT} ` +
+    `since ${since} ${MIDDOT} ${d.rows.length} record${d.rows.length === 1 ? '' : 's'} ${MIDDOT} ` +
     `<span style="color:${net > 0 ? INK : GREEN};font-weight:600">${net > 0 ? '' : '+'}${exact(net)}</span> net`;
 
-  return widget('Yesterday', rail, txnTable(d.rows, true, false), SLATE_MARK);
+  return widget('Just arrived', rail, txnTable(d.rows, true, false), SLATE_MARK);
 }
 
 /**
@@ -680,7 +705,7 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
   }
 
   const u = data.uncategorized;
-  const y = data.yesterday;
+  const a = data.arrivals;
   const ye = data.yearEnd;
 
   const dateLine = `${esc(shortDate(`${data.asOf.year}-${String(data.asOf.month).padStart(2, '0')}-${String(data.asOf.day).padStart(2, '0')}`))}, ${data.asOf.year}`;
@@ -690,7 +715,7 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
    *
    * Every mail client takes the first text in the body when no preheader is supplied. This message
    * begins with its own wordmark, so the inbox has been reading: "b8 1 record needs a category 4
-   * transactions yesterday". That is the markup leaking into the one line of the message a reader
+   * new transactions". That is the markup leaking into the one line of the message a reader
    * sees before deciding whether to open it.
    *
    * Hidden by the combination that actually works: zero font size AND zero line height AND
@@ -760,7 +785,7 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
     counters(data) +
     uncategorizedWidget(data.uncategorized) +
     watchlistWidget(data.watchlist) +
-    yesterdayWidget(data.yesterday) +
+    arrivalsWidget(data.arrivals) +
     bubblesWidget(data.bubbles, bubblesSrc) +
     yearEndWidget(data.yearEnd, chartSrc) +
     `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:2px 0 0;text-align:center">` +
@@ -772,7 +797,7 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
     '',
     ...(data.jobGap ? [`  ${data.jobGap}`, ''] : []),
     `  ${u.totalCount} ${u.totalCount === 1 ? 'record needs' : 'records need'} a category`,
-    `  ${y.rows.length} transaction${y.rows.length === 1 ? '' : 's'} yesterday`,
+    `  ${a.rows.length} new transaction${a.rows.length === 1 ? '' : 's'}`,
     '',
     `NEEDS A CATEGORY`,
     u.totalCount === 0
@@ -788,8 +813,8 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
     ...(data.watchlist.length > 0
       ? [`KEEPING AN EYE — ${data.watchlist.length} open`, ...watchlistText(data.watchlist), '']
       : []),
-    `YESTERDAY — ${shortDate(y.date)}`,
-    y.rows.length === 0 ? '  No transactions posted.' : txnTableText(y.rows, true, false).join('\n'),
+    `JUST ARRIVED — since ${shortDate(a.sinceDate)}`,
+    a.rows.length === 0 ? '  Nothing new has posted.' : txnTableText(a.rows, true, false).join('\n'),
     '',
     ...(data.bubbles.length > 0
       ? [

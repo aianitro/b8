@@ -19,8 +19,10 @@ function data(overrides: Partial<DigestData> = {}): DigestData {
       totalOut: 4083.84,
       totalIn: 16238.17,
     },
-    yesterday: {
-      date: '2026-09-13',
+    lastDeliveredAt: '2026-09-13T13:00:00Z',
+    arrivals: {
+      since: '2026-09-13T13:00:00Z',
+      sinceDate: '2026-09-13',
       rows: [
         { date: '2026-09-13', label: 'Total Wine & More', amount: 104.63, category: 'Grocery' },
         { date: '2026-09-13', label: 'Charles Tyrwhitt', amount: 376.92, category: null },
@@ -143,7 +145,7 @@ describe('the digest carries what the owner asked for', () => {
     for (const surface of [html, text]) {
       expect(surface).toContain('14');
       expect(surface).toMatch(/need a category|records need a category/);
-      expect(surface).toMatch(/transactions? yesterday/);
+      expect(surface).toMatch(/new transactions?/);
     }
     // Both counters must sit above the lists. An email read on a phone is read from the top, and
     // the whole reason these exist is to be the part that does not need scrolling to.
@@ -278,7 +280,7 @@ describe('what may never appear in the rendered message', () => {
 
   it('escapes merchant names rather than letting a bank feed write markup', () => {
     const d = data();
-    d.yesterday.rows = [{ date: '2026-09-13', label: '<b>AT&T</b> "Store"', amount: 40, category: null }];
+    d.arrivals.rows = [{ date: '2026-09-13', label: '<b>AT&T</b> "Store"', amount: 40, category: null }];
     const { html } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
     expect(html).toContain('&lt;b&gt;AT&amp;T&lt;/b&gt;');
     expect(html).not.toContain('<b>AT&T</b>');
@@ -286,7 +288,7 @@ describe('what may never appear in the rendered message', () => {
 
   it('escapes category names too, which the owner types by hand', () => {
     const d = data();
-    d.yesterday.rows = [{ date: '2026-09-13', label: 'Safeway', amount: 30, category: 'Food & <Drink>' }];
+    d.arrivals.rows = [{ date: '2026-09-13', label: 'Safeway', amount: 30, category: 'Food & <Drink>' }];
     expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).html).toContain('Food &amp; &lt;Drink&gt;');
   });
 
@@ -321,11 +323,11 @@ describe('the empty cases still say something', () => {
     expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).html).toContain('2 records');
   });
 
-  it('says a quiet day was quiet rather than rendering an empty table', () => {
+  it('says nothing arrived rather than rendering an empty table', () => {
     const d = data();
-    d.yesterday = { date: '2026-09-13', rows: [], totalOut: 0, totalIn: 0 };
+    d.arrivals = { since: '2026-09-13T13:00:00Z', sinceDate: '2026-09-13', rows: [], totalOut: 0, totalIn: 0 };
     const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
-    for (const surface of [html, text]) expect(surface).toContain('No transactions posted');
+    for (const surface of [html, text]) expect(surface).toContain('Nothing new has posted');
   });
 
   it('survives a year that has not started, where every bar would be zero', () => {

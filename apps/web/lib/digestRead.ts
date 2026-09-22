@@ -4,6 +4,7 @@ import { loadMonthOutlook } from './monthOutlookRead';
 import { loadWatchlist } from './watchlistRead';
 import { loadJobHealth } from './jobHealthRead';
 import { asOfFromDate } from './domain/monthOutlook';
+import { arrivalsSince } from './domain/digestWindow';
 import type { DigestData, DigestTxn } from './domain/digest';
 
 /**
@@ -18,7 +19,8 @@ import type { DigestData, DigestTxn } from './domain/digest';
  * `now` is a parameter rather than a `new Date()` inside each query, for the reason
  * `asOfFromDate`'s docblock gives: a second conversion is a second calendar, and the two disagree
  * for the hours around midnight. The daily job runs early in the morning, which is precisely when
- * "this month" and "yesterday" are most likely to be computed on opposite sides of a boundary.
+ * "this month" and the arrivals window are most likely to be computed on opposite sides of a
+ * boundary.
  */
 
 /** How many uncategorized rows the email lists before it falls back to a total. */
@@ -29,8 +31,8 @@ const LIST_LIMIT = 8;
  *
  * `toISOString().slice(0, 10)` is the obvious way to write this and it is wrong here: it converts
  * to UTC first, so any evening west of Greenwich reports tomorrow's date. The digest's whole second
- * widget is "yesterday", so a one-day slip would silently report the wrong day's transactions and
- * look entirely plausible doing it.
+ * widget dates the arrivals window for the reader, so a one-day slip would caption it with the
+ * wrong day and look entirely plausible doing it.
  */
 function localIso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -74,9 +76,18 @@ export async function loadDigest(now: Date): Promise<DigestData> {
   const year = now.getFullYear();
   const month = now.getMonth(); // 0-based, as `loadYearEnd` and `asOfFromDate` both expect.
 
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayIso = localIso(yesterday);
+  // WHAT ARRIVED, NOT WHAT IS DATED YESTERDAY. See `domain/digestWindow.ts` for the measurement
+  // that forced this: no transaction in this ledger is ever written on the day it is dated, so the
+  // old `t.date = yesterday` section reported 27% of rows and lost the rest permanently.
+  //
+  // Read BEFORE the arrivals query rather than alongside it, because it is that query's parameter.
+  // The one extra round trip buys a window that abuts the previous email exactly.
+  const lastSend = await db.query<{ attempted_at: string }>(
+    `SELECT MAX(attempted_at)::text AS attempted_at
+       FROM alert_sends WHERE kind = 'digest' AND delivered`
+  );
+  const lastDeliveredRaw = lastSend.rows[0]?.attempted_at ?? null;
+  const since = arrivalsSince(lastDeliveredRaw ? new Date(lastDeliveredRaw) : null, now);
 
   const [unfiled, unfiledTotals, posted, watching, health, monthRead, yearEnd] = await Promise.all([
     // Largest first — filing the biggest row moves every other figure in the email the most.
@@ -103,14 +114,20 @@ export async function loadDigest(now: Date): Promise<DigestData> {
          AND EXTRACT(YEAR FROM t.date) = $1 AND EXTRACT(MONTH FROM t.date) = $2
     `, [year, month + 1]),
 
-    // Yesterday in full, and unlimited on purpose: a day is short enough to list completely, and a
-    // truncated day is a day the reader cannot reconcile against a statement.
+    // Everything that landed since the last email, and unlimited on purpose: one day's arrivals are
+    // short enough to list completely, and a truncated list is one the reader cannot reconcile
+    // against a statement. (The dashboard's equivalent caps at 12 because a screen has a fold; an
+    // email does not.)
+    //
+    // `created_at`, matching `overviewRead.ts`'s arrivals query, so the mail and the screen answer
+    // the same question. NO landscape filter and no `exclude_from_budget` filter, matching it
+    // again: the question is "what is new", not "what counts against a budget".
     db.query<TxnRow>(`
       SELECT t.date::text, ${LABEL} AS label, t.amount::text, t.mapped_category AS category
         FROM transactions t ${VISIBLE}
-       WHERE t.date = $1::date AND t.hidden = FALSE
+       WHERE t.created_at > $1 AND t.hidden = FALSE
        ORDER BY ABS(t.amount) DESC, t.id
-    `, [yesterdayIso]),
+    `, [since.toISOString()]),
 
     // Through the shared reader, so the mail and the dashboard cannot disagree about what is on
     // the list, how it is ordered, or how old an entry is.
@@ -129,7 +146,7 @@ export async function loadDigest(now: Date): Promise<DigestData> {
   ]);
 
   const totals = unfiledTotals.rows[0];
-  const yesterdayRows = posted.rows.map(toTxn);
+  const arrivalRows = posted.rows.map(toTxn);
 
   return {
     asOf: { year, month: month + 1, day: now.getDate() },
@@ -144,11 +161,15 @@ export async function loadDigest(now: Date): Promise<DigestData> {
       totalIn: Number(totals?.inbound ?? 0),
     },
 
-    yesterday: {
-      date: yesterdayIso,
-      rows: yesterdayRows,
-      totalOut: yesterdayRows.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0),
-      totalIn: yesterdayRows.filter((t) => t.amount < 0).reduce((s, t) => s - t.amount, 0),
+    lastDeliveredAt: lastDeliveredRaw,
+
+    arrivals: {
+      since: since.toISOString(),
+      // Local, not UTC: this is a date a reader compares against their own calendar.
+      sinceDate: localIso(since),
+      rows: arrivalRows,
+      totalOut: arrivalRows.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0),
+      totalIn: arrivalRows.filter((t) => t.amount < 0).reduce((s, t) => s - t.amount, 0),
     },
 
     watchlist: watching.map((w) => ({

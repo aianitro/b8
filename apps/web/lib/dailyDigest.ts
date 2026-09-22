@@ -3,6 +3,7 @@ import db from './db';
 import { createLogger } from './logger';
 import { loadDigest } from './digestRead';
 import { renderDigest, type DigestData, type DigestMessage } from './domain/digest';
+import { alreadySentToday } from './domain/digestWindow';
 import { BUBBLES_CID, CHART_CID, renderBubblesPng, renderChartPng } from './digestImage';
 import { alertsEnabled, describeSmtp, smtpSettings, type SmtpSettings } from './mailConfig';
 import type { AlertKind } from './domain/pushPing';
@@ -53,9 +54,22 @@ export async function runDailyDigest(): Promise<AlertKind[]> {
     }
 
     // The one clock read, converted once and passed down — `loadDigest` derives "this month" and
-    // "yesterday" from this single Date. A second `new Date()` downstream is a second calendar, and
-    // the two disagree for the hours around midnight, which is exactly when this job runs.
-    const data = await loadDigest(new Date());
+    // the arrivals window from this single Date, and `alreadySentToday` below answers against the
+    // same instant. A second `new Date()` downstream is a second calendar, and the two disagree for
+    // the hours around midnight, which is exactly when this job runs.
+    const now = new Date();
+    const data = await loadDigest(now);
+
+    // ONE EMAIL A DAY, checked before anything is rendered. The fingerprint test below used to
+    // carry this on its own: a second run rendered identical content and hashed the same. That
+    // stopped being true when the arrivals window moved to "since the last delivered send" — a
+    // re-run now renders a different, usually empty, section and would be sent as a second email.
+    // `runDailyJob` fires once on startup as well as on its timer, so without this every server
+    // restart would post one. The decision itself is pure and tested; this reads the clock.
+    if (alreadySentToday(data.lastDeliveredAt ? new Date(data.lastDeliveredAt) : null, now)) {
+      log.info('a digest has already gone out today, suppressed');
+      return [];
+    }
 
     // Rendered BEFORE the suppression check is answered? No — after. The chart is the one expensive
     // step in this job (an SVG rasterised through a native library), and a suppressed run should
