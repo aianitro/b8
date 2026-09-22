@@ -14,8 +14,10 @@
 // EVERY WIDGET HERE IS FED BY `/api/v1/overview` — no new endpoint, which is exactly what that
 // payload was built for.
 
+import { useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
+import { watchlistIsStale } from '@b8/contracts/overview';
 import { fetchOverview } from './lib/api';
 import { C, money, signed } from './widgets/tokens';
 import { Kpi, KpiRow } from './widgets/Kpi';
@@ -23,6 +25,7 @@ import Alerts from './widgets/Alerts';
 import PlChart, { PlFigures } from './widgets/PlChart';
 import BudgetTracks from './widgets/BudgetTracks';
 import CategoryHeatmap from './widgets/CategoryHeatmap';
+import Watchlist, { age } from './widgets/Watchlist';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -40,6 +43,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function Dashboard() {
   const { width } = useWindowDimensions();
+  // Collapsed by default. The count is what earns permanent space; the rows are what you open when
+  // the count is surprising.
+  const [showWatchlist, setShowWatchlist] = useState(false);
   const { data, error, isFetching, refetch } = useQuery({
     queryKey: ['overview'],
     queryFn: fetchOverview,
@@ -106,7 +112,35 @@ export default function Dashboard() {
                 sub={data.stats.uncategorized > 0 ? 'fix these on Arrivals' : 'all categorised'}
                 tone={data.stats.uncategorized > 0 ? 'warn' : 'ok'}
               />
+              {/* Beside Uncategorized on purpose, and it is the second of the two: both are counts
+                  of things waiting on the owner rather than figures to read, and this is the one
+                  the owner put there themselves.
+
+                  The only tappable card on the screen. Nothing here can be fixed from the phone, so
+                  the tap opens the rows rather than pretending to a "Manage" the web has and this
+                  does not — and it opens nothing at all when the count is zero, because a control
+                  that responds with an empty list is worse than one that does not respond. */}
+              <Kpi
+                label="Keep an eye"
+                value={data.watchlist.length.toLocaleString()}
+                sub={
+                  data.watchlist.length === 0
+                    ? 'nothing flagged'
+                    // The read orders oldest first, so [0] is the age that matters — and it is the
+                    // figure that moves, which is the whole reason this is not wallpaper.
+                    : `oldest ${age(data.watchlist[0].daysOpen)}`
+                }
+                tone={
+                  data.watchlist.length === 0
+                    ? 'ok'
+                    : watchlistIsStale(data.watchlist[0].daysOpen) ? 'warn' : undefined
+                }
+                onPress={data.watchlist.length > 0 ? () => setShowWatchlist((v) => !v) : undefined}
+                expanded={showWatchlist}
+              />
             </KpiRow>
+
+            {showWatchlist && <Watchlist items={data.watchlist} />}
 
             {/* The month's map. On the web this LEADS the dashboard, above the stat cards; here it
                 sits under them, because a 300px picture at the top of a phone pushes Projected P/L

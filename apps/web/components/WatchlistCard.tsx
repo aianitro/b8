@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Flag } from 'lucide-react';
+import { WATCHLIST_STALE_DAYS } from '@b8/contracts/overview';
 import type { WatchedTransaction } from '@/lib/watchlistRead';
 
 const fmt = (n: number) =>
@@ -8,8 +9,10 @@ const fmt = (n: number) =>
 /** Whole days since the flag, as a phrase. */
 const age = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day' : `${days} days`);
 
-/** Past this, an entry stops being a process and starts being something nobody is going to chase. */
-const STALE_DAYS = 14;
+// The threshold moved to `@b8/contracts/overview` when the phone's dashboard started raising its
+// own "Keep an eye" card on the same judgement. Imported rather than restated: two surfaces calling
+// the same flag stale on different days is the quiet kind of drift this repo keeps finding.
+const STALE_DAYS = WATCHLIST_STALE_DAYS;
 
 /**
  * What the owner said they were not finished with.

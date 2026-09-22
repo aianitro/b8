@@ -674,6 +674,21 @@ export const MonthCategorySchema = z.object({
   tooEarly: z.boolean(),
 });
 
+/**
+ * Past this, a flagged transaction stops being a process and starts being something nobody is
+ * going to chase. Shared because two clients now render the judgement: the web's WatchlistCard
+ * ages a row amber, and the phone's dashboard raises its "Keep an eye" card to a warning tone.
+ *
+ * AMBER, NEVER RED, on both. Nothing on a watchlist is an error, and a colour that shouts on day
+ * fifteen has nothing left to say on day sixty.
+ */
+export const WATCHLIST_STALE_DAYS = 14;
+
+/** Whether a flag has been open long enough to have stopped being a process. */
+export function watchlistIsStale(daysOpen: number): boolean {
+  return daysOpen >= WATCHLIST_STALE_DAYS;
+}
+
 /** One transaction the owner flagged to come back to. */
 export const WatchedTransactionSchema = z.object({
   id: serialId,
