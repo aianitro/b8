@@ -160,8 +160,12 @@ export default function Dashboard() {
             </Section>
 
             <Section title="The year, month by month">
-              <PlChart points={data.monthlySpending} width={chartWidth} />
-              <PlFigures points={data.monthlySpending} />
+              {/* `yearEnd.monthly`, not `monthlySpending`: twelve positional points carrying
+                  `cumulative` and `projected`, so the rest of the year is drawn as a forecast
+                  rather than left off — and so this picture arrives at the Projected P/L printed
+                  in the KPI row above, which comes from the same reader. */}
+              <PlChart points={data.yearEnd.monthly} width={chartWidth} />
+              <PlFigures points={data.yearEnd.monthly} />
             </Section>
 
             {data.monthOutlook.offCycleElsewhere.length > 0 && (

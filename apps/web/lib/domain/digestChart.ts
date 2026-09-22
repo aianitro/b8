@@ -29,6 +29,8 @@
  * same holds here and the same single scale is used.
  */
 
+import { lastSettledIndex, monotonePath, monotoneTangents } from '@b8/contracts/monotone';
+
 /** What one month contributes to the picture. The same fields `YearEndPoint` carries. */
 export interface ChartPoint {
   income: number;
@@ -57,48 +59,6 @@ const plotW = W - PAD.left - PAD.right;
 const plotH = H - PAD.top - PAD.bottom;
 const COL = plotW / 12;
 const BAR = COL * 0.34;
-
-function sign(x: number): number {
-  return x < 0 ? -1 : 1;
-}
-
-/**
- * Monotone cubic tangents — d3's `curveMonotoneX`, which is what Recharts draws for `type="monotone"`
- * and therefore what the dashboard's line already is.
- *
- * NOT Catmull-Rom, and the difference matters on this data. Catmull-Rom overshoots: between two
- * months that both sit at −$25,000 with a −$32,000 trough before them, it will bow the curve past
- * the lowest figure in the series and draw a loss the year never had. Monotone interpolation cannot
- * invent an extremum between two points, which on a chart of money is the difference between
- * smoothing a line and fabricating one.
- */
-function tangents(values: number[]): number[] {
-  const n = values.length;
-  if (n < 2) return [0];
-
-  // Slopes of the straight segments. x-spacing is 1 (one month), so a slope IS a delta.
-  const slopes: number[] = [];
-  for (let i = 0; i < n - 1; i++) slopes.push(values[i + 1] - values[i]);
-
-  const out = new Array<number>(n);
-  for (let i = 1; i < n - 1; i++) {
-    const before = slopes[i - 1];
-    const after = slopes[i];
-    // A sign change is a local peak or trough. Its tangent is flat, which is exactly what stops
-    // the curve continuing past the turning point.
-    if (before * after <= 0) {
-      out[i] = 0;
-    } else {
-      const mean = (before + after) / 2;
-      out[i] = (sign(before) + sign(after)) * Math.min(Math.abs(before), Math.abs(after), Math.abs(mean) / 2);
-    }
-  }
-  // Ends: a one-sided estimate, damped by the neighbour's tangent so the curve leaves and arrives
-  // without a flick.
-  out[0] = (3 * slopes[0] - out[1]) / 2;
-  out[n - 1] = (3 * slopes[n - 2] - out[n - 2]) / 2;
-  return out;
-}
 
 function esc(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -177,24 +137,14 @@ export function renderChartSvg(points: ChartPoint[]): string {
   // Tangents are computed over the WHOLE series and then the path is cut in two, rather than
   // fitting each piece separately. A per-piece fit would give the last settled month two different
   // tangents and kink the curve at exactly the join between what happened and what is expected.
+  // The curve maths moved to `@b8/contracts/monotone` when the phone's chart needed the same line.
+  // Shared rather than copied: two smoothing functions do not fail loudly when they drift, they
+  // draw two subtly different pictures of one year and nobody can say which is right.
   const values = points.map((p) => p.cumulative);
-  const slope = tangents(values);
-  const lastSettled = Math.max(0, values.length - 1 - [...points].reverse().findIndex((p) => !p.projected));
-  const settledEnd = points.every((p) => p.projected) ? 0 : lastSettled;
+  const slope = monotoneTangents(values);
+  const settledEnd = lastSettledIndex(points.map((p) => p.projected));
 
-  const segment = (from: number, to: number): string => {
-    let d = `M ${cx(from).toFixed(1)} ${y(values[from]).toFixed(1)}`;
-    for (let i = from; i < to; i++) {
-      // Control points a third of a column either side, carrying each end's tangent — the standard
-      // Hermite-to-Bezier conversion, and with even spacing the thirds are the whole of it.
-      const c1x = cx(i) + COL / 3;
-      const c1y = y(values[i] + slope[i] / 3);
-      const c2x = cx(i + 1) - COL / 3;
-      const c2y = y(values[i + 1] - slope[i + 1] / 3);
-      d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${cx(i + 1).toFixed(1)} ${y(values[i + 1]).toFixed(1)}`;
-    }
-    return d;
-  };
+  const segment = (from: number, to: number): string => monotonePath(values, slope, from, to, cx, y);
 
   const line = (d: string, dashed: boolean) =>
     `<path d="${d}" fill="none" stroke="${GREEN}" stroke-width="${dashed ? 4 : 5}" ` +

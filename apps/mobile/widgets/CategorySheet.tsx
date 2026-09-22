@@ -77,10 +77,21 @@ export default function CategorySheet({ category, month, onClose }: {
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      {/* Tapping the dimmed area closes, which is the gesture people try first and costs nothing
-          to support. The sheet itself swallows the press so a tap inside never closes it. */}
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+      {/* THE BACKDROP IS A SIBLING BEHIND THE SHEET, NOT A PARENT OF IT.
+
+          Wrapping the sheet in a Pressable — the obvious way to get "tap outside to close" while
+          swallowing taps inside — froze the list. A Pressable is a touch responder, and a drag that
+          begins inside one lets it claim the gesture before the ScrollView can, so the list simply
+          refused to move. Absolutely positioning the dimmed area behind the sheet gets the same two
+          behaviours with no ancestor competing for the scroll. */}
+      <View style={styles.wrap}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        />
+        <View style={styles.sheet}>
           <View style={styles.grabber} />
 
           <View style={styles.header}>
@@ -150,14 +161,15 @@ export default function CategorySheet({ category, month, onClose }: {
               </View>
             )}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(17,24,39,0.45)', justifyContent: 'flex-end' },
+  wrap: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(17,24,39,0.45)' },
   // Capped rather than full-height: the map stays visible above it, so the tap that opened this
   // still has a visible origin and closing does not feel like navigating back from somewhere.
   sheet: { backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: '85%', paddingBottom: 28 },
@@ -173,7 +185,12 @@ const styles = StyleSheet.create({
   ofBudget: { fontSize: 14, fontWeight: '400', color: C.faint },
   over: { fontSize: 13, color: C.over, fontWeight: '600', marginTop: 3 },
   note: { fontSize: 13, color: C.muted, marginTop: 3 },
-  list: { paddingHorizontal: 20 },
+  // `flexShrink: 1` is what makes this SCROLL rather than clip. The sheet is capped at 85% of the
+  // screen, and a ScrollView with no shrink lays itself out at full content height inside that cap:
+  // the rows past the fold are rendered, clipped and unreachable, which looks exactly like a frozen
+  // list. Shrinking bounds it to the space left after the header and summary, and the overflow
+  // becomes scroll.
+  list: { flexShrink: 1, paddingHorizontal: 20 },
   listContent: { paddingTop: 4, paddingBottom: 8 },
   row: { paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: C.hair },
   rowTop: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
