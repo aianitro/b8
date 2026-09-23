@@ -13,6 +13,7 @@ import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbl
 import RecentArrivals from '@/components/RecentArrivals';
 import WatchlistCard from '@/components/WatchlistCard';
 import ExpandableKpiCards from '@/components/ExpandableKpiCards';
+import PushSetup from '@/components/PushSetup';
 import BudgetBar from '@/components/BudgetBar';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
@@ -485,6 +486,18 @@ export default async function DashboardPage() {
             about whether it is on plan; the budget-vs-actual bars said whether it is on plan and
             drew a $378 line the same length as a $29,000 one. */}
         <BudgetTracks rows={budgetVsActual} yearElapsed={yearElapsed} />
+      </div>
+
+      {/* Turning the daily ping on, at the very foot of the page — settings rather than reading,
+          reachable without being in the way. The phone put its own ping setup in the same place
+          for the same reason.
+
+          The PUBLIC key only. It is handed to every browser that subscribes and is not secret; the
+          private half signs the push and never leaves the server. Read here rather than in the
+          client component because `process.env` is not there to read. */}
+      <div className="mt-10 pt-6 border-t border-slate-100">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Notifications</p>
+        <PushSetup vapidPublicKey={process.env.VAPID_PUBLIC_KEY ?? null} />
       </div>
     </div>
   );

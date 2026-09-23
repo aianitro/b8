@@ -84,3 +84,44 @@ self.addEventListener('fetch', (event) => {
 
   // Everything else: untouched, straight to the network.
 });
+
+// ─── The daily ping (§5 step 25, delivered over Web Push for §5 step 26b) ─────────────────────
+//
+// THE TEXT IS A CONSTANT HERE, AND THAT IS THE DESIGN. `lib/domain/pushPing.ts` holds the same two
+// strings on the server and explains why they are a constant rather than a template: a function
+// taking the category or the amount would be one edit away from putting a figure on a lock screen.
+// Because the text lives in the worker, the push itself carries NO PAYLOAD — so there is nothing to
+// encrypt, nothing to leak in transit, and no `p256dh`/`auth` stored anywhere.
+//
+// Duplicated between the worker and the server ON PURPOSE, which is the one place this repo accepts
+// a second copy of a string: a service worker cannot import from the app, and the alternative —
+// sending the text — is the thing the owner's DECISION forbids.
+const PING = { title: 'b8', body: 'Something needs you. Open to see.' };
+
+self.addEventListener('push', (event) => {
+  // `waitUntil` because the worker may be terminated the moment this handler returns, and a
+  // notification that has not been shown yet dies with it.
+  event.waitUntil(self.registration.showNotification(PING.title, {
+    body: PING.body,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    // One notification, replaced rather than stacked. Two mornings without opening the app should
+    // leave one ping saying something needs you, not a pile saying it twice.
+    tag: 'b8-daily',
+    renotify: true,
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  // Focus an open window if there is one rather than opening a second copy of the app — an
+  // installed PWA tapped from a notification should return to where the reader was.
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      for (const client of windows) {
+        if ('focus' in client) return client.focus();
+      }
+      return self.clients.openWindow('/dashboard');
+    })
+  );
+});

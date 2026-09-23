@@ -1,6 +1,7 @@
 import { runSync } from './sync';
 import { runDailyDigest } from './dailyDigest';
 import { sendPingIfDelivered } from './push';
+import { sendWebPushIfDelivered } from './webPush';
 import { writeNetWorthSnapshot } from './netWorth';
 import { createLogger } from './logger';
 
@@ -95,7 +96,18 @@ export async function runDailyJob() {
   // `plan/tasks/P3-25-push-ping/DECISION.md`, the §5.1 escalation for this destination — and it
   // resolves rather than rejects, like the mail above it: a push outage must never cost the sync, the
   // snapshot, or a digest that already went out.
+  // BOTH TRANSPORTS, FROM ONE DECISION. The Expo path addresses `apps/mobile`; the Web Push path
+  // addresses the installed PWA. They share `shouldPing` and the same `delivered` array, so there is
+  // one notion of newsworthiness and two ways of carrying it — not two notions.
+  //
+  // Both during the changeover, deliberately. `apps/mobile` is retired when §5 step 26b ships, and
+  // deleting the only working notification path in the same change that introduces an untested one
+  // is how an owner ends up with neither. When the Expo app goes, this line loses its first half.
+  //
+  // Sequential rather than `Promise.all`: each resolves rather than rejects, so there is nothing to
+  // race and nothing to lose if one is slow.
   await sendPingIfDelivered(delivered);
+  await sendWebPushIfDelivered(delivered);
 }
 
 // Runs inside the Next.js server process — only active while the server is up.

@@ -603,6 +603,60 @@ CREATE TABLE IF NOT EXISTS push_devices (
   revoked_at TIMESTAMPTZ
 );
 
+
+-- Where an installed PWA is reached for the daily ping (§5 step 26b). A sibling of `push_devices`,
+-- not a replacement: that table addresses the Expo app and this one a browser, and both send during
+-- the changeover.
+--
+-- WHAT IS NOT STORED HERE IS THE POINT. A browser's PushSubscription also carries `p256dh` and
+-- `auth` — the keys needed to ENCRYPT A PAYLOAD — and they are absent on purpose. This app sends no
+-- payload: the ping's text is a constant the service worker already holds. Not storing those keys
+-- makes the content-free decision structural rather than habitual, because the server cannot send
+-- content it has nothing to encrypt with, and widening the payload would mean re-subscribing every
+-- device.
+CREATE TABLE IF NOT EXISTS web_push_subscriptions (
+  -- The push service's URL for this device. It ADDRESSES A DEVICE, which makes it
+  -- credential-shaped in exactly the way `push_devices.token` is: anyone holding it can make this
+  -- owner's phone buzz. Primary key rather than a serial, because the endpoint IS the identity and
+  -- a second row for one device would send two pings for one event.
+  --
+  -- No format CHECK. `push_devices` can assert `^ExpoPushToken[...]$` because one vendor issues
+  -- them; an endpoint is whatever Apple, Mozilla or Google chooses today, and a pattern here would
+  -- reject a valid subscription the first time one of them changed a hostname. `https://` is the
+  -- only thing true of all of them and the only thing asserted.
+  endpoint TEXT PRIMARY KEY
+    CONSTRAINT web_push_subscriptions_endpoint_https CHECK (endpoint LIKE 'https://%'),
+
+  -- Which phone, in the owner's words. The same argument as `auth_sessions.label` and
+  -- `push_devices.label`: a list is how a device that should no longer be notified gets found.
+  label TEXT
+    CONSTRAINT web_push_subscriptions_label_length CHECK (label IS NULL OR length(label) BETWEEN 1 AND 60),
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  -- Set on every accepted send: "is anything still listening here?", answerable before somebody
+  -- revokes one.
+  last_sent_at TIMESTAMPTZ,
+
+  -- The CLASSIFICATION of the last failure, never the body of it. A push service's rejection quotes
+  -- the request back, and a table holding no financial data should not start holding it in an error
+  -- string. Same reasoning as `alert_sends.failure_reason` and `push_devices.last_error`.
+  --
+  -- 'gone' is Web Push's 404/410: the subscription is dead and will never work again, which is a
+  -- different fact from a transport failure and is the one that should stop the retries.
+  last_error TEXT
+    CONSTRAINT web_push_subscriptions_last_error_check CHECK (last_error IN ('gone', 'transport', 'rejected')),
+
+  -- A lost phone is one UPDATE, like a revoked session. Kept rather than deleted, so what was
+  -- registered survives the revocation.
+  revoked_at TIMESTAMPTZ
+);
+
+-- Serves the only read on the send path: every live subscription. Partial, because a revoked row is
+-- never a send target and there is no query that wants one.
+CREATE INDEX IF NOT EXISTS idx_web_push_live
+  ON web_push_subscriptions(created_at) WHERE revoked_at IS NULL;
+
 -- The send path's only read: every device still listening.
 CREATE INDEX IF NOT EXISTS push_devices_active ON push_devices (created_at) WHERE revoked_at IS NULL;
 
