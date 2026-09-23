@@ -27,7 +27,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
 import { fetchCategoryNames, setCategory, updateTransactionNote } from '../lib/api';
-import { C, money } from './tokens';
+import { C, MODAL_TOP, money } from './tokens';
 
 export interface EditableTransaction {
   id: number;
@@ -198,7 +198,8 @@ export default function TransactionEditor({ row, onClose }: {
 }
 
 const styles = StyleSheet.create({
-  modal: { flex: 1, backgroundColor: '#fff', padding: 20, paddingTop: 60 },
+  // Outside the shell, like every full-screen Modal, so it carries its own island clearance.
+  modal: { flex: 1, backgroundColor: '#fff', padding: 20, paddingTop: MODAL_TOP },
   label: { fontSize: 18, fontWeight: '700', color: C.ink },
   sub: { fontSize: 12, color: C.faint, marginTop: 3 },
   section: { fontSize: 11, fontWeight: '700', letterSpacing: 0.6, color: C.muted, textTransform: 'uppercase', marginTop: 22, marginBottom: 8 },

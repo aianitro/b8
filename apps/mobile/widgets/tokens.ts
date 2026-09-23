@@ -11,6 +11,30 @@
 // money in sits ABOVE the zero line and money out BELOW it, so position carries the identity, and
 // the figures are listed beneath the plot. Changing either removes a relief the palette depends on.
 
+import Constants from 'expo-constants';
+
+/**
+ * How far the notch or Dynamic Island reaches, measured on the device rather than guessed.
+ *
+ * ─── Why this is here and not four literals ───────────────────────────────────────────────────
+ *
+ * It was four literals: 72 on the token screen, 64 on the budget modal, 60 on the transaction
+ * editor, and nothing at all on the dashboard, arrivals, chat and quick-entry screens — which is
+ * why the island overlapped some screens and not others. The number is not a taste decision, it is
+ * a property of the handset, so it is read from `expo-constants` once and applied in two places:
+ * the app shell, which covers every screen, and each MODAL, which React Native renders in its own
+ * root view where an ancestor's padding cannot reach.
+ *
+ * `expo-constants` rather than `react-native-safe-area-context`: the app already depends on the
+ * former and does not need rotation, per-edge insets or Android display cutouts to clear the top of
+ * a portrait screen. The bottom is already handled — the tab bar carries its own home-indicator
+ * padding.
+ */
+export const TOP_INSET = Constants.statusBarHeight;
+
+/** Clearance for a full-screen Modal, which sits outside the shell and must inset itself. */
+export const MODAL_TOP = TOP_INSET + 16;
+
 export const C = {
   ink: '#111827',
   inkSoft: '#374151',

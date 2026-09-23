@@ -149,23 +149,37 @@ export default function Dashboard() {
                   `today` and `week` stay in the overview contract regardless: the web dashboard
                   still renders them, and a payload field with one client fewer is not a field to
                   delete. */}
-              {/* Uncategorized is a COUNT, and it is last because it is the only actionable-by-you
-                  item here — everything above is a figure to read. */}
+            </KpiRow>
+
+            {/* THE THREE COUNTS, ON THEIR OWN ROW AND ALL ON ONE LINE. They answer one question
+                between them — what is waiting on you — and reading that meant scanning across a
+                row break while two of them sat beside figures they have nothing to do with. Three
+                across is only affordable because these are COUNTS: the two-per-row rule in Kpi.tsx
+                is about not truncating a five-figure amount, and "12" is not one. */}
+            <KpiRow>
+              {/* Uncategorized first: it is the one with work attached rather than a state to
+                  read. */}
               <Kpi
+                compact
                 label="Uncategorized"
                 value={data.stats.uncategorized.toLocaleString()}
-                sub={data.stats.uncategorized > 0 ? 'fix these on Arrivals' : 'all categorised'}
+                // "on Arrivals" rather than "fix these on Arrivals": at a third of a 375pt phone a
+                // card has ~83pt of content, and the longer wording overflowed it by a couple of
+                // points — which costs a second line on ALL THREE cards, since a row is as tall as
+                // its tallest member. The label already supplies the verb.
+                sub={data.stats.uncategorized > 0 ? 'on Arrivals' : 'all filed'}
                 tone={data.stats.uncategorized > 0 ? 'warn' : 'ok'}
               />
-              {/* Beside Uncategorized on purpose, and it is the second of the two: both are counts
-                  of things waiting on the owner rather than figures to read, and this is the one
-                  the owner put there themselves.
+              {/* Beside Uncategorized on purpose, and it is the second of the three: all three are
+                  counts of things waiting on the owner rather than figures to read, and this is the
+                  one the owner put there themselves.
 
                   The only tappable card on the screen. Nothing here can be fixed from the phone, so
                   the tap opens the rows rather than pretending to a "Manage" the web has and this
                   does not — and it opens nothing at all when the count is zero, because a control
                   that responds with an empty list is worse than one that does not respond. */}
               <Kpi
+                compact
                 label="Keep an eye"
                 value={data.watchlist.length.toLocaleString()}
                 sub={
@@ -191,9 +205,12 @@ export default function Dashboard() {
                   twelve by its reader, so counting the rows would read "12" whether twelve arrived
                   or forty did — wrong in the flattering direction, and invisible. */}
               <Kpi
+                compact
                 label="New arrivals"
                 value={data.recentArrivalsTotal.toLocaleString()}
-                sub={data.recentArrivalsTotal === 0 ? 'nothing new' : 'in the last 36 hours'}
+                // Shortened for a third of a row. "36h" is the window the reader needs; "in the
+                // last 36 hours" wrapped to two lines and made every card in the row taller.
+                sub={data.recentArrivalsTotal === 0 ? 'nothing new' : 'last 36h'}
                 onPress={data.recentArrivals.length > 0 ? () => setShowArrivals((v) => !v) : undefined}
                 expanded={showArrivals}
               />

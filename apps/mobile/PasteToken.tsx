@@ -126,7 +126,9 @@ export default function PasteToken({ onSaved }: { onSaved: () => void }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#fff' },
-  content: { padding: 20, paddingTop: 72 },
+  // 24, not the 72 this used to carry: the app shell now clears the island for every screen,
+  // and the old figure was this screen doing it alone.
+  content: { padding: 20, paddingTop: 24 },
   heading: { fontSize: 24, fontWeight: '700', color: '#111827', marginBottom: 10 },
   body: { fontSize: 15, color: '#4b5563', lineHeight: 22, marginBottom: 14 },
   code: {

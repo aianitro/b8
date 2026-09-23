@@ -21,7 +21,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import type { BudgetGridRow } from '@b8/contracts/budgetGrid';
 import { fetchBudgetGrid } from './lib/api';
-import { C, money, signed } from './widgets/tokens';
+import { C, money, signed, MODAL_TOP } from './widgets/tokens';
 import { Kpi, KpiRow } from './widgets/Kpi';
 import BudgetGrid from './widgets/BudgetGrid';
 
@@ -244,7 +244,8 @@ const styles = StyleSheet.create({
   footnote: { fontSize: 12, color: C.faint, marginTop: 26, lineHeight: 18 },
   error: { fontSize: 14, color: C.over, lineHeight: 20 },
   spinner: { marginTop: 40 },
-  modal: { flex: 1, backgroundColor: '#fff', paddingTop: 64, paddingHorizontal: 20 },
+  // A Modal renders outside the shell, so it insets itself — see MODAL_TOP.
+  modal: { flex: 1, backgroundColor: '#fff', paddingTop: MODAL_TOP, paddingHorizontal: 20 },
   modalTitle: { fontSize: 20, fontWeight: '700', color: C.ink, marginBottom: 16 },
   pickRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: C.hair },
   pickCurrent: { backgroundColor: C.surface },

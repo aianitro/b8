@@ -17,6 +17,7 @@ import Chat from './Chat';
 import QuickEntry from './QuickEntry';
 import Dashboard from './Dashboard';
 import Budget from './Budget';
+import { TOP_INSET } from './widgets/tokens';
 
 /**
  * TanStack Query rather than a hand-rolled `useEffect` + `useState`, and step 23 names it for a
@@ -151,12 +152,19 @@ function Tabs() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Root />
+      {/* THE ONE PLACE THE ISLAND IS CLEARED. Every screen in the app hangs off `Root`, so insetting
+          here covers all of them at once — including the token screen, which is reached before the
+          tab bar exists. Modals are the exception and inset themselves: React Native renders them
+          in their own root view, where this padding cannot reach. */}
+      <View style={styles.safeArea}>
+        <Root />
+      </View>
     </QueryClientProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: '#fff', paddingTop: TOP_INSET },
   screen: { flex: 1, backgroundColor: '#fff' },
   centred: { alignItems: 'center', justifyContent: 'center' },
   tabBody: { flex: 1 },
