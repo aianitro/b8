@@ -253,6 +253,18 @@ export const RecentArrivalSchema = z.object({
   amount: moneyString,
   label: z.string(),
   category: z.string().nullable(),
+  /**
+   * The watch flag and the note, so an editor opened from this list starts from the truth.
+   *
+   * AN ARRIVAL CAN ALSO BE WATCHED. This read has no watched bound and `loadWatchlist` has no date
+   * bound, so a row flagged today that also landed today is in both lists. The phone assumed
+   * otherwise for a day — it opened its editor with `watched: false, note: null` on the strength of
+   * a comment asserting the two could not overlap — and on such a row the note field would have
+   * opened blank and the first save would have replaced what was there. Not currently true of this
+   * ledger, which is exactly why it needed checking rather than reasoning about.
+   */
+  watched: z.boolean(),
+  note: z.string().nullable(),
 });
 
 /**
@@ -732,6 +744,15 @@ export const OverviewDataSchema = z.object({
     .array(MonthlySpendPointSchema)
     .length(12, 'monthlySpending is positional, January first — twelve entries or none'),
   recentArrivals: z.array(RecentArrivalSchema),
+  /**
+   * How many rows are actually in the window, as against how many `recentArrivals` carries.
+   *
+   * THE LIST IS CAPPED AT TWELVE and the cap is invisible from the array's length. A card counting
+   * `recentArrivals.length` reads "12" whether twelve arrived or forty did — a figure that is
+   * silently wrong in the flattering direction, which is the shape of defect this payload exists to
+   * avoid. Counted over the same predicate, before the limit.
+   */
+  recentArrivalsTotal: z.int().min(0),
   budgetVsActual: z.array(BudgetVsActualRowSchema),
   monthOutlook: MonthOutlookSchema,
   /**

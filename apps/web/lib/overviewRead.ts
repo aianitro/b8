@@ -228,12 +228,15 @@ export interface OverviewSources {
     isoDow: number;
   };
   monthlySpending: { month: string; operational: number; received: number }[];
+  recentArrivalsTotal: number;
   recentArrivals: {
     id: number;
     date: string;
     amount: number;
     label: string;
     category: string | null;
+    watched: boolean;
+    note: string | null;
   }[];
   budgetVsActual: { category: string; budget: number; spent: number }[];
   monthOutlook: MonthOutlook;
@@ -508,11 +511,14 @@ export function composeOverview(sources: OverviewSources): OverviewData {
       operational: wireMoney(m.operational),
       received: wireMoney(m.received),
     })),
+    recentArrivalsTotal: sources.recentArrivalsTotal,
     recentArrivals: sources.recentArrivals.map((r) => ({
       id: r.id,
       date: r.date,
       amount: wireMoney(r.amount),
       label: r.label,
+      watched: r.watched,
+      note: r.note,
       // `null` for an uncategorized row, never `''` and never the string `'Uncategorized'`.
       category: r.category,
     })),
@@ -618,14 +624,28 @@ async function readStats(asOf: AsOf): Promise<OverviewSources['stats']> {
  * budget". Only `hidden = FALSE` applies. Copying the other sections' predicate onto it by
  * resemblance is one of the failure modes this endpoint was specified to avoid.
  */
-async function readRecentArrivals(): Promise<OverviewSources['recentArrivals']> {
+async function readRecentArrivals(): Promise<{
+  rows: OverviewSources['recentArrivals'];
+  total: number;
+}> {
+  // COUNTED AND LISTED IN ONE ROUND TRIP, over one predicate written once. The count exists because
+  // the list is capped at twelve and the cap is invisible in the array's length: a card counting
+  // the rows reads "12" whether twelve arrived or forty did. Two queries would be two copies of
+  // the WHERE clause, and the day they drift the count stops describing the list beneath it.
   const { rows } = await db.query<{
     id: number; date: string; amount: string; label: string;
-    category: string | null; created_at: string;
+    category: string | null; created_at: string; watched: boolean; note: string | null;
+    total: string;
   }>(`
     SELECT t.id, t.date::text, t.amount::text,
            COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
-           t.mapped_category AS category, t.created_at::text
+           t.mapped_category AS category, t.created_at::text,
+           -- An arrival can ALSO be watched: this read has no watched bound and loadWatchlist has
+           -- no date bound. Carried so an editor opened from this list starts from the truth
+           -- rather than from an assumption that the two lists cannot overlap.
+           (t.watched_at IS NOT NULL) AS watched,
+           t.note,
+           COUNT(*) OVER ()::text AS total
       FROM transactions t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
      WHERE t.created_at > NOW() - INTERVAL '36 hours'
@@ -633,10 +653,16 @@ async function readRecentArrivals(): Promise<OverviewSources['recentArrivals']> 
      ORDER BY t.amount DESC, t.id
      LIMIT 12
   `);
-  return rows.map((r) => ({
-    id: r.id, date: r.date, amount: Number(r.amount),
-    label: r.label, category: r.category,
-  }));
+  return {
+    // `COUNT(*) OVER ()` is evaluated BEFORE the LIMIT, so it is the size of the window rather than
+    // of the page. Zero rows means zero arrivals, which is the only case the window function cannot
+    // report — hence the fallback rather than a non-null assertion.
+    total: rows.length > 0 ? Number(rows[0].total) : 0,
+    rows: rows.map((r) => ({
+      id: r.id, date: r.date, amount: Number(r.amount),
+      label: r.label, category: r.category, watched: r.watched, note: r.note,
+    })),
+  };
 }
 
 /** Today, against the same weekday's recent average — rendered by the dashboard and served by the API. */
@@ -845,7 +871,8 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
     today,
     week,
     monthlySpending,
-    recentArrivals,
+    recentArrivals: recentArrivals.rows,
+    recentArrivalsTotal: recentArrivals.total,
     budgetVsActual,
     monthOutlook: monthRead.outlook,
     // Scoped to the as-of month AND to categories with an allocation. `categoryPacing` emits one

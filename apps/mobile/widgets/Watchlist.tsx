@@ -22,8 +22,10 @@
 // AMBER PAST TWO WEEKS, NEVER RED, and the threshold is `@b8/contracts/overview`'s rather than a
 // second 14 typed here. Nothing on a watchlist is an error.
 
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { type OverviewData, watchlistIsStale } from '@b8/contracts/overview';
+import TransactionEditor, { type EditableTransaction } from './TransactionEditor';
 import { C } from './tokens';
 
 type Watched = OverviewData['watchlist'][number];
@@ -36,10 +38,19 @@ const exact = (n: number) =>
   `$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function Watchlist({ items }: { items: Watched[] }) {
-  if (items.length === 0) return null;
+  // Held here rather than lifted to the dashboard: this widget owns the rows, and a screen that
+  // does not render the list has no business knowing which of its rows is being edited.
+  const [editing, setEditing] = useState<EditableTransaction | null>(null);
+
+  // NOT AN EARLY RETURN WHEN THE LIST EMPTIES. Unflagging the last entry from the editor
+  // invalidates `overview`, the list refetches to nothing — and returning null here would unmount
+  // the modal the owner is still standing in, mid-edit, before they had finished changing its
+  // category. The rows go; the editor stays until it is dismissed.
+  if (items.length === 0 && editing === null) return null;
 
   return (
     <View style={styles.list}>
+      {items.length > 0 && <Text style={styles.hint}>Tap an entry to edit it.</Text>}
       {items.map((item) => {
         const stale = watchlistIsStale(item.daysOpen);
         // Money in keeps its sign and goes green. A refund rendered as a bare figure in a list of
@@ -48,7 +59,22 @@ export default function Watchlist({ items }: { items: Watched[] }) {
         const amount = Number(item.amount);
         const inbound = amount < 0;
         return (
-          <View key={item.id} style={styles.row}>
+          // THE LIST YOU ACT ON IS THE LIST YOU EDIT. Until now a row here could only be changed
+          // by finding it again on Arrivals or under its category tile — and a watchlist whose
+          // entries cannot be resolved where they are read is a list that grows.
+          <Pressable
+            key={item.id}
+            onPress={() => setEditing({
+              id: item.id, label: item.label, date: item.date, amount: item.amount,
+              category: item.category,
+              // Every row on this list is flagged by definition — that is what the list is.
+              watched: true,
+              note: item.note,
+            })}
+            accessibilityRole="button"
+            accessibilityHint="Edit its category, note, or flag"
+            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+          >
             {/* Two lines rather than the web's five columns. At 360px the label, the note, the
                 amount and the age cannot share a row without every one of them truncating; the
                 web has the width and this does not. Identity and money on top, reason and age
@@ -66,9 +92,11 @@ export default function Watchlist({ items }: { items: Watched[] }) {
               </Text>
               <Text style={[styles.age, stale && styles.ageStale]}>{age(item.daysOpen)}</Text>
             </View>
-          </View>
+          </Pressable>
         );
       })}
+
+      {editing && <TransactionEditor row={editing} onClose={() => setEditing(null)} />}
     </View>
   );
 }
@@ -76,6 +104,8 @@ export default function Watchlist({ items }: { items: Watched[] }) {
 const styles = StyleSheet.create({
   list: { marginTop: 12 },
   row: { paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: C.hair },
+  rowPressed: { opacity: 0.5 },
+  hint: { fontSize: 11, color: C.faint, marginBottom: 2 },
   top: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
   bottom: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginTop: 2 },
   label: { flex: 1, fontSize: 15, color: C.ink },

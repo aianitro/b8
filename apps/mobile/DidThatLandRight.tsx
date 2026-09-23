@@ -64,8 +64,11 @@ export default function DidThatLandRight() {
     queryFn: fetchOverview,
   });
 
-  const arrivals = (data?.recentArrivals ?? []).map(asRow);
-  const watched = (data?.watchlist ?? []).map(asRow);
+  // NOT mapped through `asRow` here. `Row` is the shape this screen DISPLAYS — the fields the two
+  // lists agree on — and converting up front threw away `watched` and `note`, which is what the
+  // editor needs to open from the truth rather than from a default. Converted per row at render.
+  const arrivals = data?.recentArrivals ?? [];
+  const watched = data?.watchlist ?? [];
 
   return (
     <View style={styles.screen}>
@@ -86,8 +89,13 @@ export default function DidThatLandRight() {
           <>
             <Text style={styles.sectionHeading}>Watching</Text>
             {watched.map((t) => (
-              <TransactionRow key={`w${t.id}`} row={t}
-                onPress={() => setEditing({ ...asRow(t), watched: true, note: t.note ?? null })} />
+              <TransactionRow key={`w${t.id}`} row={asRow(t)}
+                onPress={() => setEditing({
+                  id: t.id, label: t.label, date: t.date, amount: t.amount,
+                  category: t.category, note: t.note,
+                  // Every row in this section is flagged — that is what the section is.
+                  watched: true,
+                })} />
             ))}
           </>
         )}
@@ -98,10 +106,17 @@ export default function DidThatLandRight() {
               Just arrived
             </Text>
             {arrivals.map((t) => (
-              <TransactionRow key={`a${t.id}`} row={t}
-                // An arrival is not on the watchlist — `recentArrivals` and `watchlist` are
-                // separate reads, and a row that is both appears in the section above.
-                onPress={() => setEditing({ ...asRow(t), watched: false, note: null })} />
+              <TransactionRow key={`a${t.id}`} row={asRow(t)}
+                // THE FLAG AND THE NOTE COME FROM THE ROW, not from an assumption. This said
+                // `watched: false, note: null` for a day, on the reasoning that an arrival cannot
+                // also be on the watchlist — but this read has no watched bound and the watchlist
+                // read has no date bound, so a row flagged today that also landed today is in
+                // both. On such a row the note field opened blank and the first save replaced what
+                // was there. The payload carries both fields now.
+                onPress={() => setEditing({
+                  id: t.id, label: t.label, date: t.date, amount: t.amount,
+                  category: t.category, watched: t.watched, note: t.note,
+                })} />
             ))}
           </>
         )}

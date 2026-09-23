@@ -109,10 +109,14 @@ function fabricatedSources(): OverviewSources {
       operational: i <= 8 ? 4200.5 + i : 0,
       received: i <= 8 ? 9000 : 0,
     })),
+    // Deliberately larger than the array: the list is capped at twelve and the count is not, so a
+    // fixture where they agree would not exercise the distinction the field exists for.
+    recentArrivalsTotal: 17,
     recentArrivals: [
-      { id: 9001, date: '2026-09-12', amount: 142.19, label: 'Fabricated Grocer', category: 'Fabricated Groceries' },
+      { id: 9001, date: '2026-09-12', amount: 142.19, label: 'Fabricated Grocer', category: 'Fabricated Groceries', watched: false, note: null },
       // Negative — income, this ledger's convention. And uncategorized, so `category` is null.
-      { id: 9002, date: '2026-09-11', amount: -742.5, label: 'Fabricated Payroll', category: null },
+      // Watched AND arriving: the two lists overlap, which the phone briefly assumed they could not.
+      { id: 9002, date: '2026-09-11', amount: -742.5, label: 'Fabricated Payroll', category: null, watched: true, note: 'double paid?' },
     ],
     budgetVsActual: [
       { category: 'Fabricated Groceries', budget: 12000, spent: 8450.12 },

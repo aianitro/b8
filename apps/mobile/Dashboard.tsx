@@ -29,6 +29,7 @@ import PlChart, { PlFigures } from './widgets/PlChart';
 import BudgetTracks from './widgets/BudgetTracks';
 import CategoryHeatmap from './widgets/CategoryHeatmap';
 import Watchlist, { age } from './widgets/Watchlist';
+import Arrivals from './widgets/Arrivals';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -63,6 +64,7 @@ export default function Dashboard() {
   // Collapsed by default. The count is what earns permanent space; the rows are what you open when
   // the count is surprising.
   const [showWatchlist, setShowWatchlist] = useState(false);
+  const [showArrivals, setShowArrivals] = useState(false);
   const { data, error, isFetching, refetch } = useQuery({
     queryKey: ['overview'],
     queryFn: fetchOverview,
@@ -181,9 +183,26 @@ export default function Dashboard() {
                 onPress={data.watchlist.length > 0 ? () => setShowWatchlist((v) => !v) : undefined}
                 expanded={showWatchlist}
               />
+              {/* The third of the three counts of things waiting on the owner, beside Uncategorized
+                  and Keep an eye rather than in a section of its own — they are glanced at together
+                  and usually only one of them is interesting.
+
+                  THE VALUE IS `recentArrivalsTotal`, NOT the array's length. The list is capped at
+                  twelve by its reader, so counting the rows would read "12" whether twelve arrived
+                  or forty did — wrong in the flattering direction, and invisible. */}
+              <Kpi
+                label="New arrivals"
+                value={data.recentArrivalsTotal.toLocaleString()}
+                sub={data.recentArrivalsTotal === 0 ? 'nothing new' : 'in the last 36 hours'}
+                onPress={data.recentArrivals.length > 0 ? () => setShowArrivals((v) => !v) : undefined}
+                expanded={showArrivals}
+              />
             </KpiRow>
 
             {showWatchlist && <Watchlist items={data.watchlist} />}
+            {showArrivals && (
+              <Arrivals items={data.recentArrivals} total={data.recentArrivalsTotal} />
+            )}
 
             {/* The month's map. On the web this LEADS the dashboard, above the stat cards; here it
                 sits under them, because a 300px picture at the top of a phone pushes Projected P/L
