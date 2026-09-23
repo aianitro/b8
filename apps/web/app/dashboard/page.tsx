@@ -12,6 +12,7 @@ import AlertBell from '@/components/AlertBell';
 import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbles';
 import RecentArrivals from '@/components/RecentArrivals';
 import WatchlistCard from '@/components/WatchlistCard';
+import ExpandableKpiCards from '@/components/ExpandableKpiCards';
 import BudgetBar from '@/components/BudgetBar';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
@@ -206,7 +207,7 @@ export default async function DashboardPage() {
   // page's are one calendar, not two that disagree around midnight.
   const {
     stats, today: todayStats, week: weekStats, monthlySpending: monthly, budgetVsActual,
-    recentArrivals, watchlist, yearEnd, offCycleElsewhere, monthCategories,
+    recentArrivals, recentArrivalsTotal, watchlist, yearEnd, offCycleElsewhere, monthCategories,
     feedFindings, driftFindings, jobHealth,
   } = dashboardFromWire(await loadOverview(now));
 
@@ -291,19 +292,15 @@ export default async function DashboardPage() {
           attached. */}
       <CategoryBubbles categories={bubbleCategories} />
 
-      {/* Directly under the bubbles, and above the feed. The bubbles and the arrivals are both
-          things the app computed; this is the one thing on the page the owner put here themselves,
-          and a pending return is a claim that one of those figures is provisional — it should be
-          read in the same breath as the picture it qualifies.
+      {/* THE WATCHLIST AND THE ARRIVALS FEED MOVED INTO THE KPI ROW BELOW, as counts that open.
+          They used to sit here open, which cost the top of the page to two lists that are usually
+          short and occasionally long — the dashboard's height moved with the owner's week, above
+          the picture it was supposed to be framing. As counts they sit beside Uncategorized, where
+          the other "waiting on you" figures already live, and the rows are one click away.
 
-          Rendered only when there is something on it. Unlike the arrivals feed, whose emptiness is
-          news, an empty watchlist says only that nothing has been flagged, and a permanent card
-          reading "nothing to watch" is furniture under the page's main picture. */}
-      {watchlist.length > 0 && <WatchlistCard items={watchlist} />}
-
-      {/* Under the bubbles: they say which categories carry the money, this says what is new
-          since the reader last looked. */}
-      <RecentArrivals arrivals={recentArrivals} staleFeed={feedFindings.length > 0} />
+          The argument that put the watchlist here — that a pending return qualifies the bubbles and
+          should be read in the same breath — still holds, and is why it is in the row immediately
+          under them rather than at the foot of the page. */}
 
       {/* One panel where there were three, so the grid that sized itself to the survivors is gone
           with them — a single-column grid is a div, and the arithmetic behind it was machinery for
@@ -368,6 +365,24 @@ export default async function DashboardPage() {
           value={stats.uncategorized.toLocaleString()}
           highlight={stats.uncategorized > 0 ? 'amber' : 'green'}
           href="/transactions?filter=uncategorized"
+        />
+        {/* The other two counts of things waiting on the owner, beside the first. These OPEN rather
+            than navigate, because both answer their question in a list short enough to read in
+            place — and leaving the dashboard to read six rows loses the picture they qualify.
+
+            The panels are the same two components that used to sit above, rendered here and passed
+            through: they are server components, and handing them in already rendered keeps them
+            that way. `watchlist` is ordered oldest first by its reader, so `[0]` is the age. */}
+        <ExpandableKpiCards
+          watchCount={watchlist.length}
+          watchOldest={watchlist[0]?.daysOpen ?? 0}
+          watchPanel={<WatchlistCard items={watchlist} />}
+          arrivalsCount={recentArrivalsTotal}
+          arrivalsShown={recentArrivals.length}
+          arrivalsPanel={
+            <RecentArrivals arrivals={recentArrivals} staleFeed={feedFindings.length > 0} />
+          }
+          staleFeed={feedFindings.length > 0}
         />
       </div>
 

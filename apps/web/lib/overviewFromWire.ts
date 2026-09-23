@@ -100,6 +100,9 @@ export function dashboardFromWire(data: OverviewData) {
       received: money(m.received),
     })),
     recentArrivals: data.recentArrivals.map((r) => ({ ...r, amount: money(r.amount) })),
+    // The count BEFORE the reader's limit of twelve, so a card counting arrivals says how many
+    // there are rather than how many it was handed. See the field's note in the contract.
+    recentArrivalsTotal: data.recentArrivalsTotal,
     budgetVsActual: data.budgetVsActual.map((b) => ({
       category: b.category,
       budget: money(b.budget),
