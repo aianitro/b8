@@ -319,10 +319,16 @@ export default async function DashboardPage() {
           to sit here counted the current month as fully elapsed — 33% of the year on 1 April
           against a true 25% — which inflated expected spend and flattered the pace. It is deleted
           rather than repaired: the per-category month above is the figure the page exists for. */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+      {/* TWO ROWS: the targets, then the counts. They were one three-column grid, which put
+          Uncategorized beside two money figures it has nothing to do with and pushed the other two
+          counts onto a line of their own — so the three questions of the form "what is waiting on
+          you" were read across a row break. Splitting by KIND rather than by count is what lets
+          all three sit together. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         {/* The same figure /budget's header carries, from the same reader — where the operational
-            year closes if the plan holds. It leads the row because it is the only one of these
-            four that is a target rather than a count. */}
+            year closes if the plan holds. It leads the page's figures because it is the one the
+            others are judged against; the row it shares is now the two TARGETS, the counts having
+            moved to their own line below. */}
         <KpiCard
           label="Projected P/L"
           value={`${yearEnd.profitLoss < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.profitLoss))}`}
@@ -355,9 +361,21 @@ export default async function DashboardPage() {
           sub={`${fmt(stats.spent)} spent of ${fmt(stats.budget)}`}
           footer={<BudgetBar spent={stats.spent} budget={stats.budget} />}
         />
-        {/* The count alone. A percentage of 1,476 transactions rounds to 0% at one unfiled row and
+      </div>
+
+      {/* THE THREE COUNTS OF THINGS WAITING ON THE OWNER, on one line. Three columns at every
+          width rather than a responsive 2-then-3: the point of the row is that they are read
+          together, and a breakpoint that splits them two-and-one defeats it on exactly the narrow
+          screens where scanning is hardest. These are counts, so the columns can be narrow — the
+          argument against three across is about not truncating a five-figure amount. */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        {/* Uncategorized leads: it is the one with work attached rather than a state to read, and
+            the only one of the three that NAVIGATES rather than opening — its list is the
+            transactions page's own filter, which is where the filing actually happens.
+
+            The count alone. A percentage of 1,476 transactions rounds to 0% at one unfiled row and
             still at six, so the card used to read "0%" in amber while there was work waiting.
-            
+
             No denominator either: the total is context nobody acts on. Filing is per transaction,
             so the count IS the size of the job, and "1" says it without a ratio to interpret. */}
         <KpiCard
