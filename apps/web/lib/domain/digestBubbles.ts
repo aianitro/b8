@@ -7,13 +7,20 @@ import { STATUS_HEX } from '../chartColors';
  *
  * Pure. `lib/digestImage.ts` rasterises it; `lib/domain/digest.ts` places the `cid:` reference.
  *
- * ─── The same packer and the same colour rule, imported not copied ────────────────────────────
+ * ─── THE LAST CALLER OF THE CIRCLE PACKER, and why it keeps drawing circles ───────────────────
  *
- * `packCircles` is the one `components/CategoryBubbles.tsx` uses, and `bubbleColor` was moved out
- * of that component into `lib/domain/bubbleStatus.ts` so both surfaces read one definition. A
- * second implementation of either is this repo's standing defect aimed at a picture: nothing would
- * fail, the email and the screen would simply start disagreeing about which categories are in
- * trouble, and nobody would notice until they were compared.
+ * `packCircles` was shared with the dashboard's `CategoryBubbles` until that component was
+ * replaced by a treemap (`components/CategoryHeatmap.tsx`) on 2026-09-23. This is now its only
+ * caller, and it stays a caller deliberately: a treemap spends every pixel, which leaves a small
+ * category no room for a name, and an email has no hover and no tap to recover one. The packer
+ * leaves a gap beneath each circle precisely so the name can be printed there. What is right on a
+ * screen you can point at is wrong in a picture you cannot.
+ *
+ * The GRADING is still shared and must be. `bubbleColor` reads `@b8/contracts/bubbleStatus`, the
+ * same rule the dashboard and the phone call. A second implementation of it is this repo's
+ * standing defect aimed at a picture: nothing would fail, the email and the screen would simply
+ * start disagreeing about which categories are in trouble, and nobody would notice until they
+ * were compared.
  *
  * What is NOT shared is the drawing. The component renders interactive SVG with links, hover
  * states and a legend built from Tailwind classes; none of that survives a mail client, and an
