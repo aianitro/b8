@@ -145,25 +145,28 @@ export default function CategoryHeatmap({ categories, month }: {
   const size = useBoxSize(mapRef);
 
   /**
-   * TWO CHANNELS INTO ONE LINE, because this surface has two kinds of input and the phone has one.
+   * ONE ACTIVE TILE, SET BY WHICHEVER INPUT THE READER HAS, AND STICKY ONCE SET.
    *
-   * `hover` is the pointer's, transient. `picked` is a click or a tap, sticky. A mouse sets the
-   * first by moving, so the line follows the cursor across the map and the reader compares six
-   * categories in one gesture — which is what a treemap is FOR, and what the phone had to spend a
-   * whole tap on because it has no pointer.
+   * A mouse sets it by arriving, so the line follows the cursor across the map and the reader
+   * compares six categories in one gesture — which is what a treemap is FOR, and what the phone
+   * has to spend a whole tap on because it has no pointer. Touch and the keyboard set it by tap
+   * and by focus. The click rule is then the phone's, verbatim: the tile that is already active
+   * opens its charges, any other becomes active. On a mouse the pointer has already made the tile
+   * under it active, so one click opens it — the bubbles' behaviour, unchanged. On touch nothing
+   * is active until something is tapped, so the first tap names and the second opens. One rule,
+   * right on all three, with no `pointer: coarse` branch to get wrong.
    *
-   * The click rule is then the phone's rule verbatim: a tile that is already the active one opens
-   * its charges, any other tile becomes active. On a mouse the hover has already made the tile
-   * under the cursor active, so a single click opens it — the bubbles' behaviour, unchanged. On
-   * touch, nothing is active until something is tapped, so the first tap names it and the second
-   * opens it. One rule, correct on both, with no `pointer: coarse` branch to get wrong.
+   * IT DOES NOT CLEAR ON LEAVING A TILE, and that is the part that took a second pass. Clearing on
+   * `pointerleave` is the obvious reading of "hover", and it made the link on the line above the
+   * map unreachable with a mouse: moving the cursor off the tile to go and click it was the
+   * gesture that deleted it. Staying put also stops the line flickering as the cursor crosses the
+   * seams between tiles, and costs only that the map still names a category after the pointer has
+   * gone — which the ring on that tile makes honest rather than stale.
    *
    * `pointerType` is checked rather than trusting `mouseenter`: iOS synthesises pointer events on
-   * tap, and treating those as hover would make the first tap both name AND open a category.
+   * tap, and treating those as hover would make one tap both name AND open a category.
    */
-  const [hover, setHover] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
-  const activeKey = hover ?? picked;
+  const [activeKey, setActiveKey] = useState<string | null>(null);
 
   // A 100x100 box: the output is percentages, so nothing here depends on the rendered width.
   const tiles = useMemo(
@@ -264,11 +267,9 @@ export default function CategoryHeatmap({ categories, month }: {
             <button
               key={t.key}
               type="button"
-              onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHover(t.key); }}
-              onPointerLeave={(e) => { if (e.pointerType === 'mouse') setHover(null); }}
-              onFocus={() => setHover(t.key)}
-              onBlur={() => setHover(null)}
-              onClick={() => (isActive ? router.push(drillHref([t.key], month)) : setPicked(t.key))}
+              onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActiveKey(t.key); }}
+              onFocus={() => setActiveKey(t.key)}
+              onClick={() => (isActive ? router.push(drillHref([t.key], month)) : setActiveKey(t.key))}
               aria-label={`${cat.category}, ${fmt(cat.actual)} of ${fmt(cat.budgeted)}, ${LABEL[state]}`}
               className="absolute rounded-[3px] overflow-hidden cursor-pointer focus:outline-none"
               style={{
