@@ -47,7 +47,9 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
-  themeColor: '#ffffff',
+  // The same slate-900 the manifest declares and the mobile header paints. White was wrong here:
+  // the top of every mobile page is that dark bar, so a white chrome tint left a seam above it.
+  themeColor: '#0f172a',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

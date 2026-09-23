@@ -24,7 +24,31 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = join(HERE, '..');
 
-const INK = '#111827';   // the wordmark's ground, matching C.ink on the phone
+/**
+ * THE BRAND GROUND, AND IT IS DELIBERATELY NOT A TOKEN FROM THE DESIGN SYSTEM.
+ *
+ * Every colour in `.claude/skills/uiux-promax` means something: blue is operational, violet
+ * capital, green income, orange expense, red over budget, amber warning. An icon is PERMANENT, so
+ * painting it in any of those makes a permanent claim — a green icon reads "on track" during a
+ * month that is over budget. The skill's own rule that status colours are reserved decides it.
+ *
+ * So cyan-700 sits outside that set on purpose. It is the BRAND, not a state, and nothing else in
+ * the app may use it.
+ *
+ * ─── Why it replaced the near-black, measured rather than preferred ──────────────────────────
+ *
+ * The mark was `#111827`, which is 17.7:1 against a white wallpaper and 1.18:1 against a black
+ * one — on a dark Home Screen it did not look dark, it disappeared. An icon has no say in what sits
+ * behind it, so the figure that matters is the WORSE of the two, and cyan-700's is 3.92:1: the only
+ * candidate clearing 3:1 against both extremes. Teal-600 was close but reads as the income green at
+ * 60pt; indigo-600 reads as the operational blue.
+ *
+ * ─── The email and the phone keep the ink, and that is not an inconsistency ──────────────────
+ *
+ * `digest.ts`'s masthead and the phone dashboard's mark are drawn on a WHITE PAGE, where dark is
+ * correct and this would be worse. Same mark, different ground, different answer.
+ */
+const INK = '#0e7490';   // cyan-700 — brand only, never a status
 const PAPER = '#ffffff';
 
 /**
