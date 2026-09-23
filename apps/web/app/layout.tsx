@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import Sidebar from '@/components/Sidebar';
+import ServiceWorkerRegistrar from '@/components/ServiceWorkerRegistrar';
 import './globals.css';
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
@@ -57,6 +58,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           hides behind the toolbar. The dynamic unit is the one that tracks what is actually
           visible, and it costs nothing on a desktop where the two are equal. */}
       <body className="flex h-dvh overflow-hidden bg-slate-50 text-slate-900">
+        <ServiceWorkerRegistrar />
         <Sidebar />
         {/* `pt-14` clears the fixed mobile header, plus the island above it; both vanish at `md:`
             where the header does not exist and the sidebar is back in the flow. The inset is added

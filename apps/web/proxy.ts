@@ -93,6 +93,12 @@ export const PRE_AUTH_PATHS: ReadonlySet<string> = new Set([
   //     than after it.
   //
   // The host is tailnet-only regardless, so the audience for these is already inside the network.
+  // The worker itself and the page it falls back to. `/sw.js` MUST be reachable unauthenticated:
+  // a redirect is not a valid service worker script and registration fails outright, silently. The
+  // offline page is precached by that worker and carries no data by construction — it exists to say
+  // the server is unreachable, which is the one moment no session can be checked anyway.
+  '/sw.js',
+  '/offline',
   '/manifest.webmanifest',
   '/apple-icon.png',
   '/icon-192.png',
