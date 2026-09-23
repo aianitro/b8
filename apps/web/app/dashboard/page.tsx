@@ -299,12 +299,6 @@ export default async function DashboardPage() {
         </AlertBell>
       </div>
 
-      {/* The month, category by category. It leads the page now that the verdict card is gone:
-          the card said "2 categories heading $219 over" and these bubbles say which two, how big
-          each is, and what everything around them is doing — the same finding with the evidence
-          attached. */}
-      <CategoryBubbles categories={bubbleCategories} />
-
       {/* THE WATCHLIST AND THE ARRIVALS FEED MOVED INTO THE KPI ROW BELOW, as counts that open.
           They used to sit here open, which cost the top of the page to two lists that are usually
           short and occasionally long — the dashboard's height moved with the owner's week, above
@@ -416,6 +410,15 @@ export default async function DashboardPage() {
           staleFeed={feedFindings.length > 0}
         />
       </div>
+
+      {/* THE MONTH, CATEGORY BY CATEGORY — moved BELOW the five counts on 2026-09-23 at the
+          owner's request, to match the phone's order.
+
+          It used to lead the page, on the argument that the bubbles say which categories are going
+          wrong with the evidence attached. That still holds, but it is an argument about depth
+          rather than order: the five figures above are read in a glance and this is read for a
+          minute, so the glance goes first and the picture answers the question it raises. */}
+      <CategoryBubbles categories={bubbleCategories} />
 
       {/* Charts */}
       <div className="space-y-6">

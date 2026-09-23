@@ -64,12 +64,24 @@ export default function BudgetTracks({ rows, yearElapsed }: {
             <Link
               key={r.category}
               href={`/transactions?category=${encodeURIComponent(r.category)}&from=dashboard`}
-              className="flex items-center gap-3 py-1 rounded-lg hover:bg-slate-50 transition-colors"
+              // WRAPS ON A PHONE, ONE LINE FROM `sm:` UP. This row carried three `shrink-0` fixed
+              // widths — 128 + 160 + 48 — plus 36px of gaps: a 372px minimum inside a 308px row at
+              // phone width. It overflowed the card, the card overflowed the page, and the whole
+              // dashboard scrolled sideways. Worse, the casualty was the BAR: `flex-1 min-w-0`
+              // shrank to exactly 0px, so the one element carrying the data disappeared while the
+              // labels around it stayed intact.
+              //
+              // `flex-wrap` plus `basis-full` on the track puts the bar on its own line below the
+              // labels at phone width, which is where it has room to mean something, and
+              // `sm:basis-0` returns it to the single-line layout above that.
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1 rounded-lg hover:bg-slate-50 transition-colors"
               title={`${r.category}: ${fmt(r.spent)} of ${fmt(r.budget)} — ${Math.round(used * 100)}% used, ${pacePct}% of the year gone`}
             >
-              <span className="w-32 shrink-0 text-xs text-slate-600 truncate">{r.category}</span>
+              <span className="w-24 sm:w-32 shrink-0 text-xs text-slate-600 truncate">{r.category}</span>
 
-              <span className="flex-1 min-w-0">
+              {/* `order-last basis-full` below `sm:` — the bar drops to its own full-width line
+                  rather than being squeezed between two fixed columns. */}
+              <span className="order-last sm:order-none basis-full sm:basis-0 flex-1 min-w-0">
                 <span className="block relative h-3.5 rounded-sm bg-slate-100/70" style={{ width: `${trackPct}%` }}>
                   <span className="absolute inset-y-0 left-0 rounded-sm"
                         style={{ width: `${fillPct}%`, background: color, opacity: 0.85 }} />
@@ -84,7 +96,9 @@ export default function BudgetTracks({ rows, yearElapsed }: {
                 </span>
               </span>
 
-              <span className="w-40 shrink-0 text-right text-[11px] font-mono text-slate-500">
+              {/* `ml-auto` below `sm:` pushes the figures to the right of the label line now that
+                  the flexible track no longer sits between them. */}
+              <span className="ml-auto sm:ml-0 sm:w-40 shrink-0 text-right text-[11px] font-mono text-slate-500">
                 {fmt(r.spent)}<span className="text-slate-300">/{fmt(r.budget)}</span>
               </span>
               <span className={`w-12 shrink-0 text-right text-[11px] font-mono ${
