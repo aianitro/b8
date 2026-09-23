@@ -257,8 +257,10 @@ export default async function DashboardPage() {
   // and the mobile client alike.
   const bubbleCategories: BubbleCategory[] = monthCategories;
 
+  // `p-4` on a phone, the original `p-8` from `sm:` up. 32px of padding each side costs 64px of a
+  // 390px screen — a sixth of it — spent on whitespace beside figures that need the room.
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-6xl mx-auto">
       {/* Header, with the warnings behind a counter in the corner.
           
           They can legitimately sit here for days — a degraded bank feed clears on Plaid's
@@ -266,7 +268,7 @@ export default async function DashboardPage() {
           permanently repeats what the owner already knows. A count says it in one glyph. Feed
           health leads inside the popover, because a stale feed is what explains the drift under
           it. */}
-      <div className="flex items-start justify-between gap-6 mb-8">
+      <div className="flex items-start justify-between gap-4 sm:gap-6 mb-6 sm:mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
           <p className="text-sm text-slate-500 mt-1">
@@ -420,7 +422,11 @@ export default async function DashboardPage() {
             stop rather than a step in the sequence.
 
             Still a pair, still side by side: today only means something against the week. */}
-        <div className="grid grid-cols-2 gap-4">
+        {/* Stacked below `sm:`, side by side above it. These carry CURRENCY, so the two-per-row
+            rule the counts row is exempt from applies here: at a third of a phone a four-figure
+            amount with cents overflows its card at `text-3xl`, and a truncated figure is worse
+            than a taller page. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <KpiCard
             label="Today"
             value={fmt(todayStats.spent)}

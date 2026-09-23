@@ -635,8 +635,23 @@ export default function TransactionTable({ transactions, categories, accounts, p
 
   return (
     <div className="relative">
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
-        <table className="w-full text-sm">
+      {/* `-mx-4 md:mx-0` lets the scroll region reach the screen edges on a phone, so the last
+          column can be brought fully into view instead of stopping against a 16px gutter. */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto -mx-4 md:mx-0">
+        {/* `min-w-[56rem]` IS WHAT MAKES THE SCROLL WORK. The wrapper has had `overflow-x-auto`
+            all along and it did nothing, because `w-full` told the table to be exactly as wide as
+            its container — so nine columns compressed into 390px rather than overflowing it, and
+            every cell wrapped to three lines. A table that cannot exceed its container has nothing
+            to scroll.
+
+            HORIZONTAL SCROLL RATHER THAN RESTACKING INTO CARDS, deliberately, and it is the weaker
+            of the two. Cards read better on a phone — the phone app's own lists are two-line rows
+            for exactly that reason. But this table carries nine columns, bulk selection, inline
+            category editing, transfer pairing and a row menu, and restacking it is a rewrite of 873
+            lines rather than a layout change. Scroll loses no column and no control. If this page
+            becomes a daily phone destination rather than an occasional one, cards are the answer
+            and this comment is the argument for doing it properly. */}
+        <table className="w-full min-w-[56rem] text-sm">
           <thead className="sticky top-0 z-10">
             <tr className="bg-slate-50 border-b border-slate-100">
               <th className="px-4 py-3 w-10">

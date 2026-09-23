@@ -274,7 +274,7 @@ export default async function TransactionsPage({
     : { href: '/budget?view=monthly', label: 'Budget' };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto">
       {isDrilldown && (
         <div className="flex items-center gap-2 mb-4 text-sm">
           <a href={origin.href} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">

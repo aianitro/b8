@@ -59,6 +59,9 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
     }, 400);
   }
 
+  // Already wrapped; what it lacked was somewhere for the search box to go. At `w-48` beside five
+  // other controls it wrapped onto a line of its own and left two thirds of it empty, so it takes
+  // the full width below `sm:` and its fixed size above.
   return (
     <div className="flex items-center gap-2 mb-5 flex-wrap">
       {/* Search */}
@@ -70,7 +73,7 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
           placeholder="Search merchant or amount…"
           defaultValue={searchValue}
           onChange={(e) => handleSearch(e.target.value)}
-          className="pl-8 pr-7 py-1.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 w-48"
+          className="pl-8 pr-7 py-1.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 w-full sm:w-48"
         />
         {searchValue && (
           <button

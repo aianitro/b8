@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import { packCircles } from '@/lib/domain/bubblePack';
 import { STATUS_HEX } from '@/lib/chartColors';
 import { bubbleColor, NEUTRAL_HEX } from '@/lib/domain/bubbleStatus';
@@ -29,6 +29,42 @@ const WIDTH = 1000;
 // Taller than the circles need, because the smallest ones carry their name in the gap beneath
 // them and a tight box clips it.
 const HEIGHT = 380;
+
+/**
+ * THE SAME RULE ABOVE, RUN THE OTHER WAY, FOR A PHONE — §5 step 26b.
+ *
+ * That note is the whole reason these exist. A 1000-unit box rendered into 355 CSS pixels scales
+ * every unit to 0.355 of a pixel, so a 15px label lands at 5px and the 13-unit minimum radius
+ * becomes 4.6 — exactly the fault the comment records, inverted. Keeping one unit at roughly one
+ * pixel means shrinking the BOX, not the type.
+ *
+ * Portrait rather than the desktop's wide strip, because that is the shape of the space available:
+ * a phone has vertical room and no horizontal room, and the packer fills whatever box it is given.
+ */
+const NARROW_WIDTH = 360;
+const NARROW_HEIGHT = 430;
+
+/**
+ * Whether the viewport is phone-width, read from `matchMedia` rather than a resize listener.
+ *
+ * `useSyncExternalStore` rather than `useEffect` + `setState`: matchMedia IS an external store and
+ * this is the subscription shape React asks for. It also sidesteps the cascading-render lint rule
+ * that caught the sidebar's drawer effect an hour ago.
+ *
+ * The server snapshot is `false` — there is no viewport on a server, so the honest default is the
+ * layout the markup is generated for, and the client corrects it on hydration.
+ */
+function useNarrow(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia('(max-width: 640px)');
+      query.addEventListener('change', onChange);
+      return () => query.removeEventListener('change', onChange);
+    },
+    () => window.matchMedia('(max-width: 640px)').matches,
+    () => false,
+  );
+}
 
 /** Rough width of a character at a given font size, for fitting a label inside a circle. */
 const charWidth = (fontSize: number) => fontSize * 0.55;
@@ -64,16 +100,19 @@ function fitLabel(name: string, r: number, fontSize: number): string | null {
  */
 export default function CategoryBubbles({ categories }: { categories: BubbleCategory[] }) {
   const [hover, setHover] = useState<string | null>(null);
+  const narrow = useNarrow();
+  const width = narrow ? NARROW_WIDTH : WIDTH;
+  const height = narrow ? NARROW_HEIGHT : HEIGHT;
 
   const circles = useMemo(
     () => packCircles(
       categories.map((c) => ({ key: c.category, weight: c.budgeted })),
-      WIDTH, HEIGHT,
+      width, height,
       // Looser than the default: at 0.62 the circles crowded the box edge to edge and the picture
       // read as a solid mass rather than as distinct amounts.
       { fill: 0.46, padding: 14, minRadius: 13 }
     ),
-    [categories]
+    [categories, width, height]
   );
   const byKey = useMemo(
     () => new Map(categories.map((c) => [c.category, c])), [categories]
@@ -120,7 +159,7 @@ export default function CategoryBubbles({ categories }: { categories: BubbleCate
         )}
       </p>
 
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full" role="img"
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img"
            aria-label="Categories sized by monthly budget, coloured by projected close">
         {circles.map((c) => {
           const cat = byKey.get(c.key)!;
