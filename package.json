@@ -21,7 +21,8 @@
     "migrate:down": "node-pg-migrate down --envPath apps/web/.env.local",
     "migrate:create": "node-pg-migrate create -j sql",
     "prepare": "husky",
-    "ping:test": "npm run ping:test -w @b8/web"
+    "ping:test": "npm run ping:test -w @b8/web",
+    "ping:web": "npm run ping:web -w @b8/web"
   },
   "devDependencies": {
     "node-pg-migrate": "^9.0.0",
