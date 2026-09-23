@@ -26,7 +26,7 @@ type TxRow = {
   /** ISO timestamp of when this was flagged to keep an eye on; null means it is not flagged. */
   watched_at: string | null;
   /** Why it was flagged, in the owner's words. Null is a flag with no reason written yet. */
-  watch_note: string | null;
+  note: string | null;
   /** Explicit per-transaction tag; null means it inherits from the account. */
   property_id: number | null;
   /** Nickname of the property this actually lands on, tag or inherited — null if neither. */
@@ -333,13 +333,13 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
   const watched = transaction.watched_at !== null;
   const label = transaction.merchant_name ?? transaction.name ?? 'this transaction';
 
-  async function send(nextWatched: boolean, watch_note: string | null) {
+  async function send(nextWatched: boolean, note: string | null) {
     setBusy(true);
     setError(null);
     const res = await fetch(`/api/v1/transactions/${transaction.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ watched: nextWatched, watch_note }),
+      body: JSON.stringify({ watched: nextWatched, note }),
     });
     const data = await res.json().catch(() => null);
     setBusy(false);
@@ -354,7 +354,7 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
   }
 
   function openModal() {
-    setNote(transaction.watch_note ?? '');
+    setNote(transaction.note ?? '');
     setError(null);
     setOpen(true);
   }
@@ -364,7 +364,7 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
       <button
         onClick={openModal}
         className={`disabled:opacity-30 transition-colors ${watched ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-amber-500'}`}
-        title={watched ? `Keeping an eye on this${transaction.watch_note ? `: ${transaction.watch_note}` : ''}` : 'Keep an eye on this one'}
+        title={watched ? `Keeping an eye on this${transaction.note ? `: ${transaction.note}` : ''}` : 'Keep an eye on this one'}
         data-testid="watch-toggle"
       >
         <Flag size={14} fill={watched ? 'currentColor' : 'none'} />

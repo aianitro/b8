@@ -101,7 +101,7 @@ async function getData(
       `SELECT t.id, t.plaid_transaction_id, t.account_id, t.date::text AS date,
               t.amount, t.name, t.merchant_name, t.plaid_category, t.mapped_category,
               t.rule_applied, t.created_at, t.transfer_group_id, t.hidden,
-              t.watched_at::text AS watched_at, t.watch_note,
+              t.watched_at::text AS watched_at, t.note,
               a.name AS account_name, a.landscape AS account_landscape,
               t.property_id,
               (SELECT p.nickname FROM properties p

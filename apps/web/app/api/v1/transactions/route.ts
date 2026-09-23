@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
                t.amount::text AS amount,
                a.name AS account,
                (t.watched_at IS NOT NULL) AS watched,
-               t.watch_note AS note
+               t.note
           FROM transactions t
           JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          WHERE t.mapped_category = $1

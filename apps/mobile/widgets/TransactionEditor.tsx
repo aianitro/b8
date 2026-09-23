@@ -8,13 +8,17 @@
 // Arrivals gains the note field it never had, which is the right outcome rather than a side effect:
 // the two screens show the same rows and should offer the same verbs.
 //
-// ─── A NOTE IS A WATCHLIST ENTRY. This is not a shortcut, it is the schema ────────────────────
+// ─── A NOTE IS A NOTE; WATCHING IS A FLAG; NEITHER IMPLIES THE OTHER ─────────────────────────
 //
-// There is no free-floating comment column on a transaction. `watch_note` exists only alongside
-// `watched_at`, enforced by `transactions_watch_note_needs_flag`, so writing a note IS putting the
-// row on the watchlist — where it appears under "Keep an eye" and in the daily email — and clearing
-// the flag discards the note. That is worth saying on screen rather than surprising someone with,
-// which is what the line under the field does.
+// This screen shipped with them fused, because the schema fused them: `watch_note` could not exist
+// without `watched_at`. Writing a comment therefore put the row on the watchlist, and once watched
+// rows began to be excused from the budget grading, an innocent note silently removed its charge
+// from overspend measurement. The owner found it within the hour — an Airbnb charge annotated and
+// then spotted on a list it had no business being on.
+//
+// The column is now `note` and the CHECK is gone, so this offers two separate controls: a note, and
+// a toggle. Neither writes the other's column — `updateTransactionNote` sends only the keys it was
+// given, and the server leaves an unnamed column alone.
 
 import { useState } from 'react';
 import {
@@ -22,7 +26,7 @@ import {
 } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
-import { fetchCategoryNames, setCategory, setWatchNote } from '../lib/api';
+import { fetchCategoryNames, setCategory, updateTransactionNote } from '../lib/api';
 import { C, money } from './tokens';
 
 export interface EditableTransaction {
@@ -68,22 +72,27 @@ export default function TransactionEditor({ row, onClose }: {
     onSuccess: async () => { await refresh(); onClose(); },
   });
 
+  // NOTE AND FLAG ARE TWO MUTATIONS, not one with a derived flag. Saving a note says nothing about
+  // the watchlist, and toggling the watchlist says nothing about the note.
   const noteMutation = useMutation({
-    // An EMPTY note means "take it off the list", which is the only reading that makes the obvious
-    // gesture — clearing the box and saving — mean the obvious thing. The server discards the note
-    // when the flag comes off, so nothing is left dangling.
     mutationFn: () => {
       const trimmed = note.trim();
-      return setWatchNote(row.id, trimmed !== '', trimmed === '' ? null : trimmed);
+      return updateTransactionNote(row.id, { note: trimmed === '' ? null : trimmed });
     },
     onSuccess: refresh,
   });
 
-  const busy = categoryMutation.isPending || noteMutation.isPending;
+  const watchMutation = useMutation({
+    mutationFn: (next: boolean) => updateTransactionNote(row.id, { watched: next }),
+    onSuccess: refresh,
+  });
+
+  const busy = categoryMutation.isPending || noteMutation.isPending || watchMutation.isPending;
+  // The flag the server last confirmed, which is what the toggle must reflect after a change.
+  const watched = watchMutation.isSuccess ? watchMutation.variables : row.watched;
   const trimmed = note.trim();
-  // Nothing to save when the text is what is already stored — and, for an unflagged row, when the
-  // box is empty, because "flag it with no reason" is not what an untouched field is asking for.
-  const unchanged = trimmed === (row.note ?? '') && (row.watched || trimmed !== '');
+  // Nothing to save when the text is what is already stored.
+  const unchanged = trimmed === (row.note ?? '');
   const tooLong = trimmed.length > MAX_WATCH_NOTE;
 
   return (
@@ -102,9 +111,7 @@ export default function TransactionEditor({ row, onClose }: {
           </Text>
         )}
 
-        <Text style={styles.section}>
-          Note{row.watched ? ' · on Keep an eye' : ''}
-        </Text>
+        <Text style={styles.section}>Note</Text>
         <TextInput
           style={[styles.input, tooLong && styles.inputBad]}
           value={note}
@@ -119,14 +126,9 @@ export default function TransactionEditor({ row, onClose }: {
           accessibilityLabel="Note on this transaction"
         />
         <View style={styles.noteFoot}>
-          {/* Phrased against what is actually true NOW. A row can be flagged with no note, so
-              "saving an empty note removes it" is only a warning when there is something to
-              remove; said on an unflagged row it describes an action with no effect. */}
-          <Text style={styles.hint}>
-            {trimmed !== ''
-              ? (row.watched ? 'Stays on Keep an eye.' : 'Saving puts this on Keep an eye.')
-              : (row.watched ? 'Saving empty takes this off Keep an eye.' : 'Not on Keep an eye.')}
-          </Text>
+          {/* Says what a note IS now, because the previous version of this screen taught the
+              opposite and the correction is worth stating once rather than leaving implied. */}
+          <Text style={styles.hint}>Just a note. It does not flag this transaction.</Text>
           <Text style={[styles.count, tooLong && { color: C.over }]}>
             {trimmed.length}/{MAX_WATCH_NOTE}
           </Text>
@@ -138,6 +140,30 @@ export default function TransactionEditor({ row, onClose }: {
         >
           <Text style={styles.saveText}>
             {noteMutation.isPending ? 'Saving…' : noteMutation.isSuccess && unchanged ? 'Saved' : 'Save note'}
+          </Text>
+        </Pressable>
+
+        <Text style={styles.section}>Keep an eye</Text>
+        <Pressable
+          style={styles.toggle}
+          disabled={busy}
+          onPress={() => watchMutation.mutate(!watched)}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: watched }}
+        >
+          <View style={[styles.box, watched && styles.boxOn]}>
+            {watched && <Text style={styles.tick}>✓</Text>}
+          </View>
+          <Text style={styles.toggleText}>
+            {watched ? 'On the list' : 'Not on the list'}
+            {/* THE CONSEQUENCE, ON SCREEN. A flagged charge is left out of its category's
+                overspend measurement — that is the whole reason the flag matters now, and it is
+                not something to discover from a tile that went quiet. */}
+            <Text style={styles.toggleSub}>
+              {watched
+                ? ' · this charge is left out of its budget grading'
+                : ' · counted toward its budget as normal'}
+            </Text>
           </Text>
         </Pressable>
 
@@ -181,6 +207,12 @@ const styles = StyleSheet.create({
   noteFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, gap: 10 },
   hint: { flex: 1, fontSize: 11, color: C.faint },
   count: { fontSize: 11, color: C.faint, fontVariant: ['tabular-nums'] },
+  toggle: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 4 },
+  box: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: C.line, alignItems: 'center', justifyContent: 'center' },
+  boxOn: { backgroundColor: C.warn, borderColor: C.warn },
+  tick: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  toggleText: { flex: 1, fontSize: 14, color: C.ink, lineHeight: 19 },
+  toggleSub: { color: C.faint, fontSize: 12 },
   save: { marginTop: 10, alignSelf: 'flex-start', backgroundColor: C.accent, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 9 },
   saveOff: { opacity: 0.45 },
   saveText: { color: '#fff', fontSize: 14, fontWeight: '600' },

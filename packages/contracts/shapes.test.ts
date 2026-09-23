@@ -230,7 +230,7 @@ const transactionWireRow = {
   // The ordinary row: nothing is being kept an eye on. Both fields are present and null rather
   // than absent, because the columns exist on every row and no query in this app omits them.
   watched_at: null,
-  watch_note: null,
+  note: null,
   created_at: '2026-02-04T02:15:00.000Z',
 };
 
@@ -264,16 +264,16 @@ describe('TransactionSchema', () => {
     const flagged = {
       ...transactionWireRow,
       watched_at: '2026-09-11T18:04:00.000Z',
-      watch_note: 'returning to Zara',
+      note: 'returning to Zara',
     };
-    expect(TransactionSchema.parse(flagged).watch_note).toBe('returning to Zara');
+    expect(TransactionSchema.parse(flagged).note).toBe('returning to Zara');
 
     // The schema states the same bounds the CHECK constraint enforces. Were it looser, a payload
     // this app can never store would validate, and the contract would describe a wider world than
     // the database allows.
-    expect(issuePathsOf(TransactionSchema, { ...flagged, watch_note: '' })).toEqual(['watch_note']);
-    expect(issuePathsOf(TransactionSchema, { ...flagged, watch_note: 'x'.repeat(201) })).toEqual(['watch_note']);
-    expect(TransactionSchema.parse({ ...flagged, watch_note: 'x'.repeat(200) }).watch_note).toHaveLength(200);
+    expect(issuePathsOf(TransactionSchema, { ...flagged, note: '' })).toEqual(['note']);
+    expect(issuePathsOf(TransactionSchema, { ...flagged, note: 'x'.repeat(201) })).toEqual(['note']);
+    expect(TransactionSchema.parse({ ...flagged, note: 'x'.repeat(200) }).note).toHaveLength(200);
   });
 });
 

@@ -216,7 +216,7 @@ export const TransactionSchema = z.object({
   // which no query in this app produces and which would let a client tell "not watched" from
   // "the server did not say" — a distinction with nothing behind it.
   watched_at: timestamptz.nullable(),
-  watch_note: z.string().min(1).max(200).nullable(),
+  note: z.string().min(1).max(200).nullable(),
   created_at: timestamptz,
 });
 export type TransactionFieldsAreExact = Assert<

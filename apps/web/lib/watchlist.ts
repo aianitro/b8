@@ -25,7 +25,13 @@ import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
 // this module's existing importers keep working and the move stays one file.
 export const MAX_NOTE = MAX_WATCH_NOTE;
 
-export type WatchInput = { watched: boolean; note: string | null };
+/**
+ * What the caller asked to change. EITHER KEY MAY BE ABSENT, and absent is not the same as null:
+ * `note: null` clears the note, no `note` key leaves it alone. The pair was a single indivisible
+ * update while the database refused a note without a flag; now that it does not, a caller that
+ * wants to toggle the flag must be able to do so without restating the note it is not touching.
+ */
+export type WatchInput = { watched?: boolean; note?: string | null };
 
 export type WatchRefusal = { code: string; message: string };
 
@@ -36,35 +42,49 @@ export type WatchRefusal = { code: string; message: string };
  * exception, and a route that has to try/catch its own validator ends up catching real bugs too.
  */
 export function parseWatchInput(body: unknown): { ok: true; value: WatchInput } | { ok: false; error: WatchRefusal } {
-  if (typeof body !== 'object' || body === null || !('watched' in body)) {
-    return { ok: false, error: { code: 'INVALID_INPUT', message: 'watched must be present and boolean' } };
+  if (typeof body !== 'object' || body === null) {
+    return { ok: false, error: { code: 'INVALID_INPUT', message: 'a body with watched or note is required' } };
   }
 
-  const { watched } = body as { watched: unknown };
-  if (typeof watched !== 'boolean') {
-    return { ok: false, error: { code: 'INVALID_INPUT', message: 'watched must be a boolean' } };
+  const hasWatched = 'watched' in body;
+  const hasNote = 'note' in body;
+  if (!hasWatched && !hasNote) {
+    return { ok: false, error: { code: 'INVALID_INPUT', message: 'watched or note must be present' } };
   }
 
-  const raw = 'watch_note' in body ? (body as { watch_note: unknown }).watch_note : null;
-  if (raw !== null && raw !== undefined && typeof raw !== 'string') {
-    return { ok: false, error: { code: 'INVALID_INPUT', message: 'watch_note must be a string or null' } };
+  const value: WatchInput = {};
+
+  if (hasWatched) {
+    const { watched } = body as { watched: unknown };
+    if (typeof watched !== 'boolean') {
+      return { ok: false, error: { code: 'INVALID_INPUT', message: 'watched must be a boolean' } };
+    }
+    value.watched = watched;
   }
 
-  // Trimmed before every other test, so "   " is the empty note it plainly is rather than a
-  // three-character one that satisfies the length CHECK and renders as a blank in the email.
-  const trimmed = typeof raw === 'string' ? raw.trim() : null;
-  const note = trimmed === null || trimmed === '' ? null : trimmed;
+  if (hasNote) {
+    const raw = (body as { note: unknown }).note;
+    if (raw !== null && typeof raw !== 'string') {
+      return { ok: false, error: { code: 'INVALID_INPUT', message: 'note must be a string or null' } };
+    }
+    // Trimmed before every other test, so "   " is the empty note it plainly is rather than a
+    // three-character one that satisfies the length CHECK and renders as a blank in the email.
+    const trimmed = typeof raw === 'string' ? raw.trim() : null;
+    const note = trimmed === null || trimmed === '' ? null : trimmed;
 
-  if (note !== null && note.length > MAX_NOTE) {
-    return {
-      ok: false,
-      error: { code: 'NOTE_TOO_LONG', message: `The note is ${note.length} characters; the limit is ${MAX_NOTE}.` },
-    };
+    if (note !== null && note.length > MAX_NOTE) {
+      return {
+        ok: false,
+        error: { code: 'NOTE_TOO_LONG', message: `The note is ${note.length} characters; the limit is ${MAX_NOTE}.` },
+      };
+    }
+    value.note = note;
   }
 
-  // Unflagging DISCARDS the note rather than refusing the pair. A caller clearing the flag is
-  // finished with the transaction, and making them send `watch_note: null` as well would be a
-  // second way to get a 400 for something nobody meant. The database's CHECK forbids the stored
-  // combination; this is what makes the obvious request mean the obvious thing.
-  return { ok: true, value: { watched, note: watched ? note : null } };
+  // UNFLAGGING NO LONGER DISCARDS THE NOTE. It used to, because the database refused the surviving
+  // combination — an unwatched row holding a note — and making the obvious request mean the obvious
+  // thing was the only way to avoid a 400 for something nobody meant. That CHECK is gone
+  // (migrations/…_note-decoupled-from-flag.sql): a note is the owner's comment and taking a row off
+  // the list is not a reason to delete what they wrote about it.
+  return { ok: true, value };
 }

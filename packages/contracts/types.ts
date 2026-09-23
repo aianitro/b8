@@ -119,10 +119,14 @@ export interface Transaction {
    */
   watched_at: string | null;
   /**
-   * Why, in the owner's words — "returning to Zara", "double charged". Null on a flag whose reason
-   * has not been written, and refused by the database on a row that is not flagged at all.
+   * The owner's own comment on the row — "returning to Zara", "double charged".
+   *
+   * INDEPENDENT OF `watched_at` since 2026-09-22. It used to be refused on an unflagged row, which
+   * made writing a comment the same act as putting the row on the watchlist — and once watched rows
+   * began to be excused from the budget grading, a note silently changed the figures. A note is now
+   * just a note; taking a row off the list does not discard it.
    */
-  watch_note: string | null;
+  note: string | null;
   created_at: string;
 }
 

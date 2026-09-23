@@ -36,8 +36,10 @@ export const CategoryTransactionSchema = z.object({
    *
    * CARRIED SO AN EDITOR CAN OPEN WITH THE CURRENT VALUES. A note field that opens blank on a row
    * that already has a note does not look like missing data — it looks like an empty box — and the
-   * first save silently replaces what was there. The pair travels together because the database
-   * will not hold one without the other: `transactions_watch_note_needs_flag`.
+   * first save silently replaces what was there.
+   *
+   * The two are INDEPENDENT since 2026-09-22: a row may hold a note without being watched, and
+   * unwatching one keeps its note. They travel together here because an editor offers both.
    */
   watched: z.boolean(),
   note: z.string().nullable(),

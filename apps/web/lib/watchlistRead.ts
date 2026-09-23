@@ -31,7 +31,7 @@ interface Row {
   label: string;
   amount: string;
   category: string | null;
-  watch_note: string | null;
+  note: string | null;
   days_open: string;
 }
 
@@ -56,7 +56,7 @@ export async function loadWatchlist(): Promise<WatchedTransaction[]> {
            COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
            t.amount::text,
            t.mapped_category AS category,
-           t.watch_note,
+           t.note,
            -- Whole days, computed by POSTGRES against ITS clock. In JS this would be a second
            -- calendar and a subtraction across a DST boundary; here it is one clock, the same one
            -- that wrote watched_at.
@@ -80,7 +80,7 @@ export async function loadWatchlist(): Promise<WatchedTransaction[]> {
       label: r.label,
       amount,
       category: r.category,
-      note: r.watch_note,
+      note: r.note,
       daysOpen: Math.max(0, Number(r.days_open)),
     };
   });

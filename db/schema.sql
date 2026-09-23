@@ -231,10 +231,12 @@ CREATE TABLE IF NOT EXISTS transactions (
   transfer_group_id     INT REFERENCES transfer_groups(id) ON DELETE SET NULL,
   hidden                BOOLEAN NOT NULL DEFAULT FALSE,  -- excluded from budget/dashboard calcs; still visible (grayed out) on /transactions
   watched_at            TIMESTAMPTZ,                     -- NOT NULL *is* the "keep an eye on this" flag; the timestamp is what lets an entry age
-  watch_note            TEXT,                            -- the owner's reason, e.g. "returning to Zara" — the whole value of the flag a week later
+  note                  TEXT,                            -- the owner's own comment, e.g. "returning to Zara". INDEPENDENT of watched_at since 2026-09-22: writing a note does not flag a row, and unflagging does not discard the note
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT transactions_watch_note_length     CHECK (watch_note IS NULL OR (length(watch_note) BETWEEN 1 AND 200)),
-  CONSTRAINT transactions_watch_note_needs_flag CHECK (watched_at IS NOT NULL OR watch_note IS NULL)
+  -- No constraint tying the note to the flag. There WAS one, and it made writing a comment the same
+  -- act as putting a row on the watchlist -- which, once watched rows started being excused from the
+  -- budget grading, meant a note silently changed the figures. See the 2026-09-22 migration.
+  CONSTRAINT transactions_note_length           CHECK (note IS NULL OR (length(note) BETWEEN 1 AND 200))
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);

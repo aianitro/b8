@@ -253,27 +253,29 @@ export async function setCategory(transactionId: number, category: string | null
 }
 
 /**
- * Flag or unflag a transaction, and set the reason.
+ * Write a note, or set the flag, or both — each only if named.
  *
- * THERE IS NO FREE-FLOATING "COMMENT" ON A TRANSACTION IN THIS APP, and that is a schema fact
- * rather than an omission: `watch_note` is constrained by `transactions_watch_note_needs_flag` to
- * exist only alongside `watched_at`. So writing a note IS putting the row on the watchlist — where
- * it shows up in "Keep an eye" and in the daily email — and clearing the flag discards the note,
- * which is the server's rule (`parseWatchInput`) rather than this client's.
+ * ABSENT IS NOT NULL, and the server depends on it: omitting `note` leaves the column alone while
+ * `note: null` clears it. That distinction is what lets the toggle below change the flag without
+ * touching what the owner wrote.
+ *
+ * A NOTE NO LONGER PUTS A ROW ON THE WATCHLIST. It did until 2026-09-22, because `watch_note` could
+ * not exist without `watched_at` — so annotating a charge quietly flagged it, and once watched rows
+ * started being excused from the budget grading, a comment silently moved the figures. The column
+ * is now `note` and the CHECK is gone.
  */
-export async function setWatchNote(
+export async function updateTransactionNote(
   transactionId: number,
-  watched: boolean,
-  note: string | null,
+  changes: { note?: string | null; watched?: boolean },
 ): Promise<void> {
   const response = await authed(`/api/v1/transactions/${transactionId}`, {
     method: 'PATCH',
-    body: JSON.stringify({ watched, watch_note: note }),
+    body: JSON.stringify(changes),
   });
   if (!response.ok) {
     // The server's message is the useful one here — it names the limit when a note is too long.
     const body = await response.json().catch(() => null);
-    throw new ApiError(body?.error?.message ?? `Could not save that note (${response.status}).`);
+    throw new ApiError(body?.error?.message ?? `Could not save that (${response.status}).`);
   }
 }
 
