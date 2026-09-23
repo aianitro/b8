@@ -500,8 +500,12 @@ export default function BudgetMonthlyGridClient({ rows, currentMonth, beginningB
   }
 
 
+  // Already scrolled horizontally and already froze its category column — this grid was built for a
+  // narrow viewport before there was one. The only change a phone needed is the bleed: letting the
+  // scroll region reach the screen edges so the December column can be brought fully into view
+  // instead of stopping against a gutter.
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden -mx-4 sm:mx-0">
       <div className="overflow-x-auto">
         <table className="w-full text-xs border-collapse">
           <thead className="sticky top-0 z-20">

@@ -302,7 +302,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
     tenantHeldFunds.lastMonthRent !== null;
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-4xl mx-auto">
       <Link href="/properties" className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 mb-4 transition-colors">
         <ArrowLeft size={13} />
         Properties

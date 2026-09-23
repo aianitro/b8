@@ -21,7 +21,7 @@ async function getAccounts(): Promise<Pick<Account, 'id' | 'name' | 'landscape'>
 export default async function CategoriesPage() {
   const [categories, accounts] = await Promise.all([getCategories(), getAccounts()]);
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-6xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-slate-900">Budget Categories</h1>
         <p className="text-sm text-slate-500 mt-1">Annual budget allocations per landscape, and which of them behaviour is scored on.</p>

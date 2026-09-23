@@ -109,8 +109,8 @@ function CategoryTable({
   return (
     <div className="mb-6">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">{label}</h2>
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+        <table className="w-full min-w-[48rem] text-sm">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-100">
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Category</th>

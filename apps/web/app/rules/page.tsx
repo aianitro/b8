@@ -36,7 +36,7 @@ async function getData() {
 export default async function RulesPage() {
   const { rows, categories, pendingApply } = await getData();
   return (
-    <div className="p-8 max-w-3xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-slate-900">Category Rules</h1>
         <p className="text-sm text-slate-500 mt-1">Map Plaid categories to your budget categories. Applied automatically on each sync.</p>

@@ -70,7 +70,7 @@ export default async function AccountStatementPage({
   const account = accountRes.rows[0];
   if (!account) {
     return (
-      <div className="p-8 text-slate-400">Account not found.</div>
+      <div className="p-4 sm:p-8 text-slate-400">Account not found.</div>
     );
   }
 
@@ -107,7 +107,7 @@ export default async function AccountStatementPage({
   const ytdNet      = ytdIncome - ytdExpenses;
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-4xl mx-auto">
       {/* Page header */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">

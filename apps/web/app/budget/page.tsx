@@ -101,8 +101,13 @@ function Section({ title, rows, landscape }: { title: string; rows: SummaryRow[]
         <span className="text-xs font-mono text-slate-400">{p}%</span>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      {/* `overflow-x-auto`, not `overflow-hidden`. Six columns had nowhere to go on a phone but to
+          compress, because the wrapper clipped and the table was told to match its container —
+          the same pairing that stopped the transactions table from scrolling. `min-w-[40rem]` is
+          what gives it something to overflow; the rounded corners survive because the scroll
+          container keeps its own radius. */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto -mx-4 sm:mx-0">
+        <table className="w-full min-w-[40rem] text-sm">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-100">
               <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Category</th>
@@ -250,7 +255,7 @@ export default async function BudgetPage({ searchParams }: PageProps) {
   const { profitLoss: projectedPL, netToDate } = yearEnd;
 
   return (
-    <div className={view === 'monthly' ? 'p-8' : 'p-8 max-w-4xl mx-auto'}>
+    <div className={view === 'monthly' ? 'p-4 sm:p-8' : 'p-4 sm:p-8 max-w-4xl mx-auto'}>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

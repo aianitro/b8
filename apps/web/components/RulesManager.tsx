@@ -136,8 +136,8 @@ export default function RulesManager({ rows, categories, pendingApply }: Props) 
           <h2 className="text-xs font-semibold uppercase tracking-wider text-amber-600 mb-3">
             Unmapped — {withoutRule.length} categories
           </h2>
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+            <table className="w-full min-w-[48rem] text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
                   <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Plaid category</th>
@@ -160,8 +160,8 @@ export default function RulesManager({ rows, categories, pendingApply }: Props) 
           <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
             Mapped — {withRule.length} categories
           </h2>
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
+            <table className="w-full min-w-[48rem] text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
                   <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Plaid category</th>

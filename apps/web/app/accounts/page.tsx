@@ -59,7 +59,7 @@ export default async function AccountsPage() {
     // max-w-5xl, not the max-w-3xl the design doc lists for this page: that predates the
     // balance-mode and valuation columns, and five controls plus an account name genuinely do
     // not fit in 768px — cramming them there is what caused the overlapping row content.
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Accounts</h1>
