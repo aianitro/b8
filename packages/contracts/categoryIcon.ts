@@ -1,4 +1,8 @@
-// A one-glyph stand-in for a category name, for tiles too small to hold the name itself.
+// A one-glyph stand-in for a category name. The sole label on every heatmap tile, on both surfaces.
+//
+// Shared rather than the phone's, since the web dashboard's map draws the same tiles — a glyph
+// table that disagreed between the two would put a different alphabet on each, which is the one
+// thing worse than an unlabelled tile.
 //
 // ─── Why an icon rather than a truncated name ─────────────────────────────────────────────────
 //
@@ -8,8 +12,8 @@
 // cannot name is a finding you have to tap to understand.
 //
 // Truncation is the obvious alternative and it is worse. "Onlin…", "Educa…", "Entert…" is what a
-// purely geometric fit produces — technically inside the tile and unreadable, and the web's bubbles
-// carry a comment saying exactly that. A glyph is legible at a size no text is.
+// purely geometric fit produces — technically inside the tile and unreadable, and the digest's
+// bubble renderer carries a comment saying exactly that. A glyph is legible at a size no text is.
 //
 // ─── Keyword matching, not a lookup by name ───────────────────────────────────────────────────
 //

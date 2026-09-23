@@ -1,17 +1,22 @@
-// Where the month sits — the web dashboard's CategoryBubbles, as a market heatmap.
+// Where the month sits — every budgeted category as a market heatmap.
 //
-// ─── Same data, same rule, different shape, at the owner's request ────────────────────────────
+// ─── Where this shape came from, and where it went ────────────────────────────────────────────
 //
-// The web packs every budgeted category as a circle. Asked for this on the phone, the owner asked
-// for squares instead: "green/orange/red as on stock market, size proportional to category budget".
-// That is the right call at 360px and not only a preference — circle packing spends about a third
-// of the box on the gaps between circles, which is affordable at 1000px and is not here, and the
-// smallest categories fall below the radius at which a circle can hold anything at all.
+// The web dashboard packed these as circles. Asked for the same picture on the phone, the owner
+// asked for squares instead: "green/orange/red as on stock market, size proportional to category
+// budget". That was the right call at 360px and not only a preference — circle packing spends about
+// a third of the box on the gaps between circles, which is affordable at 1000px and is not here,
+// and the smallest categories fall below the radius at which a circle can hold anything at all.
 //
-// WHAT DID NOT CHANGE IS THE GRADING. Colour comes from `@b8/contracts/bubbleStatus`, the same
-// function the web bubbles and the daily digest call. The phone may paint a different red; it must
-// never disagree about which categories are in trouble. The rule moved into the shared package for
-// this widget — see that file.
+// The web then took the tiles back. Its dashboard is mostly read in the PWA, at this width, so the
+// argument above applies there too; `apps/web/components/CategoryHeatmap.tsx` is the same map in
+// DOM. Everything that is not rendering — the layout, the glyphs, the grading and the four fills —
+// moved into `@b8/contracts` and is imported by both. Circles survive in the daily digest email,
+// which has no pointer and needs the room beneath a circle to print a name.
+//
+// WHAT NEVER CHANGED IS THE GRADING. Colour comes from `@b8/contracts/bubbleStatus`, the same
+// function the digest calls. Two surfaces may legitimately paint a different red; they must never
+// disagree about which categories are in trouble.
 //
 // ─── Two channels, and the third one the validator deleted ────────────────────────────────────
 //
@@ -36,76 +41,22 @@ import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { OverviewData } from '@b8/contracts/overview';
 import { bubbleState, type BubbleState } from '@b8/contracts/bubbleStatus';
-import { layoutTreemap } from './treemap';
-import { categoryIcon } from './categoryIcon';
+import { layoutTreemap } from '@b8/contracts/treemap';
+import { categoryIcon } from '@b8/contracts/categoryIcon';
+// Fills, inks and wording live in the contracts package because the web dashboard's map paints
+// from the same four values — see the note at the top of that file for why THIS paint is shared
+// when `cellColors.ts`'s deliberately is not.
+import {
+  HEATMAP_FILL as FILL,
+  HEATMAP_INK as INK,
+  HEATMAP_LABEL as LABEL,
+  HEATMAP_LEGEND as LEGEND,
+} from '@b8/contracts/heatmapPalette';
 import CategorySheet from './CategorySheet';
 import { C, money } from './tokens';
 
 type MonthCategory = OverviewData['monthCategories'][number];
 
-/**
- * The status palette. Reserved: the dataviz skill forbids reusing these as series colours, and
- * nothing else on this screen does.
- *
- * ─── Two of these four are one ramp step off the design tokens, and the validator moved them ──
- *
- * `uiux-promax` gives over `#dc2626`, warning `#d97706`, on-track `#16a34a`. As TEXT colours they
- * are fine. As FILLS covering a third of the screen they failed three checks at once: green against
- * red at ΔE 5.0 deutan (below the 6 floor — a red/green reader cannot tell an over-budget tile from
- * an on-plan one, which is the entire reading this widget exists for), and amber against red at
- * ΔE 14.4 for normal vision, below the 15 floor.
- *
- * Deuteranopia separates red from green almost entirely by LIGHTNESS, and those two sit at nearly
- * the same L. Dropping on-track one ramp step to green-700 and lifting warning to amber-500 —
- * `STATUS_HEX.watch`'s own value on the web, so this is an in-system number — takes the worst pair
- * to ΔE 8.6 deutan and 20.8 normal. All hard checks pass.
- *
- * Amber remains below 3:1 against the white surface, which the skill says is not dismissable and
- * obligates visible labels or a table view. Both are here: tiles carry their names, and every tile
- * — labelled or not — opens the line above the map on tap. Chasing 3:1 was tried and is a worse
- * trade: amber-700 clears the contrast check and collapses into red at ΔE 2.8 deutan.
- */
-const FILL: Record<BubbleState, string> = {
-  over: '#dc2626',          // red-600 — the design token, unchanged
-  'heading-over': '#f59e0b',// amber-500 — was amber-600; raised for normal-vision separation
-  inside: '#15803d',        // green-700 — was green-600; darkened for deuteran separation
-  'too-early': '#94a3b8',   // slate-400
-};
-
-/**
- * Ink per tile, chosen by WCAG contrast against that fill rather than by eye: white on red 5.9:1,
- * on green 5.0:1; amber and slate are light fills and take dark ink at 4.3:1 and 6.5:1. White on
- * amber would be 1.9:1, which is the obvious choice and unreadable.
- */
-const INK: Record<BubbleState, string> = {
-  over: '#ffffff',
-  'heading-over': '#78350f',  // amber-900
-  inside: '#ffffff',
-  'too-early': '#1f2937',     // gray-800
-};
-
-/**
- * Slate-400 fails the validator's chroma floor, deliberately and as the only dismissed check.
- * That floor exists so a categorical series does not read as grey; this slot is not a series, it
- * is the ABSENCE of a verdict for a month too young to judge, and reading as grey is the job.
- */
-/**
- * Four swatches on one line, which is the constraint that shapes the wording.
- *
- * "already over" and "heading over" keep their length: the pair IS the distinction the colours
- * encode — one is money that has left, the other is a forecast — and shortening either to "over"
- * collapses a fact and a guess into the same word. "too early to call" shortens to "too early"
- * because the dropped words add nothing the two remaining ones do not carry.
- *
- * The screen-reader text in `LABEL` is not shortened. It has no width to fit into, and "too early
- * to call" is the better sentence when it is read aloud rather than scanned.
- */
-const LEGEND: ReadonlyArray<[BubbleState, string]> = [
-  ['over', 'already over'],
-  ['heading-over', 'heading over'],
-  ['inside', 'in budget'],
-  ['too-early', 'too early'],
-];
 
 /** 2px of surface between fills, per the dataviz skill — half of it either side of every seam. */
 const GAP = 2;
@@ -343,13 +294,6 @@ export default function CategoryHeatmap({ categories, width, month }: {
   );
 }
 
-/** What a screen reader hears, and what the legend says, from one place. */
-const LABEL: Record<BubbleState, string> = {
-  over: 'already over budget',
-  'heading-over': 'heading over budget',
-  inside: 'in budget',
-  'too-early': 'too early to call',
-};
 
 const styles = StyleSheet.create({
   caption: { fontSize: 11, color: C.faint, marginBottom: 8 },

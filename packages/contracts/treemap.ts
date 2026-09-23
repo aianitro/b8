@@ -1,12 +1,22 @@
 // Squarified treemap layout. Pure geometry: weights in, rectangles out, no React and no colour.
 //
-// ─── Why a treemap here and circles on the web ────────────────────────────────────────────────
+// ─── Why a treemap, and why this file is shared ───────────────────────────────────────────────
 //
-// The web dashboard packs the same data as circles (`lib/domain/bubblePack.ts`). Circle packing
-// wastes the gaps between circles, which is affordable at 1000px wide and is not at 360: the same
-// fifteen categories lose roughly a third of the box to whitespace, and the smallest ones fall
-// under the radius at which anything can be drawn in them. A treemap spends every pixel, which is
-// why market heatmaps have this shape and why the owner asked for it by that name.
+// It was written for the phone, where circle packing is unaffordable: the gaps between circles cost
+// roughly a third of the box, which is fine at 1000px wide and is not at 360, and the smallest
+// categories fall under the radius at which anything can be drawn in them. A treemap spends every
+// pixel, which is why market heatmaps have this shape and why the owner asked for it by that name.
+//
+// It now lays out the WEB dashboard's "where the month sits" as well, at the owner's request — the
+// same picture on both surfaces — which is why it moved out of `apps/mobile/widgets` into this
+// package. The web's circle packer (`apps/web/lib/domain/bubblePack.ts`) stays where it is, because
+// the daily digest EMAIL still draws bubbles and should: an email has no hover and no tap, so a
+// label a pointer must uncover is not a label there, and the packer leaves room beneath each circle
+// for one. A treemap has no such room — it spends every pixel by definition.
+//
+// Nothing in here changed in the move. It takes a width and a height in whatever unit the caller
+// works in: device pixels on the phone, and percentage points on the web, where laying out in a
+// 100x100 box and positioning in `%` gives a map that survives a resize with no measurement pass.
 //
 // ─── The algorithm, and why not a simpler one ─────────────────────────────────────────────────
 //

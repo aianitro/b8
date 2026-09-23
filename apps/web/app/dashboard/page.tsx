@@ -9,7 +9,7 @@ import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
 import JobHealthCard from '@/components/JobHealthCard';
 import AlertBell from '@/components/AlertBell';
-import CategoryBubbles, { type BubbleCategory } from '@/components/CategoryBubbles';
+import CategoryHeatmap, { type HeatmapCategory } from '@/components/CategoryHeatmap';
 import RecentArrivals from '@/components/RecentArrivals';
 import WatchlistCard from '@/components/WatchlistCard';
 import ExpandableKpiCards from '@/components/ExpandableKpiCards';
@@ -266,7 +266,7 @@ export default async function DashboardPage() {
   // the bubbles are a map, not a judgement, and a map that omits groceries, fuel and utilities is
   // the wrong shape. Scoping and shaping now happen in `lib/overviewRead.ts`, once, for this page
   // and the mobile client alike.
-  const bubbleCategories: BubbleCategory[] = monthCategories;
+  const heatmapCategories: HeatmapCategory[] = monthCategories;
 
   // `p-4` on a phone, the original `p-8` from `sm:` up. 32px of padding each side costs 64px of a
   // 390px screen — a sixth of it — spent on whitespace beside figures that need the room.
@@ -414,11 +414,16 @@ export default async function DashboardPage() {
       {/* THE MONTH, CATEGORY BY CATEGORY — moved BELOW the five counts on 2026-09-23 at the
           owner's request, to match the phone's order.
 
-          It used to lead the page, on the argument that the bubbles say which categories are going
+          It used to lead the page, on the argument that the picture says which categories are going
           wrong with the evidence attached. That still holds, but it is an argument about depth
           rather than order: the five figures above are read in a glance and this is read for a
-          minute, so the glance goes first and the picture answers the question it raises. */}
-      <CategoryBubbles categories={bubbleCategories} />
+          minute, so the glance goes first and the picture answers the question it raises.
+
+          Tiles rather than the bubbles it packed for months, on the same day and at the same
+          request — this dashboard is mostly read in the PWA now, and circle packing spends a third
+          of a phone-width box on the gaps between circles. `asOf.month` rather than the component's
+          own clock: the tiles and the link out of them should name one month. */}
+      <CategoryHeatmap categories={heatmapCategories} month={asOf.month} />
 
       {/* Charts */}
       <div className="space-y-6">

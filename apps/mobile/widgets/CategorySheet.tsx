@@ -31,7 +31,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { OverviewData } from '@b8/contracts/overview';
 import { bubbleState } from '@b8/contracts/bubbleStatus';
 import { fetchCategoryTransactions } from '../lib/api';
-import { categoryIcon } from './categoryIcon';
+import { categoryIcon } from '@b8/contracts/categoryIcon';
 import TransactionEditor, { type EditableTransaction } from './TransactionEditor';
 import { C, money } from './tokens';
 
