@@ -40,5 +40,14 @@ console.log('# Web Push (VAPID). Add to apps/web/.env.local on EVERY machine tha
 console.log('# the local one and the server. Never commit; never rsync.');
 console.log(`VAPID_PUBLIC_KEY=${b64url(uncompressed)}`);
 console.log(`VAPID_PRIVATE_KEY=${pkcs8.toString('base64')}`);
-console.log('# The `sub` claim. A mailto: or https: the push service can contact about this sender.');
-console.log('VAPID_SUBJECT=mailto:b8@localhost');
+console.log('# The `sub` claim: who the push service contacts about this sender.');
+console.log('#');
+console.log('# NOT `mailto:...@localhost`, which is what this script emitted first and what Apple');
+console.log('# refused with a 4xx — it validates the claim, and `localhost` is not a contact domain.');
+console.log('# The symptom was a push classified `rejected` with nothing saying why.');
+console.log('#');
+console.log('# An https URL is preferred over a personal address here. The services do not fetch it,');
+console.log('# only parse it, and handing a real mailbox to Apple for a single-user app is more than');
+console.log('# the field needs — the same instinct that made the ping itself content-free. Replace');
+console.log('# the host below with this server\'s own name.');
+console.log('VAPID_SUBJECT=https://example.ts.net');

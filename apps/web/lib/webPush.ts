@@ -129,6 +129,16 @@ export async function sendWebPushIfDelivered(deliveredKinds: readonly AlertKind[
           },
         });
         outcome = classifyStatus(response.status);
+        if (outcome !== 'delivered') {
+          // THE STATUS AND THE SERVICE'S OWN REASON, because "rejected" is not actionable on its
+          // own: Apple answers 400 for a malformed JWT, 403 for one it will not accept, and the
+          // difference is the whole diagnosis. Its body is a short machine reason such as
+          // `BadJwtToken` — a code, not a transcription of the request — so it is safe to log where
+          // the endpoint is not. Truncated regardless, so a verbose service cannot turn this line
+          // into a dump.
+          const reason = await response.text().catch(() => '');
+          log.error('push service refused', { status: response.status, reason: reason.slice(0, 200) });
+        }
       } catch {
         // Never reached the service at all — a different fact from being refused by it.
         outcome = 'transport';
