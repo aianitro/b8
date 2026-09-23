@@ -254,7 +254,6 @@ export default function CategoryHeatmap({ categories, month }: {
           const iconSize = Math.round(Math.min(34, Math.max(10, iconBox * 0.55)));
 
           const isActive = activeKey === t.key;
-          const dim = activeKey !== null && !isActive;
 
           // Over means spent PAST the line, not projected to pass it, so the overage is only ever
           // printed on a tile that has actually breached. The colour carries the forecast.
@@ -271,20 +270,27 @@ export default function CategoryHeatmap({ categories, month }: {
               onBlur={() => setHover(null)}
               onClick={() => (isActive ? router.push(drillHref([t.key], month)) : setPicked(t.key))}
               aria-label={`${cat.category}, ${fmt(cat.actual)} of ${fmt(cat.budgeted)}, ${LABEL[state]}`}
-              className="absolute rounded-[3px] overflow-hidden cursor-pointer transition-opacity duration-100 focus:outline-none"
+              className="absolute rounded-[3px] overflow-hidden cursor-pointer focus:outline-none"
               style={{
                 left: `calc(${t.x}% + ${GAP}px)`,
                 top: `calc(${t.y}% + ${GAP}px)`,
                 width: `calc(${t.w}% - ${GAP * 2}px)`,
                 height: `calc(${t.h}% - ${GAP * 2}px)`,
                 background: FILL[state],
-                opacity: dim ? 0.4 : 1,
               }}
             >
-              {/* The ring is drawn INSIDE the tile with an inset shadow rather than as a border,
+              {/* THE RING IS THE ONLY SELECTION CUE, and the dimming that used to accompany it is
+                  gone. The bubbles faded every unhovered circle to 35%, which worked because
+                  circles are sparse marks on a white ground. A treemap covers its whole box, so the
+                  same rule washed out fifteen of sixteen tiles the instant the pointer arrived —
+                  destroying the comparison the map exists to make, and taking white-on-green down
+                  to an unreadable contrast on the way. Seen in a screenshot, not reasoned about.
+
+                  The ring is drawn INSIDE the tile with an inset shadow rather than as a border,
                   because a border would resize it — and a tile whose size changes on hover is a
                   tile whose size stopped meaning the budget. It is what ties the line above the map
-                  to a square on it. */}
+                  to a square on it, and it is enough on its own: it is painted in that tile's own
+                  ink, so it is visible against all four fills. Same cue the phone uses. */}
               {isActive && (
                 <span
                   aria-hidden
