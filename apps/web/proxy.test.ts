@@ -204,10 +204,24 @@ describe('the request boundary', () => {
     // pre-auth would let anyone mint one. It stays behind the boundary.
     expect(letsThrough(await proxy(requestFor('/api/v1/auth/device-handoff')))).toBe(false);
 
-    // SEVEN AND NO MORE. `logout` sits under the same directory and is NOT admitted — the allowlist
-    // is a set of exact paths rather than a prefix, and a prefix would have let it and every future
-    // endpoint under `/api/v1/auth/` through by default.
-    expect(PRE_AUTH_PATHS.size).toBe(7);
+    // TWELVE AND NO MORE, and the count is asserted precisely so that growing it is a decision
+    // rather than a drift. It went from seven on 2026-09-22 when the PWA's install assets were
+    // added — a manifest and four icons, which carry an app name, a colour and a drawn square and
+    // nothing else. They are the least privileged bytes the server holds, and they have to be
+    // reachable before auth or an installed app caches the LOGIN PAGE as its own shell.
+    //
+    // `logout` sits under the same directory and is NOT admitted — the allowlist is a set of exact
+    // paths rather than a prefix, and a prefix would have let it and every future endpoint under
+    // `/api/v1/auth/` through by default. The five new entries are exact paths for the same reason:
+    // `/icon-192.png` is admitted and `/icon-192.png/anything` is not.
+    expect(PRE_AUTH_PATHS.size).toBe(12);
+
+    // THE NEW ONES CARRY NOTHING. Asserted rather than described, so a future edit that points one
+    // of these at something privileged fails here.
+    for (const asset of ['/manifest.webmanifest', '/apple-icon.png', '/icon-192.png']) {
+      expect(PRE_AUTH_PATHS.has(asset)).toBe(true);
+      expect((await proxy(requestFor(`${asset}/anything`))).status).toBe(401);
+    }
     expect((await proxy(requestFor('/api/v1/auth/logout'))).status).toBe(401);
     // Nor does a path that merely extends an allowlisted one.
     expect((await proxy(requestFor('/api/v1/auth/register/options/anything'))).status).toBe(401);

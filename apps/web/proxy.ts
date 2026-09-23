@@ -74,6 +74,30 @@ export const PRE_AUTH_PATHS: ReadonlySet<string> = new Set([
   // The browser half of the same flow. A page, no privilege of its own: it runs the passkey ceremony
   // and cannot mint anything without one succeeding first.
   '/link-device',
+
+  // ─── The PWA's install assets (§5 step 26b) ─────────────────────────────────────────────────
+  //
+  // WHAT THEY CONTAIN is the whole argument: an app name, a description, a theme colour, and a
+  // drawn "b8" square. No figure, no account, no session, nothing derived from the ledger. Weighed
+  // against the same write-up's warning that an allowlist creates its holes at the special paths —
+  // these are the opposite of special. They are the least privileged bytes the server holds.
+  //
+  // WHY THEY CANNOT SIT BEHIND THE BOUNDARY, which is the part that is not obvious:
+  //
+  //   * iOS reads the manifest and icons AT INSTALL TIME. Behind auth they answer 307 to /login,
+  //     and the Home Screen entry silently falls back to the page title and a screenshot.
+  //   * A service worker precaching the shell would follow that redirect and cache the LOGIN PAGE
+  //     as the app's shell — after which the installed app opens to a login screen forever, from
+  //     its own cache, with no request to the server that could correct it. That failure is
+  //     invisible until it is permanent, which is why this lands before the service worker rather
+  //     than after it.
+  //
+  // The host is tailnet-only regardless, so the audience for these is already inside the network.
+  '/manifest.webmanifest',
+  '/apple-icon.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png',
 ]);
 
 /**

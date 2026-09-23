@@ -65,8 +65,8 @@ export async function authorize(request: RequestLike): Promise<AuthDecision> {
  * A handler's question: which session is this, for THIS request?
  *
  * IT APPLIES THE SCOPE CHECK ITSELF, and the earlier version of this function did not — its comment
- * said "the boundary already made it", which is true of every path except the five in
- * `PRE_AUTH_PATHS`, and two of those five are the registration endpoints. The boundary returns
+ * said "the boundary already made it", which is true of every path except those in
+ * `PRE_AUTH_PATHS`, and two of them are the registration endpoints. The boundary returns
  * `NextResponse.next()` for them before `authorize` runs, so on exactly the paths that can enrol a
  * permanent credential, nothing had checked scope at all: a READ-ONLY personal token counted as a
  * session, `registrationDecision` saw `hasValidSession: true`, and the handler enrolled whatever
