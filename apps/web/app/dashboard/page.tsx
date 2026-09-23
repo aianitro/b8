@@ -63,11 +63,21 @@ function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
 }) {
   const content = (
     <>
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-      <p className={`text-3xl font-bold mt-2 font-mono ${highlight ? STATUS_CLASS[highlight] : 'text-slate-900'}`}>
+      {/* `break-words` IS WHAT STOPS THE PAGE SCROLLING SIDEWAYS. A grid track defaults to
+          `min-width: auto`, so it grows to fit its widest unbreakable content — and
+          "UNCATEGORIZED" is one unbreakable word about 117px across at `text-xs tracking-wider`.
+          Three such tracks exceed a 390px viewport, the grid overflows its container, and the whole
+          page gains a horizontal scrollbar because of a LABEL. Wrapping it mid-word is ugly in the
+          worst case and bounded in every case. */}
+      <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide sm:tracking-wider text-slate-400 break-words">
+        {label}
+      </p>
+      {/* Smaller on a phone for the same reason, and because a figure that needs 3xl at 358px of
+          screen is a figure that will be truncated instead. */}
+      <p className={`text-2xl sm:text-3xl font-bold mt-1.5 sm:mt-2 font-mono ${highlight ? STATUS_CLASS[highlight] : 'text-slate-900'}`}>
         {value}
       </p>
-      {sub && <p className={`text-xs mt-1.5 ${subColor ? STATUS_CLASS[subColor] : 'text-slate-400'}`}>{sub}</p>}
+      {sub && <p className={`text-[11px] sm:text-xs mt-1 sm:mt-1.5 ${subColor ? STATUS_CLASS[subColor] : 'text-slate-400'}`}>{sub}</p>}
       {footer && <div className="mt-3 pt-3 border-t border-slate-100">{footer}</div>}
     </>
   );
@@ -75,14 +85,14 @@ function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
     return (
       <a
         href={href}
-        className="block bg-white rounded-2xl border border-slate-100 shadow-sm p-6 hover:border-slate-200 hover:shadow-md transition-all"
+        className="block min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 hover:border-slate-200 hover:shadow-md transition-all"
       >
         {content}
       </a>
     );
   }
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+    <div className="min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6">
       {content}
     </div>
   );
@@ -327,7 +337,7 @@ export default async function DashboardPage() {
           counts onto a line of their own — so the three questions of the form "what is waiting on
           you" were read across a row break. Splitting by KIND rather than by count is what lets
           all three sit together. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
         {/* The same figure /budget's header carries, from the same reader — where the operational
             year closes if the plan holds. It leads the page's figures because it is the one the
             others are judged against; the row it shares is now the two TARGETS, the counts having
@@ -371,7 +381,7 @@ export default async function DashboardPage() {
           together, and a breakpoint that splits them two-and-one defeats it on exactly the narrow
           screens where scanning is hardest. These are counts, so the columns can be narrow — the
           argument against three across is about not truncating a five-figure amount. */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-6">
         {/* Uncategorized leads: it is the one with work attached rather than a state to read, and
             the only one of the three that NAVIGATES rather than opening — its list is the
             transactions page's own filter, which is where the filing actually happens.
@@ -423,11 +433,11 @@ export default async function DashboardPage() {
             stop rather than a step in the sequence.
 
             Still a pair, still side by side: today only means something against the week. */}
-        {/* Stacked below `sm:`, side by side above it. These carry CURRENCY, so the two-per-row
-            rule the counts row is exempt from applies here: at a third of a phone a four-figure
-            amount with cents overflows its card at `text-3xl`, and a truncated figure is worse
-            than a taller page. */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Two per row at every width, matching the phone and the targets row above. It was
+            stacked below `sm:` because a four-figure amount with cents overflowed its card at
+            `text-3xl` — which the smaller mobile type in `KpiCard` has since fixed at the source,
+            so the stacking is no longer buying anything. */}
+        <div className="grid grid-cols-2 gap-3 sm:gap-4">
           <KpiCard
             label="Today"
             value={fmt(todayStats.spent)}

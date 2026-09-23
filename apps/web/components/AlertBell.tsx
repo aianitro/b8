@@ -62,7 +62,7 @@ export default function AlertBell({ count, children }: { count: number; children
         // floats above — the drift card in particular came out grey. The panel puts white
         // underneath them and a shadow around, so it reads as lifted off the page rather than
         // dissolved into whatever is behind it.
-        <div className="absolute right-0 top-full mt-2 w-[26rem] z-30 rounded-xl bg-white p-2
+        <div className="absolute right-0 top-full mt-2 w-[calc(100vw-2rem)] max-w-[26rem] sm:w-[26rem] z-30 rounded-xl bg-white p-2
                         shadow-lg ring-1 ring-slate-900/5 space-y-2">
           {children}
         </div>

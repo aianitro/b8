@@ -100,7 +100,7 @@ function Card({ label, value, sub, amber, open, onToggle, disabled }: {
   const body = (
     <>
       <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+        <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide sm:tracking-wider text-slate-400 break-words">{label}</p>
         {/* THE ONLY MARK SAYING THIS CARD OPENS. Its neighbours in the row do not, and a control
             that looks exactly like a static card is a control nobody finds. Hidden when there is
             nothing to open, so it never invites a click that does nothing. */}
@@ -111,14 +111,16 @@ function Card({ label, value, sub, amber, open, onToggle, disabled }: {
           />
         )}
       </div>
-      <p className={`text-3xl font-bold mt-2 font-mono ${amber ? 'text-amber-600' : 'text-slate-900'}`}>
+      <p className={`text-2xl sm:text-3xl font-bold mt-1.5 sm:mt-2 font-mono ${amber ? 'text-amber-600' : 'text-slate-900'}`}>
         {value}
       </p>
-      <p className="text-xs mt-1.5 text-slate-400">{sub}</p>
+      <p className="text-[11px] sm:text-xs mt-1 sm:mt-1.5 text-slate-400">{sub}</p>
     </>
   );
 
-  const shell = 'bg-white rounded-2xl border border-slate-100 shadow-sm p-6 text-left w-full';
+  // `min-w-0` and the smaller mobile padding for the same reason as KpiCard: a grid track grows
+  // to its widest unbreakable word unless told it may shrink.
+  const shell = 'min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 text-left w-full';
 
   // A card with nothing behind it stays a card rather than becoming a dead button: `disabled` on a
   // <button> is announced as "unavailable", which is the wrong thing to say about a figure that is
