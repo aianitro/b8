@@ -27,16 +27,17 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: '/dashboard',
     display: 'standalone',
     background_color: '#ffffff',
-    // SLATE-900, MATCHING THE APP'S TOP BAR — not the icon, and not the page.
+    // CYAN-700, MATCHING THE APP'S TOP BAR — which is now the brand colour too, so this agrees with
+    // the icon by consequence rather than by copying it.
     //
     // `theme_color` paints the browser or OS CHROME around the app; `background_color` above is what
     // fills the launch splash. An earlier draft of this line set it to the icon's cyan on the
     // reasoning that the splash should flash the brand, which is simply the wrong field.
     //
-    // The mobile header is `bg-slate-900`, and with `black-translucent` the page runs under the
+    // The mobile header is `bg-cyan-700`, and with `black-translucent` the page runs under the
     // status bar — so this is the colour sitting directly beneath the clock. Anything else leaves a
     // seam at the very top of the screen.
-    theme_color: '#0f172a',
+    theme_color: '#0e7490',
     orientation: 'portrait',
     icons: [
       { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },

@@ -9,6 +9,39 @@ Read this fully before writing any UI code. All new components must conform to t
 
 ---
 
+## Brand — chrome only, never data
+
+| Concept            | Tailwind class           | Hex       |
+|--------------------|--------------------------|-----------|
+| Brand ground       | `bg-cyan-700`            | `#0e7490` |
+| Wordmark (display) | —                        | `#f0dfae` |
+| Ink on brand ground| `text-cyan-100`          | `#cffafe` |
+
+**These are the only colours in this document that mean nothing.** Every token in the table below
+is semantic — blue is operational, green is income, red is over budget — so none of them may paint a
+permanent surface: an icon or a nav bar in a status colour makes a claim that is wrong in some
+month. Cyan-700 exists to be the app's *identity*, and the rule runs both ways: **never use it for a
+chart series, a cell, a figure or a state.** If it ever encodes data, it has stopped being the brand.
+
+Where it is used: the Home Screen icon, the sidebar, the mobile header and drawer, and `theme_color`.
+
+**Two measured limits, because this ground is mid-toned rather than near-black:**
+
+- **14px text on cyan-700 needs 4.5:1**, which admits white (5.36:1) down to `cyan-100` (4.79:1) and
+  nothing dimmer. `text-slate-400`, the old shell's inactive ink, is **2.11:1** here — a colour swap
+  that keeps the foreground makes the nav illegible.
+- That band is too narrow to signal active/inactive by lightness, so **state is carried by a
+  background wash and font weight**, not by a dimmer label.
+- **Champagne is display-size only** — 4.05:1, which clears the 3:1 large-bold floor and fails the
+  4.5:1 one. It is the wordmark and nothing smaller.
+
+*Chosen 2026-09-23 by measurement: the previous near-black icon was 1.18:1 against a dark wallpaper —
+not dark but invisible. An icon cannot choose its wallpaper, so the figure that matters is the worse
+of the two, and cyan-700's is 3.92:1, the only candidate clearing 3:1 against both extremes. True
+gold was rejected the same way: it needs a ground dark enough to fail that test.*
+
+---
+
 ## Color Tokens
 
 | Concept            | Tailwind class           | Hex       |

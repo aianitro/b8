@@ -49,7 +49,18 @@ const WEB = join(HERE, '..');
  * correct and this would be worse. Same mark, different ground, different answer.
  */
 const INK = '#0e7490';   // cyan-700 — brand only, never a status
-const PAPER = '#ffffff';
+/**
+ * CHAMPAGNE, NOT WHITE — warm metal against a cool ground, which is the relationship that makes
+ * gold-on-vert work heraldically, executed at a lightness the wallpaper constraint permits.
+ *
+ * True gold was measured and rejected: antique gold needs a ground of teal-800 or darker to clear
+ * 3:1, and every such ground falls below 3:1 against a DARK wallpaper — the fault this icon was
+ * just changed to fix. You can have the gold or the visibility, not both.
+ *
+ * 4.05:1 here, which clears the 3:1 floor for large bold type. It is NOT enough for 14px nav
+ * labels, and `Sidebar.tsx` uses cyan-100 for those rather than reusing this.
+ */
+const PAPER = '#f0dfae';   // champagne — the mark, at display size only
 
 /**
  * @param size   pixel square
