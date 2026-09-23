@@ -23,7 +23,6 @@
 // task already depends on removes that step rather than reimplementing it carefully.
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 
 /** Where a successful ceremony lands. The dashboard is the app's home surface. */
@@ -59,7 +58,6 @@ async function runCeremony(ceremony: Ceremony): Promise<void> {
 }
 
 export default function LoginPage() {
-  const router = useRouter();
   const [busy, setBusy] = useState<Ceremony | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,11 +66,25 @@ export default function LoginPage() {
     setError(null);
     try {
       await runCeremony(ceremony);
-      // A full navigation rather than a client transition: the session cookie was set by the
-      // response that just landed, and every protected page is server-rendered behind the boundary
-      // that reads it.
-      router.push(AFTER_SIGN_IN);
-      router.refresh();
+      // A FULL NAVIGATION, and this time actually one.
+      //
+      // This was `router.push()` followed by `router.refresh()`, under a comment claiming it was a
+      // full navigation. It is not: Next's own reference says `push` performs a CLIENT-SIDE
+      // navigation, and that is what made signing in fail on the first try for days.
+      //
+      // The sequence: opening the app requests /dashboard, the boundary answers 307 to /login, and
+      // the client router caches that result for the route. The passkey ceremony then succeeds —
+      // the server logged "session opened" every single time, three to five times per burst — and
+      // `push` serves the CACHED redirect straight back to /login. The session was valid the whole
+      // time and the browser never asked for the page with it. Retrying worked only once the cache
+      // entry went stale, which is why the bursts in the log span about thirty seconds.
+      //
+      // `location.assign` is the fix and not a workaround: it discards every client cache and makes
+      // a fresh HTTP request carrying the cookie that was just set. A sign-in is the one navigation
+      // that must not be served from anything remembered from before it.
+      window.location.assign(AFTER_SIGN_IN);
+      // Deliberately no `router.refresh()`. The line above ends this document; anything after it is
+      // a race against the browser tearing the page down.
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'That did not work. Try again.');
     } finally {
