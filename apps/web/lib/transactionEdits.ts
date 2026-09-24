@@ -139,3 +139,50 @@ export const GROUP_LABELS = {
   capital: 'Capital',
   excluded: 'Excluded from budget',
 } as const;
+
+/** One row that could be the other side of a transfer — `GET /api/v1/transactions/:id/counterparts`. */
+export interface Counterpart {
+  id: number;
+  date: string;
+  label: string;
+  amount: number;
+  account: string;
+}
+
+/**
+ * Who could be the other half of this transfer, nearest in time first.
+ *
+ * Returns an empty list rather than throwing when the lookup fails. A missing OFFER degrades to the
+ * link that was there before — the reader can still pair in the ledger — where a thrown error would
+ * put a failure notice on a dialog whose actual edit succeeded.
+ */
+export async function fetchCounterparts(id: number): Promise<Counterpart[]> {
+  try {
+    const res = await fetch(`/api/v1/transactions/${id}/counterparts`);
+    const data = await res.json();
+    return data?.success ? (data.data as Counterpart[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Link these rows as one transfer — the same endpoint the ledger's multi-select uses.
+ *
+ * It sets `mapped_category = 'Transfer'` on every member itself, which is why pairing IS
+ * categorising and why the caller need not send the category separately.
+ */
+export const pairAsTransfer = (ids: number[]) =>
+  post('/api/v1/transfers', { ids });
+
+async function post(url: string, body: Record<string, unknown>): Promise<void> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => null);
+  if (!data?.success) {
+    throw new TransactionEditError(data?.error?.message ?? 'Could not pair those. Try the ledger.');
+  }
+}

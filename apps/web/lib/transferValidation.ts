@@ -58,3 +58,50 @@ export function validateTransferRows(
   }
   return null;
 }
+
+/** How far either side of a row to look for its counterpart, in days. */
+export const COUNTERPART_WINDOW_DAYS = 7;
+
+export interface CounterpartRow {
+  id: number;
+  date: string;
+  label: string;
+  amount: number;
+  account: string;
+}
+
+/**
+ * The rule for "which rows could be the other side of this one", as a predicate over fetched rows.
+ *
+ * ─── Why this is narrow, and stays narrow ─────────────────────────────────────────────────────
+ *
+ * A transfer group must net to ~zero (see `validateTransferRows`), so for a TWO-row group the
+ * counterpart's amount is the exact negation — not "about the same", not "within a tolerance".
+ * `EPSILON` is here only to absorb the float error of reading a NUMERIC through `pg`, never to
+ * admit a near-miss: two rows a cent apart are two different movements of money, and pairing them
+ * would put a cent of a real transfer into a budget forever.
+ *
+ * ALREADY-GROUPED ROWS ARE EXCLUDED because `validateTransferRows` would refuse them anyway, and
+ * an offer the server will reject is worse than no offer.
+ *
+ * The window is days, not hours. A card autopay debits and credits the same day; an inter-bank
+ * transfer takes two or three; `COUNTERPART_WINDOW_DAYS` is generous enough for both and tight
+ * enough that a recurring equal amount a fortnight later is not proposed as the same movement.
+ *
+ * ─── What this deliberately does NOT do ───────────────────────────────────────────────────────
+ *
+ * No three-way groups. `POST /api/v1/transfers` takes any number of ids and the ledger's own
+ * multi-select can build them; this one-tap path answers the overwhelmingly common case and leaves
+ * the rest where the tool for it already is. Offering a "pick several of these" list inside a
+ * modal over a single row would be rebuilding that tool in the wrong place.
+ */
+export function isCounterpart(
+  row: { amount: number; transfer_group_id: number | null; date: string },
+  subject: { amount: number; date: string },
+): boolean {
+  if (row.transfer_group_id !== null) return false;
+  if (Math.abs(row.amount + subject.amount) > EPSILON) return false;
+  const days = Math.abs(Date.parse(`${row.date}T00:00:00Z`) - Date.parse(`${subject.date}T00:00:00Z`))
+    / 86_400_000;
+  return Number.isFinite(days) && days <= COUNTERPART_WINDOW_DAYS;
+}

@@ -39,8 +39,8 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeftRight, Flag, Pencil, X } from 'lucide-react';
 import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
 import {
-  GROUP_LABELS, groupCategories, isTransferCategory, setCategory, setNote, setWatched,
-  type CategoryOption,
+  fetchCounterparts, GROUP_LABELS, groupCategories, isTransferCategory, pairAsTransfer,
+  setCategory, setNote, setWatched, type CategoryOption, type Counterpart,
 } from '@/lib/transactionEdits';
 
 export interface EditableRow {
@@ -86,6 +86,9 @@ export default function TransactionEditButton({ row, categories }: {
   const [undoTo, setUndoTo] = useState<string | null | undefined>(undefined);
   /** Whether anything was written since the dialog opened — see `run`, and `closeModal` below. */
   const [dirty, setDirty] = useState(false);
+  /** Rows that could be the other side, once this row owes a pair. `null` while unasked. */
+  const [counterparts, setCounterparts] = useState<Counterpart[] | null>(null);
+  const [paired, setPaired] = useState(false);
 
   // The window closes on its own, and closes NOTHING ELSE. An expiry that also refreshed would
   // make the dialog disappear unprompted five seconds after a category was picked. A permanent
@@ -146,12 +149,25 @@ export default function TransactionEditButton({ row, categories }: {
     setCategoryState(row.category);
     setUndoTo(undefined);
     setDirty(false);
+    setCounterparts(null);
+    setPaired(false);
     setError(null);
     setOpen(true);
   }
 
   const groups = groupCategories(categories, row.label);
-  const owesAPair = isTransferCategory(category);
+  const owesAPair = isTransferCategory(category) && !paired;
+
+  /**
+   * Asked for only once the row actually owes a pair, and never on open. Most rows edited here are
+   * not transfers, and a lookup fired on every dialog would be a query per row read.
+   */
+  useEffect(() => {
+    if (!open || !owesAPair) return;
+    let live = true;
+    fetchCounterparts(row.id).then((found) => { if (live) setCounterparts(found); });
+    return () => { live = false; };
+  }, [open, owesAPair, row.id]);
 
   return (
     <>
@@ -246,31 +262,82 @@ export default function TransactionEditButton({ row, categories }: {
               </div>
             )}
 
-            {/* HALF A TRANSFER IS NOT A TRANSFER. `POST /api/v1/transfers` sets this category
-                itself, which says what the ledger thinks the real act is: pairing IS categorising,
-                and setting the category alone leaves a row whose counterpart nothing points at.
-                The table renders that state as an amber "Pair required" badge on the row; this
-                panel had no way to say it, so filing something as Transfer from the dashboard
-                created the half-state in silence.
+            {/* HALF A TRANSFER IS NOT A TRANSFER, AND THE OTHER HALF IS NOT A MYSTERY.
+                `POST /api/v1/transfers` sets this category itself, which says what the ledger
+                considers the real act: pairing IS categorising, and setting the category alone
+                leaves a row whose counterpart nothing points at.
 
-                The link filters the ledger by ABSOLUTE amount, which is the useful accident of how
-                that filter is written: one figure brings back both this row and its mirror, which
-                is exactly the selection "Pair as Transfer" needs. Pairing itself stays in the
-                table, because it is a multi-row act and a modal over one row is the wrong shape
-                for it. */}
+                This used to say so and link to the ledger, which was honest and cost nine steps
+                across two pages — open the panel, open the row, choose Transfer, read the warning,
+                follow the link OFF the dashboard, tick two boxes in a wide table, press Pair,
+                come back. The owner asked me to try it. Step three creates the invalid state that
+                steps five to eight exist only to repair.
+
+                None of it was necessary. A two-row transfer must net to zero, so the other side is
+                an ungrouped row of the exact opposite amount within a few days — the app was
+                already computing that (it is what the link's absolute-amount filter did) and then
+                making the owner do the finding by eye. It offers instead. The link survives for
+                the cases one tap cannot serve: no candidate found, or a three-way group. */}
+            {paired && (
+              <p className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-700">
+                <ArrowLeftRight size={13} className="shrink-0" />
+                Paired. Both sides are now one transfer.
+              </p>
+            )}
+
             {owesAPair && (
-              <div className="mt-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-2.5">
-                <ArrowLeftRight size={14} className="shrink-0 mt-0.5 text-amber-600" />
-                <p className="text-[11px] text-amber-900 leading-snug">
-                  A transfer needs its matching transaction.{' '}
-                  <Link
-                    href={`/transactions?amountMin=${Math.abs(row.amount)}&amountMax=${Math.abs(row.amount)}`}
-                    className="font-semibold underline hover:text-amber-950"
-                  >
-                    Find the other side
-                  </Link>{' '}
-                  and use Pair as Transfer.
+              <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2.5">
+                <p className="flex items-start gap-2 text-[11px] text-amber-900 leading-snug">
+                  <ArrowLeftRight size={14} className="shrink-0 mt-0.5 text-amber-600" />
+                  <span>A transfer needs its matching transaction.</span>
                 </p>
+
+                {counterparts === null && (
+                  <p className="mt-1.5 pl-6 text-[11px] text-amber-700/70">Looking for the other side…</p>
+                )}
+
+                {counterparts?.length === 0 && (
+                  <p className="mt-1.5 pl-6 text-[11px] text-amber-900">
+                    Nothing matching found nearby.{' '}
+                    <Link
+                      href={`/transactions?amountMin=${Math.abs(row.amount)}&amountMax=${Math.abs(row.amount)}`}
+                      className="font-semibold underline hover:text-amber-950"
+                    >
+                      Find it in the ledger
+                    </Link>.
+                  </p>
+                )}
+
+                {/* One tap per candidate, and the candidate says enough to tell two apart: the
+                    account it moved through, the day, and the figure. Five at most — more than
+                    that and the amount is not identifying anything, which is the ledger's job. */}
+                {counterparts && counterparts.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {counterparts.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => run(async () => {
+                            await pairAsTransfer([row.id, c.id]);
+                            setPaired(true);
+                          })}
+                          className="w-full flex items-center gap-2 rounded-md bg-white border border-amber-200
+                                     px-2 py-1.5 text-left hover:border-amber-400 disabled:opacity-50 transition-colors"
+                        >
+                          <ArrowLeftRight size={12} className="shrink-0 text-amber-600" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[11px] text-slate-700 truncate">{c.label}</span>
+                            <span className="block text-[10px] text-slate-400">{c.account} · {c.date}</span>
+                          </span>
+                          <span className={`text-[11px] font-mono shrink-0 ${c.amount < 0 ? 'text-emerald-600' : 'text-slate-700'}`}>
+                            {c.amount < 0 ? '+' : ''}{fmt(c.amount)}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isValidTransferIds, validateTransferRows, type TransferCandidate } from './transferValidation';
+import { isValidTransferIds, validateTransferRows, type TransferCandidate , isCounterpart } from './transferValidation';
 
 const row = (id: number, amount: string | number, groupId: number | null = null): TransferCandidate => ({
   id,
@@ -89,5 +89,49 @@ describe('validateTransferRows', () => {
     it('handles amounts arriving as numbers as well as strings', () => {
       expect(validateTransferRows([1, 2], [row(1, -500), row(2, 500)])).toBeNull();
     });
+  });
+});
+
+describe('isCounterpart', () => {
+  const subject = { amount: 6938.46, date: '2026-09-23' };
+  const row = (over: Partial<{ amount: number; transfer_group_id: number | null; date: string }> = {}) =>
+    ({ amount: -6938.46, transfer_group_id: null, date: '2026-09-22', ...over });
+
+  it('accepts the exact negation a couple of days either side', () => {
+    expect(isCounterpart(row(), subject)).toBe(true);
+    expect(isCounterpart(row({ date: '2026-09-24' }), subject)).toBe(true);
+    expect(isCounterpart(row({ date: '2026-09-23' }), subject)).toBe(true);
+  });
+
+  // THE CENT THAT MUST NOT PAIR. `EPSILON` absorbs the float error of reading a NUMERIC through
+  // `pg`; it is not a tolerance for near-misses. Two rows a cent apart are two movements of money,
+  // and pairing them would bury that cent in a budget forever.
+  it('refuses an amount that is close but not equal', () => {
+    expect(isCounterpart(row({ amount: -6938.45 }), subject)).toBe(false);
+    expect(isCounterpart(row({ amount: -6938.47 }), subject)).toBe(false);
+  });
+
+  it('tolerates only float noise', () => {
+    expect(isCounterpart(row({ amount: -6938.46 - 1e-9 }), subject)).toBe(true);
+  });
+
+  it('refuses the same sign', () => {
+    expect(isCounterpart(row({ amount: 6938.46 }), subject)).toBe(false);
+  });
+
+  it('refuses a row already in a group, which the server would reject anyway', () => {
+    expect(isCounterpart(row({ transfer_group_id: 168 }), subject)).toBe(false);
+  });
+
+  // A standing transfer of the same amount repeats. The window is what stops last fortnight's
+  // being offered as this one's other half.
+  it('refuses a match outside the window', () => {
+    expect(isCounterpart(row({ date: '2026-09-16' }), subject)).toBe(true);   // exactly 7 days
+    expect(isCounterpart(row({ date: '2026-09-15' }), subject)).toBe(false);  // 8
+    expect(isCounterpart(row({ date: '2026-10-07' }), subject)).toBe(false);
+  });
+
+  it('refuses an unparseable date rather than treating it as near', () => {
+    expect(isCounterpart(row({ date: 'not-a-date' }), subject)).toBe(false);
   });
 });
