@@ -118,6 +118,13 @@ function fabricatedSources(): OverviewSources {
       // Watched AND arriving: the two lists overlap, which the phone briefly assumed they could not.
       { id: 9002, date: '2026-09-11', amount: -742.5, label: 'Fabricated Payroll', category: null, watched: true, note: 'double paid?' },
     ],
+    // A CAPPED SAMPLE, not the count. `stats.uncategorized` says how many there are; this says
+    // what some of them look like. The second row is watched AND unfiled — the overlap the
+    // editor opened from this list has to start from, rather than assuming a blank note.
+    uncategorized: [
+      { id: 9101, date: '2026-09-10', amount: 418.4, label: 'Fabricated Unfiled', category: null, watched: false, note: null },
+      { id: 9102, date: '2026-09-09', amount: 22.75, label: 'Fabricated Unfiled Two', category: null, watched: true, note: 'chase this' },
+    ],
     budgetVsActual: [
       { category: 'Fabricated Groceries', budget: 12000, spent: 8450.12 },
       { category: 'Fabricated Sport', budget: 4800, spent: 265 },
@@ -342,6 +349,14 @@ describe('the composed overview payload, on the wire', () => {
     // The same rule one section over: an uncategorized arrival's category is null, not '' and not
     // the string 'Uncategorized'.
     expect(wire.recentArrivals[1].category).toBeNull();
+
+    // The unfiled sample crosses the wire as money strings like everything else, and its
+    // `category` is null by construction — that is what makes a row unfiled.
+    expect(wire.uncategorized).toHaveLength(2);
+    expect(wire.uncategorized[0].amount).toBe('418.40');
+    expect(wire.uncategorized[0].category).toBeNull();
+    expect(wire.uncategorized[1].watched).toBe(true);
+    expect(wire.uncategorized[1].note).toBe('chase this');
 
     // The helper, directly, in both directions — and the contrast that makes the rule legible: a
     // real zero still formats, because zero dollars IS a figure.

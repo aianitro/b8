@@ -100,6 +100,9 @@ export function dashboardFromWire(data: OverviewData) {
       received: money(m.received),
     })),
     recentArrivals: data.recentArrivals.map((r) => ({ ...r, amount: money(r.amount) })),
+    // The sample behind the Uncategorized card. `stats.uncategorized` remains the COUNT — this is
+    // capped, so its length is not it, and the panel says so when the two differ.
+    uncategorized: data.uncategorized.map((r) => ({ ...r, amount: money(r.amount) })),
     // The count BEFORE the reader's limit of twelve, so a card counting arrivals says how many
     // there are rather than how many it was handed. See the field's note in the contract.
     recentArrivalsTotal: data.recentArrivalsTotal,

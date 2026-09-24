@@ -11,6 +11,7 @@ import JobHealthCard from '@/components/JobHealthCard';
 import AlertBell from '@/components/AlertBell';
 import WhereTheMonthSits, { type MonthCategoryView } from '@/components/WhereTheMonthSits';
 import RecentArrivals from '@/components/RecentArrivals';
+import UncategorizedCard from '@/components/UncategorizedCard';
 import WatchlistCard from '@/components/WatchlistCard';
 import ExpandableKpiCards from '@/components/ExpandableKpiCards';
 import PushSetup from '@/components/PushSetup';
@@ -50,6 +51,24 @@ const pct = (fraction: number) => `${Math.round(fraction * 100)}%`;
  * One recently arrived transaction, as `RecentArrivals` renders it. Kept here because the component
  * imports its type from this page.
  */
+/**
+ * One unfiled row, as the dashboard's panel renders it.
+ *
+ * Structurally `RecentArrival`'s twin and separate for the same reason the contract keeps the two
+ * schemas apart: they are selected by different predicates and should be free to diverge at the
+ * one place they might. `category` is always null — that is what makes a row unfiled — and is
+ * carried because the editor these rows open reads it.
+ */
+export interface UnfiledTransaction {
+  id: number;
+  date: string;
+  amount: number;
+  label: string;
+  category: string | null;
+  watched: boolean;
+  note: string | null;
+}
+
 export interface RecentArrival {
   id: number;
   date: string;
@@ -238,7 +257,8 @@ export default async function DashboardPage() {
   // page's are one calendar, not two that disagree around midnight.
   const {
     stats, today: todayStats, week: weekStats, monthlySpending: monthly, budgetVsActual,
-    recentArrivals, recentArrivalsTotal, watchlist, yearEnd, offCycleElsewhere, monthCategories,
+    recentArrivals, recentArrivalsTotal, uncategorized: unfiled, watchlist, yearEnd,
+    offCycleElsewhere, monthCategories,
     feedFindings, driftFindings, jobHealth,
   } = dashboardFromWire(await loadOverview(now));
   // Started before the overview and collected here, so the two reads overlap rather than queue.
@@ -402,29 +422,19 @@ export default async function DashboardPage() {
           screens where scanning is hardest. These are counts, so the columns can be narrow — the
           argument against three across is about not truncating a five-figure amount. */}
       <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-6">
-        {/* Uncategorized leads: it is the one with work attached rather than a state to read, and
-            the only one of the three that NAVIGATES rather than opening — its list is the
-            transactions page's own filter, which is where the filing actually happens.
-
-            The count alone. A percentage of 1,476 transactions rounds to 0% at one unfiled row and
-            still at six, so the card used to read "0%" in amber while there was work waiting.
-
-            No denominator either: the total is context nobody acts on. Filing is per transaction,
-            so the count IS the size of the job, and "1" says it without a ratio to interpret. */}
-        <KpiCard
-          label="Uncategorized"
-          value={stats.uncategorized.toLocaleString()}
-          highlight={stats.uncategorized > 0 ? 'amber' : 'green'}
-          href="/transactions?filter=uncategorized"
-        />
-        {/* The other two counts of things waiting on the owner, beside the first. These OPEN rather
-            than navigate, because both answer their question in a list short enough to read in
-            place — and leaving the dashboard to read six rows loses the picture they qualify.
+        {/* ALL THREE COUNTS, as figures that open. Uncategorized was a separate `KpiCard` with an
+            `href` until 2026-09-23, which made it the one of the three that left the page; it now
+            opens beside the other two. They answer their questions in lists short enough to read
+            in place, and leaving the dashboard to read six rows loses the picture they qualify.
 
             The panels are the same two components that used to sit above, rendered here and passed
             through: they are server components, and handing them in already rendered keeps them
             that way. `watchlist` is ordered oldest first by its reader, so `[0]` is the age. */}
         <ExpandableKpiCards
+          unfiledCount={stats.uncategorized}
+          unfiledPanel={
+            <UncategorizedCard items={unfiled} total={stats.uncategorized} categories={categoryOptions} />
+          }
           watchCount={watchlist.length}
           watchOldest={watchlist[0]?.daysOpen ?? 0}
           watchPanel={<WatchlistCard items={watchlist} categories={categoryOptions} />}

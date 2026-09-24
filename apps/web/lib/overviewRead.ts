@@ -238,6 +238,16 @@ export interface OverviewSources {
     watched: boolean;
     note: string | null;
   }[];
+  /** A capped sample of what `stats.uncategorized` counts — see the field's note in the contract. */
+  uncategorized: {
+    id: number;
+    date: string;
+    amount: number;
+    label: string;
+    category: string | null;
+    watched: boolean;
+    note: string | null;
+  }[];
   budgetVsActual: { category: string; budget: number; spent: number }[];
   monthOutlook: MonthOutlook;
   /**
@@ -522,6 +532,15 @@ export function composeOverview(sources: OverviewSources): OverviewData {
       // `null` for an uncategorized row, never `''` and never the string `'Uncategorized'`.
       category: r.category,
     })),
+    uncategorized: sources.uncategorized.map((r) => ({
+      id: r.id,
+      date: r.date,
+      amount: wireMoney(r.amount),
+      label: r.label,
+      category: r.category,
+      watched: r.watched,
+      note: r.note,
+    })),
     budgetVsActual: sources.budgetVsActual.map((b) => ({
       category: b.category,
       budget: wireMoney(b.budget),
@@ -596,6 +615,10 @@ async function readStats(asOf: AsOf): Promise<OverviewSources['stats']> {
               AND bc.landscape = 'operational'
          WHERE EXTRACT(YEAR FROM t.date) = $1 AND t.hidden = FALSE)::text AS ytd_spent,
       (SELECT COUNT(*) FROM transactions t JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+         -- readUncategorized LISTS these same rows and repeats this predicate. The two must
+         -- agree: a card reading four above a panel showing five is a contradiction a reader
+         -- resolves by distrusting both. They cannot be one query — this is unbounded, that is
+         -- capped — so each names the other instead.
          WHERE t.mapped_category IS NULL AND t.hidden = FALSE)::text AS uncategorized,
       (SELECT COUNT(*) FROM transactions t JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          WHERE t.hidden = FALSE)::text AS total_txns
@@ -769,6 +792,53 @@ async function readWeek(): Promise<OverviewSources['week']> {
   };
 }
 
+/**
+ * A capped sample of the unfiled rows — the list behind the dashboard's Uncategorized card.
+ *
+ * ─── THE PREDICATE IS `readStats`'s, AND THAT IS THE WHOLE RISK HERE ──────────────────────────
+ *
+ * `stats.uncategorized` counts `mapped_category IS NULL AND hidden = FALSE` over accounts the app
+ * tracks. This lists the same rows and must keep listing the same rows: a card reading four above
+ * a panel showing five is the kind of contradiction a reader resolves by distrusting both. The two
+ * cannot be one query — the count is unbounded and this is capped — so the predicate is written
+ * twice, deliberately, with each side naming the other.
+ *
+ * NO DATE BOUND, unlike the arrivals list. An unfiled row from March is still unfiled, and it is
+ * the one most likely to have been forgotten; a 36-hour window would show only what the reader has
+ * already seen this morning.
+ *
+ * Largest first, which is the arrivals reader's order and the same argument: twelve rows is more
+ * than a glance, and the row worth filing first is the one carrying the most money, whenever it
+ * happened to land. `t.id` breaks ties so the order is total and a re-read cannot reshuffle.
+ */
+async function readUncategorized(): Promise<OverviewSources['uncategorized']> {
+  const { rows } = await db.query<{
+    id: number; date: string; amount: string; label: string;
+    watched: boolean; note: string | null;
+  }>(`
+    SELECT t.id, t.date::text, t.amount::text,
+           COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
+           (t.watched_at IS NOT NULL) AS watched,
+           t.note
+      FROM transactions t
+      JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+     WHERE t.mapped_category IS NULL AND t.hidden = FALSE
+     ORDER BY t.amount DESC, t.id
+     LIMIT 12
+  `);
+  return rows.map((r) => ({
+    id: r.id,
+    date: r.date,
+    amount: Number(r.amount),
+    label: r.label,
+    // Null by construction — the predicate above is what makes these rows unfiled. Carried because
+    // the editor these open reads it; see the contract's note on the field.
+    category: null,
+    watched: r.watched,
+    note: r.note,
+  }));
+}
+
 /** Operational spending per elapsed month — rendered by the dashboard and served by the API. */
 async function readMonthlySpending(asOf: AsOf): Promise<OverviewSources['monthlySpending']> {
   const { rows } = await db.query<{ month_num: number; total: string; received: string }>(`
@@ -846,7 +916,8 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
   const driftPromise = findBalanceDrift();
   const feedPromise = loadFeedHealth();
 
-  const [stats, monthRead, today, week, monthlySpending, budgetVsActual, recentArrivals, yearEnd] =
+  const [stats, monthRead, today, week, monthlySpending, budgetVsActual, recentArrivals,
+         uncategorized, yearEnd] =
     await Promise.all([
       readStats(asOf),
       loadMonthOutlook(asOf),
@@ -855,6 +926,7 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
       readMonthlySpending(asOf),
       readBudgetVsActual(asOf),
       readRecentArrivals(),
+      readUncategorized(),
       // Operational, matching the dashboard and /budget's default tab. The capital year is lumpy by
       // construction — a remodel draws $40,000 in one month — and averaging it in would give a P/L
       // nobody is steering by.
@@ -873,6 +945,7 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
     monthlySpending,
     recentArrivals: recentArrivals.rows,
     recentArrivalsTotal: recentArrivals.total,
+    uncategorized,
     budgetVsActual,
     monthOutlook: monthRead.outlook,
     // Scoped to the as-of month AND to categories with an allocation. `categoryPacing` emits one

@@ -4,7 +4,8 @@ import { useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 /**
- * "Keep an eye" and "New arrivals" as counts you open, rather than two permanent lists.
+ * The three counts of things waiting on the owner, as figures you open rather than lists you
+ * scroll past. "Uncategorized" joined the other two on 2026-09-23 — see the note on its card.
  *
  * ─── Why they stopped being full-width cards ──────────────────────────────────────────────────
  *
@@ -31,9 +32,13 @@ import { ChevronDown } from 'lucide-react';
  * way: nothing here needs to know how a watchlist row looks.
  */
 export default function ExpandableKpiCards({
+  unfiledCount, unfiledPanel,
   watchCount, watchOldest, watchPanel,
   arrivalsCount, arrivalsShown, arrivalsPanel, staleFeed,
 }: {
+  /** `stats.uncategorized` — the count, which may exceed what its panel lists. */
+  unfiledCount: number;
+  unfiledPanel: ReactNode;
   watchCount: number;
   /** Whole days the oldest flag has been open — the figure on this card that actually moves. */
   watchOldest: number;
@@ -45,12 +50,33 @@ export default function ExpandableKpiCards({
   /** Whether a bank feed is behind — see the note on the zero case below. */
   staleFeed: boolean;
 }) {
-  const [open, setOpen] = useState<'watch' | 'arrivals' | null>(null);
+  const [open, setOpen] = useState<'unfiled' | 'watch' | 'arrivals' | null>(null);
 
   const age = (days: number) => (days === 0 ? 'today' : days === 1 ? '1 day' : `${days} days`);
 
   return (
     <>
+      {/* UNCATEGORIZED JOINED THE OTHER TWO, at the owner's request, and it leads for the reason
+          it always did: it is the one with work attached rather than a state to read.
+
+          It used to NAVIGATE while its two neighbours opened — off to the ledger's uncategorized
+          filter, on the argument that filing is real work and the ledger is where work happens.
+          That argument expired when these panel rows became editable: the whole job is now four
+          taps from here, and leaving the page to do what the page can do is a detour. Three cards
+          that look identical now behave identically, which is what they looked like they did.
+
+          The count alone, as before. A percentage of 1,476 transactions rounds to 0% at one
+          unfiled row and still at six, so the card once read "0%" in amber while work waited.
+          No denominator either: filing is per transaction, so the count IS the size of the job. */}
+      <Card
+        label="Uncategorized"
+        value={unfiledCount.toLocaleString()}
+        sub={unfiledCount === 0 ? 'all filed' : 'tap to file'}
+        amber={unfiledCount > 0}
+        open={open === 'unfiled'}
+        onToggle={() => setOpen((v) => (v === 'unfiled' ? null : 'unfiled'))}
+        disabled={unfiledCount === 0}
+      />
       <Card
         label="Keep an eye"
         value={watchCount.toLocaleString()}
@@ -95,7 +121,7 @@ export default function ExpandableKpiCards({
 
       {open !== null && (
         <div className="col-span-full">
-          {open === 'watch' ? watchPanel : arrivalsPanel}
+          {open === 'unfiled' ? unfiledPanel : open === 'watch' ? watchPanel : arrivalsPanel}
         </div>
       )}
     </>

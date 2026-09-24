@@ -268,6 +268,30 @@ export const RecentArrivalSchema = z.object({
 });
 
 /**
+ * One unfiled transaction — a row with no budget category, waiting to be given one.
+ *
+ * STRUCTURALLY IDENTICAL TO `RecentArrivalSchema`, and separate on purpose. The two lists answer
+ * different questions and are selected by different predicates — one is "what landed in 36 hours",
+ * the other is "what has no category, whenever it landed" — so a shared schema would couple them
+ * at the one place they might legitimately diverge. `category` is carried and is always `null` by
+ * construction; it is here because the editor these rows open reads it, and a field the editor
+ * needs is better present and null than absent and special-cased.
+ *
+ * `watched` and `note` for the same reason an arrival carries them: an unfiled row can also be
+ * flagged, and an editor opening with `watched: false, note: null` on a row that has both would
+ * blank the note on its first save.
+ */
+export const UnfiledTransactionSchema = z.object({
+  id: serialId,
+  date: dateString,
+  amount: moneyString,
+  label: z.string(),
+  category: z.string().nullable(),
+  watched: z.boolean(),
+  note: z.string().nullable(),
+});
+
+/**
  * One category's year against its allocation — `getBudgetVsActual`.
  *
  * `spent` is net of refunds and may exceed `budget`; a category over its year is exactly what the
@@ -744,6 +768,18 @@ export const OverviewDataSchema = z.object({
     .array(MonthlySpendPointSchema)
     .length(12, 'monthlySpending is positional, January first — twelve entries or none'),
   recentArrivals: z.array(RecentArrivalSchema),
+  /**
+   * The unfiled rows themselves, so the dashboard's Uncategorized card can open them and file them
+   * where it stands rather than sending the reader to the ledger.
+   *
+   * CAPPED, LIKE THE ARRIVALS LIST, and for the same reason: the count is `stats.uncategorized`
+   * and this is a sample of what it counts. A backlog of four is the normal state and a backlog of
+   * four hundred is a bad week, and neither should decide how large this payload is.
+   *
+   * The cap means `uncategorized.length` is NOT the count. `stats.uncategorized` is, it is computed
+   * by the same predicate, and the panel says so when the two differ.
+   */
+  uncategorized: z.array(UnfiledTransactionSchema),
   /**
    * How many rows are actually in the window, as against how many `recentArrivals` carries.
    *
