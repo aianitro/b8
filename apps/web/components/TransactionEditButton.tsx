@@ -84,9 +84,12 @@ export default function TransactionEditButton({ row, categories }: {
    */
   const [category, setCategoryState] = useState(row.category);
   const [undoTo, setUndoTo] = useState<string | null | undefined>(undefined);
+  /** Whether anything was written since the dialog opened — see `run`, and `closeModal` below. */
+  const [dirty, setDirty] = useState(false);
 
-  // The window closes on its own. A permanent "Undo" is a second history the reader has to reason
-  // about; a five-second one is a correction.
+  // The window closes on its own, and closes NOTHING ELSE. An expiry that also refreshed would
+  // make the dialog disappear unprompted five seconds after a category was picked. A permanent
+  // "Undo" is a second history the reader has to reason about; a five-second one is a correction.
   useEffect(() => {
     if (undoTo === undefined) return;
     const t = setTimeout(() => setUndoTo(undefined), UNDO_WINDOW_MS);
@@ -97,19 +100,42 @@ export default function TransactionEditButton({ row, categories }: {
   const tooLong = trimmed.length > MAX_WATCH_NOTE;
   const unchanged = trimmed === savedNote;
 
+  /**
+   * THE REFRESH IS DEFERRED TO CLOSE, AND THAT IS NOT AN OPTIMISATION.
+   *
+   * It used to run right after every save. On the Uncategorized panel that closed the dialog out
+   * from under the reader: `router.refresh()` re-renders the server tree, a row that just got a
+   * category is no longer unfiled, so it leaves the list — and the button hosting this modal
+   * unmounts, taking the five-second undo with it. The undo was unreachable in exactly the case it
+   * was added for.
+   *
+   * The watchlist panel had the same bug waiting: unflagging a row removes it from "Keep an eye".
+   * So the rule is one rule for all three edits rather than a special case for the one that was
+   * caught — every list here is defined by a property its own editor can change.
+   *
+   * The figures above are stale only while the dialog covers them, and they are correct again
+   * before it is out of the way.
+   */
   async function run(work: () => Promise<void>) {
     setBusy(true);
     setError(null);
     try {
       await work();
-      // The panels are server-rendered inside the dashboard, so the figures above them — the KPI
-      // counts, the heatmap, the month's grading — move with this edit rather than going stale
-      // behind it. One refetch, not a hand-patched copy of what the month says.
-      router.refresh();
+      setDirty(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'That did not work. Try again.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  function closeModal() {
+    setOpen(false);
+    // The KPI counts, the heatmap and the month's grading all move with these edits. One refetch,
+    // not a hand-patched copy of what the month says.
+    if (dirty) {
+      setDirty(false);
+      router.refresh();
     }
   }
 
@@ -119,6 +145,7 @@ export default function TransactionEditButton({ row, categories }: {
     setWatchedState(row.watched);
     setCategoryState(row.category);
     setUndoTo(undefined);
+    setDirty(false);
     setError(null);
     setOpen(true);
   }
@@ -144,7 +171,7 @@ export default function TransactionEditButton({ row, categories }: {
         // where there is no thumb and a centred dialog is the convention.
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-sm"
-          onClick={() => !busy && setOpen(false)}
+          onClick={() => !busy && closeModal()}
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -160,7 +187,7 @@ export default function TransactionEditButton({ row, categories }: {
               </div>
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={closeModal}
                 disabled={busy}
                 aria-label="Close"
                 className="shrink-0 p-1 -m-1 text-slate-300 hover:text-slate-600 disabled:opacity-40"
