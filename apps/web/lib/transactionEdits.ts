@@ -65,6 +65,21 @@ export interface CategoryOption {
 const TRANSFERISH = /transfer|autopay|payment|xfer/i;
 
 /**
+ * Whether choosing this category makes the row a transfer, and therefore one that OWES A PAIR.
+ *
+ * `POST /api/v1/transfers` sets `mapped_category = 'Transfer'` itself, which says what the ledger
+ * considers the real act: pairing IS categorising, and setting the category alone produces half a
+ * transfer. The table renders that half-state as an amber "Pair required" badge; anything else that
+ * can set this category has to say the same thing or it is creating the state silently.
+ *
+ * Narrower than `TRANSFERISH` above on purpose. That pattern answers "does this row LOOK like a
+ * transfer", where a false positive costs a suggestion nobody takes. This one answers "did the
+ * owner just create an unpaired transfer", where a false positive is a warning about nothing.
+ */
+export const isTransferCategory = (name: string | null): boolean =>
+  name !== null && /transfer/i.test(name);
+
+/**
  * The picker's groups, in the order a `<select>` should show them.
  *
  * ─── WHY A LEADING "SUGGESTED" GROUP, AND NOT JUST A SORT ─────────────────────────────────────

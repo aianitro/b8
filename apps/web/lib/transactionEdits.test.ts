@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GROUP_LABELS, groupCategories, type CategoryOption } from './transactionEdits';
+import { GROUP_LABELS, groupCategories, isTransferCategory, type CategoryOption } from './transactionEdits';
 
 // This ledger's own categories and flags, as `budget_categories` holds them. The table is only
 // worth testing against the shapes that actually exist — the landscape/exclude combinations here
@@ -83,5 +83,22 @@ describe('GROUP_LABELS', () => {
     for (const label of Object.values(GROUP_LABELS)) {
       expect(names.has(label.toLowerCase()), `group "${label}" shares a name with a category`).toBe(false);
     }
+  });
+});
+
+describe('isTransferCategory', () => {
+  // Narrower than the suggestion pattern: this one decides whether to WARN that a row now owes a
+  // pair, and a warning about nothing is worse than a suggestion nobody takes.
+  it('is true for the category that creates a half-transfer', () => {
+    expect(isTransferCategory('Transfer')).toBe(true);
+    expect(isTransferCategory('Internal transfer')).toBe(true);
+  });
+
+  it('does not fire on the words that merely SUGGEST a transfer', () => {
+    // These match TRANSFERISH so they surface Transfer in the picker. None of them is a category
+    // whose selection owes a pair.
+    expect(isTransferCategory('Mortgage Gastonia')).toBe(false);
+    expect(isTransferCategory('Income tax')).toBe(false);
+    expect(isTransferCategory(null)).toBe(false);
   });
 });

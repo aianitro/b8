@@ -25,15 +25,22 @@
 //
 // No "Save" button collecting all three. Each edit commits on its own, as it does on the phone,
 // because they are independent facts and a combined save would have to decide what to do when one
-// of three succeeds. Category commits on change and closes — refiling is the verb people come here
-// for and it is done in one gesture.
+// of three succeeds.
+//
+// NOTHING CLOSES THE MODAL BUT THE READER. Category used to commit and close, on the argument that
+// refiling is the verb people come here for and should cost one gesture. It cost two features the
+// ledger already had and the owner missed both: the five-second undo, which has nowhere to live on
+// a closed dialog, and the warning that a transfer still owes its pair. A gesture saved is not
+// worth a misfile that cannot be taken back.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Flag, Pencil, X } from 'lucide-react';
+import { ArrowLeftRight, Flag, Pencil, X } from 'lucide-react';
 import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
 import {
-  GROUP_LABELS, groupCategories, setCategory, setNote, setWatched, type CategoryOption,
+  GROUP_LABELS, groupCategories, isTransferCategory, setCategory, setNote, setWatched,
+  type CategoryOption,
 } from '@/lib/transactionEdits';
 
 export interface EditableRow {
@@ -47,6 +54,10 @@ export interface EditableRow {
   watched: boolean;
   note: string | null;
 }
+
+/** The ledger's own window, matching `CategorySelect`. Two undo affordances that expire at
+ *  different times would be two different promises about the same action. */
+const UNDO_WINDOW_MS = 5000;
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Math.abs(n));
@@ -63,12 +74,30 @@ export default function TransactionEditButton({ row, categories }: {
   // The flag as the SERVER last confirmed it, so the toggle reflects a save rather than a wish.
   const [watched, setWatchedState] = useState(row.watched);
   const [savedNote, setSavedNote] = useState(row.note ?? '');
+  /**
+   * The category as the server last confirmed it, plus what it was before, for the undo window.
+   *
+   * THIS EDITOR USED TO COMMIT AND CLOSE. That lost the 5-second undo the ledger's own picker has
+   * offered since it was written, and the owner noticed — a category chosen by thumb on a phone is
+   * exactly the change most likely to be the wrong row, and closing the one surface that could
+   * take it back is how a misfile becomes permanent. It stays open now.
+   */
+  const [category, setCategoryState] = useState(row.category);
+  const [undoTo, setUndoTo] = useState<string | null | undefined>(undefined);
+
+  // The window closes on its own. A permanent "Undo" is a second history the reader has to reason
+  // about; a five-second one is a correction.
+  useEffect(() => {
+    if (undoTo === undefined) return;
+    const t = setTimeout(() => setUndoTo(undefined), UNDO_WINDOW_MS);
+    return () => clearTimeout(t);
+  }, [undoTo]);
 
   const trimmed = note.trim();
   const tooLong = trimmed.length > MAX_WATCH_NOTE;
   const unchanged = trimmed === savedNote;
 
-  async function run(work: () => Promise<void>, thenClose = false) {
+  async function run(work: () => Promise<void>) {
     setBusy(true);
     setError(null);
     try {
@@ -77,7 +106,6 @@ export default function TransactionEditButton({ row, categories }: {
       // counts, the heatmap, the month's grading — move with this edit rather than going stale
       // behind it. One refetch, not a hand-patched copy of what the month says.
       router.refresh();
-      if (thenClose) setOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'That did not work. Try again.');
     } finally {
@@ -89,11 +117,14 @@ export default function TransactionEditButton({ row, categories }: {
     setNoteText(row.note ?? '');
     setSavedNote(row.note ?? '');
     setWatchedState(row.watched);
+    setCategoryState(row.category);
+    setUndoTo(undefined);
     setError(null);
     setOpen(true);
   }
 
   const groups = groupCategories(categories, row.label);
+  const owesAPair = isTransferCategory(category);
 
   return (
     <>
@@ -144,9 +175,17 @@ export default function TransactionEditButton({ row, categories }: {
               Category
             </label>
             <select
-              value={row.category ?? ''}
+              value={category ?? ''}
               disabled={busy}
-              onChange={(e) => run(() => setCategory(row.id, e.target.value || null), true)}
+              onChange={(e) => {
+                const next = e.target.value || null;
+                const previous = category;
+                run(async () => {
+                  await setCategory(row.id, next);
+                  setCategoryState(next);
+                  setUndoTo(previous);
+                });
+              }}
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700
                          disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
             >
@@ -161,6 +200,52 @@ export default function TransactionEditButton({ row, categories }: {
                 ) : null
               )}
             </select>
+
+            {undoTo !== undefined && (
+              <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-400">
+                <span>Updated</span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => run(async () => {
+                    await setCategory(row.id, undoTo);
+                    setCategoryState(undoTo);
+                    setUndoTo(undefined);
+                  })}
+                  className="text-blue-600 hover:text-blue-700 font-medium underline disabled:opacity-50"
+                >
+                  Undo
+                </button>
+              </div>
+            )}
+
+            {/* HALF A TRANSFER IS NOT A TRANSFER. `POST /api/v1/transfers` sets this category
+                itself, which says what the ledger thinks the real act is: pairing IS categorising,
+                and setting the category alone leaves a row whose counterpart nothing points at.
+                The table renders that state as an amber "Pair required" badge on the row; this
+                panel had no way to say it, so filing something as Transfer from the dashboard
+                created the half-state in silence.
+
+                The link filters the ledger by ABSOLUTE amount, which is the useful accident of how
+                that filter is written: one figure brings back both this row and its mirror, which
+                is exactly the selection "Pair as Transfer" needs. Pairing itself stays in the
+                table, because it is a multi-row act and a modal over one row is the wrong shape
+                for it. */}
+            {owesAPair && (
+              <div className="mt-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-2.5">
+                <ArrowLeftRight size={14} className="shrink-0 mt-0.5 text-amber-600" />
+                <p className="text-[11px] text-amber-900 leading-snug">
+                  A transfer needs its matching transaction.{' '}
+                  <Link
+                    href={`/transactions?amountMin=${Math.abs(row.amount)}&amountMax=${Math.abs(row.amount)}`}
+                    className="font-semibold underline hover:text-amber-950"
+                  >
+                    Find the other side
+                  </Link>{' '}
+                  and use Pair as Transfer.
+                </p>
+              </div>
+            )}
 
             <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mt-5 mb-1.5">
               Note
