@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, PieChart, Landmark, ArrowLeftRight, Zap,
-  Tag, Building2, Home, Wallet, Sparkles, Upload, Menu, X,
+  Tag, Building2, Home, Wallet, Sparkles, Upload, Menu, X, FlaskConical,
 } from 'lucide-react';
 
 const NAV = [
@@ -66,6 +66,12 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
           Intelligence
         </p>
         <NavItem href="/insights" label="Insights" icon={Sparkles} pathname={pathname} onNavigate={onNavigate} />
+        {/* BELOW THE LINE WITH INSIGHTS, not up in the ledger's own list. The pages above are the
+            app: an account, a budget, the transactions. This is a holding bay for a widget whose
+            home is undecided, and putting it beside Balances would say it is a place you go for an
+            answer. A route nothing links to is a route nobody visits, though — which is the only
+            reason it is in the nav at all rather than being a URL to remember. */}
+        <NavItem href="/sandbox" label="Sandbox" icon={FlaskConical} pathname={pathname} onNavigate={onNavigate} />
       </div>
     </>
   );

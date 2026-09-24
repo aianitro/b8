@@ -2,7 +2,6 @@ export const dynamic = 'force-dynamic';
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import BudgetTracks from '@/components/charts/BudgetTracks';
 import ProfitLossChart from '@/components/charts/ProfitLossChart';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import DriftAlertCard from '@/components/DriftAlertCard';
@@ -251,19 +250,13 @@ export default async function DashboardPage() {
   // `now` is the same Date the page's own clock read produced, so the payload's as-of point and the
   // page's are one calendar, not two that disagree around midnight.
   const {
-    stats, monthlySpending: monthly, budgetVsActual,
+    stats, monthlySpending: monthly,
     recentArrivals, recentArrivalsTotal, uncategorized: unfiled, watchlist, yearEnd,
     offCycleElsewhere, monthCategories,
     feedFindings, driftFindings, jobHealth,
   } = dashboardFromWire(await loadOverview(now));
   // Started before the overview and collected here, so the two reads overlap rather than queue.
   const categoryOptions = await categoryOptionsPromise;
-
-  // Share of the year gone, from the page's own clock read. The tracks compare a year's spend to
-  // a year's budget, and without this the reader has to date the figure themselves.
-  const startOfYear = Date.UTC(asOf.year, 0, 1);
-  const yearElapsed =
-    (Date.UTC(asOf.year, asOf.month, asOf.day) - startOfYear) / (Date.UTC(asOf.year + 1, 0, 1) - startOfYear);
 
   // `pl` and `plProjected` overlap on the last settled month. Without that shared point the dashed
   // line would start a month adrift of where the solid one ended, leaving a visible gap exactly at
@@ -455,13 +448,11 @@ export default async function DashboardPage() {
 
             What the page keeps at this horizon: the P/L chart above ends on the current month,
             and the category track below answers per category rather than per horizon. */}
-        {/* The donut lost the pair it sat beside when Cash Flow went. Full width rather than half
-            a row with white space next to it — the operational book has fourteen categories and
-            the legend was the cramped half of that layout anyway. */}
-        {/* One widget where there were two. The donut said how big each category is and nothing
-            about whether it is on plan; the budget-vs-actual bars said whether it is on plan and
-            drew a $378 line the same length as a $29,000 one. */}
-        <BudgetTracks rows={budgetVsActual} yearElapsed={yearElapsed} />
+        {/* "The year by category" MOVED TO /sandbox on 2026-09-24 at the owner's request. It is a
+            good widget and a slow read — twenty tracks, each wanting a comparison against a pace
+            mark — which is a different job from the one this page does. The dashboard answers "is
+            anything wrong today" in a glance, and a page that also answers "how is the year going,
+            category by category" does the first one worse. */}
       </div>
 
       {/* Turning the daily ping on, at the very foot of the page — settings rather than reading,
