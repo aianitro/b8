@@ -24,6 +24,27 @@ type AccountOption = { id: string; name: string; landscape: string };
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
+/**
+ * `2026-09-23` as `Sep 23, 2026` — or `Sep 21` when it is the opening half of a range that ends
+ * in the same year, where repeating the year twice in one heading says nothing twice.
+ *
+ * Parsed by hand rather than through `new Date(iso)`. That constructor reads a bare `YYYY-MM-DD`
+ * as UTC midnight and then renders it in the local zone, so west of Greenwich every date in this
+ * heading would come out a day early — the classic off-by-one, and one nobody notices until a
+ * heading and the rows under it disagree about which day they are.
+ */
+/** Whether two `YYYY-MM-DD` strings fall in the same calendar year. */
+function sameYear(a: string, b: string): boolean {
+  return a.slice(0, 4) === b.slice(0, 4);
+}
+
+function prettyDate(iso: string, withYear = true): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  const short = MONTH_NAMES[m - 1]?.slice(0, 3) ?? iso;
+  return withYear ? `${short} ${d}, ${y}` : `${short} ${d}`;
+}
+
 async function getData(
   uncategorizedOnly: boolean,
   watchedOnly: boolean,
@@ -266,6 +287,28 @@ export default async function TransactionsPage({
     ? `${drillCategoryLabel} · ${MONTH_NAMES[(drillMonth ?? 1) - 1]} ${new Date().getFullYear()}`
     : null;
   const isTransferGroup = Boolean(transferGroupValue !== null && !isNaN(transferGroupValue));
+
+  /**
+   * Arrived from the dashboard's Today or This Week card — a closed date range, no category.
+   *
+   * It earns a breadcrumb for a reason the desktop hides: an INSTALLED PWA HAS NO BACK BUTTON.
+   * iOS still honours the edge swipe, but an invisible gesture is not an affordance, and without
+   * this the two new links were a one-way trip into the ledger.
+   *
+   * NAMED BY ITS DATES, never "Today". The label has to survive the link being reopened from
+   * history tomorrow, when a heading reading "Today" over yesterday's rows would be a lie the page
+   * tells with a straight face. The dates say the same thing and keep saying it.
+   */
+  const isDateRange = !isDrilldown && !isTransferGroup
+    && from === 'dashboard' && Boolean(dateFromValue && dateToValue);
+  const dateRangeLabel = isDateRange
+    ? (dateFromValue === dateToValue
+        ? prettyDate(dateToValue as string)
+        // The year is dropped from the opening date only when both ends share one. A week running
+        // Dec 28 to Jan 3 is a real week this link can produce, and "Dec 28 – Jan 3, 2027" puts
+        // the wrong year on the first date by implication.
+        : `${prettyDate(dateFromValue as string, !sameYear(dateFromValue as string, dateToValue as string))} – ${prettyDate(dateToValue as string)}`)
+    : null;
   // Where the breadcrumb goes back to. A drilldown opened from the dashboard that offers "← Budget"
   // is a back link that lies about where the owner came from, so the origin travels in the URL
   // rather than being assumed. Budget stays the default: every link that predates `from` is one.
@@ -286,6 +329,17 @@ export default async function TransactionsPage({
         </div>
       )}
 
+      {isDateRange && (
+        <div className="flex items-center gap-2 mb-4 text-sm">
+          <a href={origin.href} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+            {origin.label}
+          </a>
+          <span className="text-slate-300">/</span>
+          <span className="text-slate-600 font-medium">{dateRangeLabel}</span>
+        </div>
+      )}
+
       {isTransferGroup && (
         <div className="flex items-center gap-2 mb-4 text-sm">
           <a href="/transactions" className="text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">
@@ -299,7 +353,10 @@ export default async function TransactionsPage({
 
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">
-          {isDrilldown ? drillLabel : isTransferGroup ? 'Linked transfer' : 'Transactions'}
+          {isDrilldown ? drillLabel
+            : isTransferGroup ? 'Linked transfer'
+            : isDateRange ? dateRangeLabel
+            : 'Transactions'}
         </h1>
         <p className="text-sm text-slate-500 mt-1">
           {total.toLocaleString()} transaction{total !== 1 ? 's' : ''}

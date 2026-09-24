@@ -28,7 +28,7 @@ import { dashboardFromWire } from '@/lib/overviewFromWire';
 // cannot import a page's private function, and copying the queries would have put two definitions
 // of the same figures one directory apart. Nothing a reader sees changed — the queries moved
 // verbatim, and the page is touched here only by a deletion and this import.
-import { MONTHS, drillHref } from '@/lib/drilldown';
+import { MONTHS, dateRangeHref, drillHref, weekStartYmd, ymd } from '@/lib/drilldown';
 // The calendar rule, imported rather than restated: `./pacing` exports it precisely so a caller
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
 // April is. A second leap-year rule here would drift on 2100.
@@ -241,6 +241,10 @@ export default async function DashboardPage() {
   // sensitive on the page to a feed that has stopped: a day is one data point and a week is five.
   const staleFeed = feedFindings.length > 0;
 
+  // Today, as the ledger spells a date. One value, used by both cards below — the day card's
+  // single-day range and the week card's upper bound are the same day by definition, and deriving
+  // it twice is how they would stop being.
+  const todayYmd = ymd(asOf.year, asOf.month, asOf.day);
   const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
   const todayVsAvgRatio = todayStats.avgSameWeekday > 0 ? todayStats.spent / todayStats.avgSameWeekday : 0;
 
@@ -455,8 +459,20 @@ export default async function DashboardPage() {
             `text-3xl` — which the smaller mobile type in `KpiCard` has since fixed at the source,
             so the stacking is no longer buying anything. */}
         <div className="grid grid-cols-2 gap-3 sm:gap-4">
+          {/* BOTH OF THESE OPEN THE ROWS BEHIND THEM, at the owner's request. They were the only
+              figures on this page a reader could not get behind: every other card either navigates
+              or expands, and these two showed a total and three of its lines with no way to see
+              the rest.
+
+              The dates come from `asOf` and from the WEEK QUERY'S OWN `isoDow`, not from a clock
+              read here. The week card counts from `date_trunc('week', CURRENT_DATE)`, which is
+              Monday-based and evaluated by Postgres; a link that decided for itself which day the
+              week starts would eventually send the reader to a list that does not add up to the
+              figure they tapped. Both bounds are inclusive, matching the `>=` / `<=` the
+              transactions page applies them with. */}
           <KpiCard
             label="Today"
+            href={dateRangeHref(todayYmd, todayYmd)}
             value={fmt(todayStats.spent)}
             sub={todayStats.avgSameWeekday > 0
               ? `${todayDelta >= 0 ? '+' : ''}${fmt(todayDelta)} vs the same weekday's recent average`
@@ -490,6 +506,7 @@ export default async function DashboardPage() {
           />
           <KpiCard
             label="This Week"
+            href={dateRangeHref(weekStartYmd(asOf, weekStats.isoDow), todayYmd)}
             value={fmt(weekStats.spent)}
             sub={`${weekDelta >= 0 ? '+' : ''}${fmt(weekDelta)} vs same point last week`}
             subColor={expectedWeekSpend > 0 ? paceColor(weekPaceRatio) : undefined}
