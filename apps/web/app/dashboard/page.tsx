@@ -29,7 +29,7 @@ import { dashboardFromWire } from '@/lib/overviewFromWire';
 // cannot import a page's private function, and copying the queries would have put two definitions
 // of the same figures one directory apart. Nothing a reader sees changed — the queries moved
 // verbatim, and the page is touched here only by a deletion and this import.
-import { MONTHS, dateRangeHref, drillHref, weekStartYmd, ymd } from '@/lib/drilldown';
+import { MONTHS, drillHref } from '@/lib/drilldown';
 // The calendar rule, imported rather than restated: `./pacing` exports it precisely so a caller
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
 // April is. A second leap-year rule here would drift on 2100.
@@ -132,11 +132,6 @@ function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
   );
 }
 
-function paceColor(ratio: number): StatusColor {
-  if (ratio > 1.1) return 'red';
-  if (ratio > 1.0) return 'amber';
-  return 'green';
-}
 
 
 
@@ -256,7 +251,7 @@ export default async function DashboardPage() {
   // `now` is the same Date the page's own clock read produced, so the payload's as-of point and the
   // page's are one calendar, not two that disagree around midnight.
   const {
-    stats, today: todayStats, week: weekStats, monthlySpending: monthly, budgetVsActual,
+    stats, monthlySpending: monthly, budgetVsActual,
     recentArrivals, recentArrivalsTotal, uncategorized: unfiled, watchlist, yearEnd,
     offCycleElsewhere, monthCategories,
     feedFindings, driftFindings, jobHealth,
@@ -269,21 +264,6 @@ export default async function DashboardPage() {
   const startOfYear = Date.UTC(asOf.year, 0, 1);
   const yearElapsed =
     (Date.UTC(asOf.year, asOf.month, asOf.day) - startOfYear) / (Date.UTC(asOf.year + 1, 0, 1) - startOfYear);
-
-  // One name for the condition, used by both short-horizon cards. Their figures are the most
-  // sensitive on the page to a feed that has stopped: a day is one data point and a week is five.
-  const staleFeed = feedFindings.length > 0;
-
-  // Today, as the ledger spells a date. One value, used by both cards below — the day card's
-  // single-day range and the week card's upper bound are the same day by definition, and deriving
-  // it twice is how they would stop being.
-  const todayYmd = ymd(asOf.year, asOf.month, asOf.day);
-  const todayDelta = todayStats.spent - todayStats.avgSameWeekday;
-  const todayVsAvgRatio = todayStats.avgSameWeekday > 0 ? todayStats.spent / todayStats.avgSameWeekday : 0;
-
-  const weekDelta = weekStats.spent - weekStats.spentComparableLastWeek;
-  const expectedWeekSpend = weekStats.weeklyBudgetReference * (weekStats.isoDow / 7);
-  const weekPaceRatio = expectedWeekSpend > 0 ? weekStats.spent / expectedWeekSpend : 0;
 
   // `pl` and `plProjected` overlap on the last settled month. Without that shared point the dashed
   // line would start a month adrift of where the solid one ended, leaving a visible gap exactly at
@@ -464,88 +444,17 @@ export default async function DashboardPage() {
       {/* Charts */}
       <div className="space-y-6">
         <ProfitLossChart data={plSeries} />
-        {/* Two shorter horizons. They used to sit directly under the month's verdict, on the
-            grounds that they are the same question at a different scale — but that put a $47 day
-            three lines below the year's projected P/L, and a reader scanning down met the smallest
-            horizon before the charts that explain the largest.
+        {/* TODAY AND THIS WEEK WERE HERE, and were removed on 2026-09-24 at the owner's request.
+            They were a day's spend against the same weekday's average, and a week's against the
+            same point last week.
 
-            Between the two charts, the page reads longest horizon to shortest and then back out:
-            where the year closes, then this week and today, then the year category by category.
-            The P/L chart above ends on the current month, so these two continue it inward at the
-            same scale rather than interrupting it — and the category track below is a different
-            question, per category rather than per horizon, which makes it the natural place to
-            stop rather than a step in the sequence.
+            The figures are still read and still served — `today` and `week` remain in the
+            /overview payload, which the phone consumes and the API answers with. Nothing about
+            them was wrong; the page simply stopped showing them, and the reader that produces
+            them is untouched so the decision is reversible with a component rather than a query.
 
-            Still a pair, still side by side: today only means something against the week. */}
-        {/* Two per row at every width, matching the phone and the targets row above. It was
-            stacked below `sm:` because a four-figure amount with cents overflowed its card at
-            `text-3xl` — which the smaller mobile type in `KpiCard` has since fixed at the source,
-            so the stacking is no longer buying anything. */}
-        <div className="grid grid-cols-2 gap-3 sm:gap-4">
-          {/* BOTH OF THESE OPEN THE ROWS BEHIND THEM, at the owner's request. They were the only
-              figures on this page a reader could not get behind: every other card either navigates
-              or expands, and these two showed a total and three of its lines with no way to see
-              the rest.
-
-              The dates come from `asOf` and from the WEEK QUERY'S OWN `isoDow`, not from a clock
-              read here. The week card counts from `date_trunc('week', CURRENT_DATE)`, which is
-              Monday-based and evaluated by Postgres; a link that decided for itself which day the
-              week starts would eventually send the reader to a list that does not add up to the
-              figure they tapped. Both bounds are inclusive, matching the `>=` / `<=` the
-              transactions page applies them with. */}
-          <KpiCard
-            label="Today"
-            href={dateRangeHref(todayYmd, todayYmd)}
-            value={fmt(todayStats.spent)}
-            sub={todayStats.avgSameWeekday > 0
-              ? `${todayDelta >= 0 ? '+' : ''}${fmt(todayDelta)} vs the same weekday's recent average`
-              : undefined}
-            subColor={todayStats.avgSameWeekday > 0 ? paceColor(todayVsAvgRatio) : undefined}
-            footer={
-              todayStats.transactions.length === 0 ? (
-                // "No spending yet today" is a claim about behaviour, and while a feed is behind it
-                // is a claim about the pipe wearing behaviour's clothes. Chase last reported on the
-                // 8th, so a $0 today and a flattering delta against the weekday average are both
-                // artefacts. Said here rather than left for the reader to remember.
-                <p className="text-xs text-slate-300">
-                  {staleFeed
-                    ? <span className="text-amber-600">A bank feed is behind — nothing recorded today may be the connection, not a quiet day.</span>
-                    : 'No spending yet today'}
-                </p>
-              ) : (
-                <div className="space-y-1">
-                  {todayStats.transactions.map((t, i) => (
-                    <div key={i} className="flex justify-between gap-2 text-xs text-slate-500">
-                      <span className="truncate">{t.label}</span>
-                      <span className="font-mono text-slate-400 shrink-0">{fmt(t.amount)}</span>
-                    </div>
-                  ))}
-                  {todayStats.totalCount > todayStats.transactions.length && (
-                    <p className="text-[10px] text-slate-300">+{todayStats.totalCount - todayStats.transactions.length} more</p>
-                  )}
-                </div>
-              )
-            }
-          />
-          <KpiCard
-            label="This Week"
-            href={dateRangeHref(weekStartYmd(asOf, weekStats.isoDow), todayYmd)}
-            value={fmt(weekStats.spent)}
-            sub={`${weekDelta >= 0 ? '+' : ''}${fmt(weekDelta)} vs same point last week`}
-            subColor={expectedWeekSpend > 0 ? paceColor(weekPaceRatio) : undefined}
-            footer={
-              <p className="text-xs text-slate-400">
-                {fmt(weekStats.weeklyBudgetReference)}/wk reference
-                {staleFeed && (
-                  <span className="block text-amber-600 mt-0.5">
-                    A bank feed is behind, so recent days may be short.
-                  </span>
-                )}
-              </p>
-            }
-          />
-        </div>
-
+            What the page keeps at this horizon: the P/L chart above ends on the current month,
+            and the category track below answers per category rather than per horizon. */}
         {/* The donut lost the pair it sat beside when Cash Flow went. Full width rather than half
             a row with white space next to it — the operational book has fourteen categories and
             the legend was the cramped half of that layout anyway. */}

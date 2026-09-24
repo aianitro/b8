@@ -301,18 +301,29 @@ export default async function TransactionsPage({
   const isTransferGroup = Boolean(transferGroupValue !== null && !isNaN(transferGroupValue));
 
   /**
-   * Arrived from the dashboard's Today or This Week card — a closed date range, no category.
+   * The view is EXACTLY a closed date range and nothing else — a heading and a total can then
+   * speak for it.
    *
-   * It earns a breadcrumb for a reason the desktop hides: an INSTALLED PWA HAS NO BACK BUTTON.
-   * iOS still honours the edge swipe, but an invisible gesture is not an affordance, and without
-   * this the two new links were a one-way trip into the ledger.
+   * It was built for the dashboard's Today and This Week cards and gated on `from=dashboard`.
+   * Those cards were removed on 2026-09-24, which would have left this unreachable, so the gate
+   * became what it should always have been: a question about the FILTERS rather than about where
+   * the reader came from. Setting the two date inputs in the bar above now gets the same heading
+   * and the same split.
    *
-   * NAMED BY ITS DATES, never "Today". The label has to survive the link being reopened from
-   * history tomorrow, when a heading reading "Today" over yesterday's rows would be a lie the page
-   * tells with a straight face. The dates say the same thing and keep saying it.
+   * Every other narrowing disqualifies it, and that is the point. "Sep 21 – Sep 23" over rows that
+   * are also filtered to one merchant, one account or one category is a heading that describes a
+   * third of what the reader is looking at.
+   *
+   * NAMED BY ITS DATES, never "Today" — the label has to survive being reopened from history
+   * tomorrow, when a heading reading "Today" over yesterday's rows would be a lie the page tells
+   * with a straight face.
    */
   const isDateRange = !isDrilldown && !isTransferGroup
-    && from === 'dashboard' && Boolean(dateFromValue && dateToValue);
+    && Boolean(dateFromValue && dateToValue)
+    && drillCategories.length === 0 && !searchQuery && !accountId
+    && !uncategorizedOnly && !watchedOnly
+    && amountMinValue === null && amountMaxValue === null
+    && transferGroupValue === null;
   const dateRangeLabel = isDateRange
     ? (dateFromValue === dateToValue
         ? prettyDate(dateToValue as string)
@@ -341,7 +352,11 @@ export default async function TransactionsPage({
         </div>
       )}
 
-      {isDateRange && (
+      {/* The breadcrumb needs an origin, and only `from` carries one — a range typed into the
+          filter bar was not arrived at from anywhere. It earns one when it HAS an origin for a
+          reason the desktop hides: an installed PWA has no back button, and iOS's edge swipe is
+          a gesture rather than an affordance. */}
+      {isDateRange && from && (
         <div className="flex items-center gap-2 mb-4 text-sm">
           <a href={origin.href} className="text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
