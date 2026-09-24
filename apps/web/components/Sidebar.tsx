@@ -123,20 +123,38 @@ export default function Sidebar() {
           <Link href="/dashboard" className="text-[#f0dfae] font-bold text-lg tracking-tight">
             B8<span className="text-cyan-100/80 font-medium text-xs ml-1.5 uppercase tracking-wider">Finance</span>
           </Link>
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            aria-label="Open navigation"
-            aria-expanded={open}
-            className="p-2 -mr-2 text-cyan-100 hover:text-white"
-          >
-            <Menu size={22} />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* WHERE THE WARNINGS GO ON A PHONE. The bell is rendered by whichever page HAS
+                warnings — it needs their content, and the shell has no business fetching it — so
+                this is an empty landing site rather than a component. `AlertBell` portals into it
+                when it finds it and renders in place when it does not, which is what keeps a page
+                without alerts from paying anything for this and keeps the layout free of a query
+                that every route, including the login screen, would otherwise run.
+
+                Beside the menu button rather than replacing it: both are shell-level controls and
+                a reader looking for "what needs me" looks at the same corner either way. */}
+            <div id="alert-slot" className="flex items-center" />
+            <button
+              type="button"
+              onClick={() => setOpen(true)}
+              aria-label="Open navigation"
+              aria-expanded={open}
+              className="p-2 -mr-2 text-cyan-100 hover:text-white"
+            >
+              <Menu size={22} />
+            </button>
+          </div>
         </div>
       </header>
 
+      {/* THE DRAWER COMES FROM THE RIGHT, because that is where the button that opens it is. It
+          slid in from the left for its whole life, which the owner reported as exactly the
+          confusion it is: the panel appears on the opposite side of the screen from the finger
+          that summoned it, so the eye has to cross the whole width to find what it just opened.
+          `justify-end` is the entire fix — the panel is already the flex item, it was simply
+          being packed to the start. */}
       {open && (
-        <div className="md:hidden fixed inset-0 z-50 flex">
+        <div className="md:hidden fixed inset-0 z-50 flex justify-end">
           {/* The dimmed area closes it, which is the gesture people try first. */}
           <button
             type="button"
