@@ -370,8 +370,12 @@ export default async function TransactionsPage({
         </h1>
         <p className="text-sm text-slate-500 mt-1">
           {total.toLocaleString()} transaction{total !== 1 ? 's' : ''}
-          <span className="text-slate-300 mx-1.5">·</span>
-          {(() => {
+          {/* Nothing follows an empty result. A day with no rows was reporting a dash between two
+              zeroes, which is three pieces of punctuation saying what "0 transactions" already
+              said — and it is the state this page is in most mornings, since Today opens it before
+              the feed has anything to show. */}
+          {total > 0 && <span className="text-slate-300 mx-1.5">·</span>}
+          {total > 0 && (() => {
             // A drilldown is answering for a budget cell, so it totals the rows that cell counted.
             // Everywhere else this is the plain ledger view and totals every row on screen.
             //
