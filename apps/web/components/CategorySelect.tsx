@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { BudgetCategory } from '@b8/contracts/types';
-import { groupCategories, setCategory } from '@/lib/transactionEdits';
+import { GROUP_LABELS, groupCategories, setCategory } from '@/lib/transactionEdits';
 
 interface Props {
   transactionId: number;
@@ -39,7 +39,7 @@ export default function CategorySelect({ transactionId, current, categories, des
 
   // The grouping moved to `lib/transactionEdits.ts` when the dashboard's row editor needed the
   // same three optgroups in the same order. One list, sorted once.
-  const { operational, capital, excluded } = groupCategories(categories, /payment/i.test(description ?? ''));
+  const groups = groupCategories(categories, description);
 
   async function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const prev = value;
@@ -77,26 +77,14 @@ export default function CategorySelect({ transactionId, current, categories, des
         }`}
       >
         <option value="">— uncategorized —</option>
-        {operational.length > 0 && (
-          <optgroup label="Operational">
-            {operational.map((c) => (
-              <option key={c.name} value={c.name}>{c.name}</option>
-            ))}
-          </optgroup>
-        )}
-        {capital.length > 0 && (
-          <optgroup label="Capital">
-            {capital.map((c) => (
-              <option key={c.name} value={c.name}>{c.name}</option>
-            ))}
-          </optgroup>
-        )}
-        {excluded.length > 0 && (
-          <optgroup label="Other">
-            {excluded.map((c) => (
-              <option key={c.name} value={c.name}>{c.name}</option>
-            ))}
-          </optgroup>
+        {(['suggested', 'operational', 'capital', 'excluded'] as const).map((key) =>
+          groups[key].length > 0 ? (
+            <optgroup key={key} label={GROUP_LABELS[key]}>
+              {groups[key].map((c) => (
+                <option key={c.name} value={c.name}>{c.name}</option>
+              ))}
+            </optgroup>
+          ) : null
         )}
       </select>
       {undoPrev !== null && (

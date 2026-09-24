@@ -33,7 +33,7 @@ import { useRouter } from 'next/navigation';
 import { Flag, Pencil, X } from 'lucide-react';
 import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
 import {
-  groupCategories, setCategory, setNote, setWatched, type CategoryOption,
+  GROUP_LABELS, groupCategories, setCategory, setNote, setWatched, type CategoryOption,
 } from '@/lib/transactionEdits';
 
 export interface EditableRow {
@@ -93,7 +93,7 @@ export default function TransactionEditButton({ row, categories }: {
     setOpen(true);
   }
 
-  const groups = groupCategories(categories, /payment/i.test(row.label));
+  const groups = groupCategories(categories, row.label);
 
   return (
     <>
@@ -151,20 +151,14 @@ export default function TransactionEditButton({ row, categories }: {
                          disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
             >
               <option value="">— uncategorized —</option>
-              {groups.operational.length > 0 && (
-                <optgroup label="Operational">
-                  {groups.operational.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </optgroup>
-              )}
-              {groups.capital.length > 0 && (
-                <optgroup label="Capital">
-                  {groups.capital.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </optgroup>
-              )}
-              {groups.excluded.length > 0 && (
-                <optgroup label="Other">
-                  {groups.excluded.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </optgroup>
+              {/* Rendered from one list so a group cannot be forgotten here and present in the
+                  grouping — `suggested` was, on the first pass. */}
+              {(['suggested', 'operational', 'capital', 'excluded'] as const).map((key) =>
+                groups[key].length > 0 ? (
+                  <optgroup key={key} label={GROUP_LABELS[key]}>
+                    {groups[key].map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+                  </optgroup>
+                ) : null
               )}
             </select>
 
