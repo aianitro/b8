@@ -54,7 +54,9 @@ export default function ExpandableKpiCards({
       <Card
         label="Keep an eye"
         value={watchCount.toLocaleString()}
-        sub={watchCount === 0 ? 'nothing flagged' : `oldest ${age(watchOldest)}`}
+        // 'none flagged', not 'nothing flagged': the longer one measures 80px against the 79px a
+        // card has at phone width and wrapped by a single pixel. `oldest 15 days` is 72px and fits.
+        sub={watchCount === 0 ? 'none flagged' : `oldest ${age(watchOldest)}`}
         // Amber past two weeks, never red: nothing on a watchlist is an error, and a colour that
         // shouts on day fifteen has nothing left to say on day sixty. The threshold is the shared
         // one — this card must not disagree with the row it opens.
@@ -69,15 +71,22 @@ export default function ExpandableKpiCards({
         // THE COUNT IS NOT THE LIST'S LENGTH. The reader caps its rows at twelve, so a card
         // counting them would read "12" whether twelve arrived or forty did. When they differ the
         // card says which figure the panel is showing.
+        //
+        // ALL THREE BELOW MEASURED AT 11px AGAINST THE 79px A CARD HAS AT 390px. The phrasing this
+        // replaced was prose — 'in the last 36 hours' is 2 lines, 'last 36 hours · showing 12' is
+        // 2, 'nothing new · a feed is behind' is 130px against 79. A caption that wraps in a card
+        // this narrow pushes the row's height around as the figures change, which is worse than
+        // being terse. The phone reached the same wording first, for the same reason.
         sub={arrivalsCount === 0
           // ZERO ARRIVALS IS AMBIGUOUS AND THE PANEL USED TO SAY SO. While the feed sat open on the
           // page, its empty state distinguished a quiet day from a bank that stopped reporting —
           // and collapsing it into a card would have thrown that away silently, since a card
           // nobody can open never shows its panel. The distinction moves onto the card instead.
-          ? (staleFeed ? 'nothing new · a feed is behind' : 'nothing new')
+          // 'feed behind' alone, because a zero above it already says nothing arrived.
+          ? (staleFeed ? 'feed behind' : 'nothing new')
           : arrivalsCount > arrivalsShown
-            ? `last 36 hours · showing ${arrivalsShown}`
-            : 'in the last 36 hours'}
+            ? `36h · ${arrivalsShown} shown`
+            : 'last 36h'}
         amber={arrivalsCount === 0 && staleFeed}
         open={open === 'arrivals'}
         onToggle={() => setOpen((v) => (v === 'arrivals' ? null : 'arrivals'))}
@@ -99,18 +108,25 @@ function Card({ label, value, sub, amber, open, onToggle, disabled }: {
 }) {
   const body = (
     <>
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-wide sm:tracking-wider text-slate-400 break-words">{label}</p>
-        {/* THE ONLY MARK SAYING THIS CARD OPENS. Its neighbours in the row do not, and a control
-            that looks exactly like a static card is a control nobody finds. Hidden when there is
-            nothing to open, so it never invites a click that does nothing. */}
-        {!disabled && (
-          <ChevronDown
-            size={15}
-            className={`shrink-0 text-slate-300 transition-transform ${open ? 'rotate-180' : ''}`}
-          />
-        )}
-      </div>
+      {/* THE CHEVRON IS OUT OF THE FLOW, which is a layout fix rather than a style choice. It sat
+          in a `flex justify-between` row beside the label and took 15px plus an 8px gap — a third
+          of the 79px a card gets at a third of a 390px screen. "NEW ARRIVALS" needs 67px at this
+          size and had 54, so both of these cards wrapped their label to two lines while the
+          Uncategorized card beside them, which has no chevron, did not. Absolutely positioned, the
+          label gets the full width and the mark still sits where it was drawn.
+
+          It is what says this card OPENS. Its neighbour in the row does not, and a control that
+          looks exactly like a static card is a control nobody finds. Hidden when there is nothing
+          to open, so it never invites a click that does nothing. */}
+      {!disabled && (
+        <ChevronDown
+          size={15}
+          className={`absolute top-4 right-2 sm:top-6 sm:right-6 text-slate-300 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      )}
+      {/* 9px and normal tracking below `sm:`, for the reason set out on `KpiCard`'s own label —
+          these three sit in one row and must be sized as one. */}
+      <p className="text-[9px] sm:text-xs font-semibold uppercase tracking-normal sm:tracking-wider text-slate-400 break-words">{label}</p>
       <p className={`text-2xl sm:text-3xl font-bold mt-1.5 sm:mt-2 font-mono ${amber ? 'text-amber-600' : 'text-slate-900'}`}>
         {value}
       </p>
@@ -120,7 +136,7 @@ function Card({ label, value, sub, amber, open, onToggle, disabled }: {
 
   // `min-w-0` and the smaller mobile padding for the same reason as KpiCard: a grid track grows
   // to its widest unbreakable word unless told it may shrink.
-  const shell = 'min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 text-left w-full';
+  const shell = 'relative min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 text-left w-full';
 
   // A card with nothing behind it stays a card rather than becoming a dead button: `disabled` on a
   // <button> is announced as "unavailable", which is the wrong thing to say about a figure that is
