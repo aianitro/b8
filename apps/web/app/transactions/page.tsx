@@ -139,7 +139,8 @@ async function getData(
     db.query<Pick<BudgetCategory, 'name' | 'landscape' | 'exclude_from_budget'>>(
       'SELECT name, landscape, exclude_from_budget FROM budget_categories ORDER BY name'
     ),
-    db.query<{ total: string; uncategorized: string; watched: string; sum: string; sum_budgeted: string }>(
+    db.query<{ total: string; uncategorized: string; watched: string; sum: string; sum_budgeted: string;
+                sum_out: string; sum_in: string }>(
       `SELECT COUNT(*)::text AS total,
               COUNT(*) FILTER (WHERE mapped_category IS NULL AND t.hidden = FALSE)::text AS uncategorized,
               -- Counted over the SAME filtered set as the uncategorized count above, not over the
@@ -152,7 +153,14 @@ async function getData(
               -- listed here (greyed) but counted nowhere in budget math, so a drilldown summing
               -- them would contradict the very cell it was opened from. Two totals rather than
               -- one, because the plain ledger view still wants every row it is showing.
-              COALESCE(SUM(t.amount) FILTER (WHERE t.hidden = FALSE), 0)::text AS sum_budgeted
+              COALESCE(SUM(t.amount) FILTER (WHERE t.hidden = FALSE), 0)::text AS sum_budgeted,
+              -- THE TWO SIDES, UNNETTED, for arrivals from a card that reported only one of them.
+              -- A net is the right figure for the ledger view and the wrong one under a tap on
+              -- "This Week", where a single credit-card payment is larger than the whole week of
+              -- spending and flips the headline to money IN. Computed here rather than derived
+              -- from the net, which has already lost the split by the time it arrives.
+              COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0 AND t.hidden = FALSE), 0)::text AS sum_out,
+              COALESCE(ABS(SUM(t.amount) FILTER (WHERE t.amount < 0 AND t.hidden = FALSE)), 0)::text AS sum_in
        FROM transactions t JOIN accounts a ON a.id = t.account_id
        WHERE a.track_transactions = TRUE ${where}`,
       args
@@ -176,6 +184,8 @@ async function getData(
     watched: Number(counts.rows[0].watched),
     sum: Number(counts.rows[0].sum),
     sumBudgeted: Number(counts.rows[0].sum_budgeted),
+    sumOut: Number(counts.rows[0].sum_out),
+    sumIn: Number(counts.rows[0].sum_in),
     accounts: accounts.rows,
     properties: props.rows,
   };
@@ -256,7 +266,7 @@ export default async function TransactionsPage({
   const amountMaxValue = amountMax ? parseFloat(amountMax) : null;
   const transferGroupValue = transferGroup ? parseInt(transferGroup, 10) : null;
 
-  const { transactions, categories, total, uncategorized, watched, sum, sumBudgeted, accounts, properties } = await getData(
+  const { transactions, categories, total, uncategorized, watched, sum, sumBudgeted, sumOut, sumIn, accounts, properties } = await getData(
     uncategorizedOnly, watchedOnly, accountId, drillCategories, drillMonth, searchQuery,
     dateFromValue, dateToValue,
     amountMinValue !== null && !isNaN(amountMinValue) ? amountMinValue : null,
@@ -364,6 +374,21 @@ export default async function TransactionsPage({
           {(() => {
             // A drilldown is answering for a budget cell, so it totals the rows that cell counted.
             // Everywhere else this is the plain ledger view and totals every row on screen.
+            //
+            // EXCEPT ON A DATE-RANGE ARRIVAL, where the two sides are reported separately. The
+            // reader got here by tapping a SPENDING figure, and a net can invert it outright: a
+            // week holding one credit-card payment nets positive and would headline as money in.
+            // Both figures below are true of the rows on screen and neither pretends to be the
+            // other.
+            if (isDateRange) {
+              return (
+                <>
+                  <span className="font-mono font-medium text-slate-700">−{fmt(sumOut)}</span>
+                  <span className="text-slate-300 mx-1.5">·</span>
+                  <span className="font-mono font-medium text-emerald-600">+{fmt(sumIn)}</span>
+                </>
+              );
+            }
             const shown = isDrilldown ? sumBudgeted : sum;
             return (
               <span className={`font-mono font-medium ${shown < 0 ? 'text-emerald-600' : 'text-slate-700'}`}>
