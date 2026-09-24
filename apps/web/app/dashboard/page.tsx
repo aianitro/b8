@@ -33,6 +33,7 @@ import { MONTHS, dateRangeHref, drillHref, weekStartYmd, ymd } from '@/lib/drill
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
 // April is. A second leap-year rule here would drift on 2100.
 import { daysInMonth } from '@/lib/domain/pacing';
+import { loadCategoryOptions } from '@/lib/categoryOptionsRead';
 
 
 
@@ -55,6 +56,11 @@ export interface RecentArrival {
   amount: number;
   label: string;
   category: string | null;
+  /** Carried so the row's editor opens from the truth rather than from an assumption.
+   *  An arrival can ALSO be watched — the reader has no watched bound and the watchlist has no
+   *  date bound, so a row flagged today that also landed today is in both lists. */
+  watched: boolean;
+  note: string | null;
 }
 
 function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
@@ -216,6 +222,11 @@ export default async function DashboardPage() {
   const asOf = asOfFromDate(now);
   const monthLength = daysInMonth(asOf.year, asOf.month);
 
+  // The picker behind every row editor in the panels below. Not from the payload, and not a figure
+  // — see the note on the reader. Awaited beside the overview rather than after it, so the page
+  // still issues one round of I/O.
+  const categoryOptionsPromise = loadCategoryOptions();
+
   // P1-11a: EVERYTHING BELOW IS READ FROM THE /overview PAYLOAD — the same object the mobile client
   // will consume, produced by the same function the API handler wraps. The page used to run ten
   // queries and six loaders of its own; those were copied into `lib/overviewRead.ts` for the
@@ -230,6 +241,8 @@ export default async function DashboardPage() {
     recentArrivals, recentArrivalsTotal, watchlist, yearEnd, offCycleElsewhere, monthCategories,
     feedFindings, driftFindings, jobHealth,
   } = dashboardFromWire(await loadOverview(now));
+  // Started before the overview and collected here, so the two reads overlap rather than queue.
+  const categoryOptions = await categoryOptionsPromise;
 
   // Share of the year gone, from the page's own clock read. The tracks compare a year's spend to
   // a year's budget, and without this the reader has to date the figure themselves.
@@ -414,11 +427,11 @@ export default async function DashboardPage() {
         <ExpandableKpiCards
           watchCount={watchlist.length}
           watchOldest={watchlist[0]?.daysOpen ?? 0}
-          watchPanel={<WatchlistCard items={watchlist} />}
+          watchPanel={<WatchlistCard items={watchlist} categories={categoryOptions} />}
           arrivalsCount={recentArrivalsTotal}
           arrivalsShown={recentArrivals.length}
           arrivalsPanel={
-            <RecentArrivals arrivals={recentArrivals} staleFeed={feedFindings.length > 0} />
+            <RecentArrivals arrivals={recentArrivals} staleFeed={feedFindings.length > 0} categories={categoryOptions} />
           }
           staleFeed={feedFindings.length > 0}
         />

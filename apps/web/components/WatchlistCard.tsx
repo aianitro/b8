@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { Flag } from 'lucide-react';
 import { WATCHLIST_STALE_DAYS } from '@b8/contracts/overview';
 import type { WatchedTransaction } from '@/lib/watchlistRead';
+import TransactionEditButton from './TransactionEditButton';
+import type { CategoryOption } from '@/lib/transactionEdits';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Math.abs(n));
@@ -41,7 +43,11 @@ const STALE_DAYS = WATCHLIST_STALE_DAYS;
  * A permanent card reading "nothing to watch" is furniture directly under the page's main picture.
  * The page renders this conditionally; see app/dashboard/page.tsx.
  */
-export default function WatchlistCard({ items }: { items: WatchedTransaction[] }) {
+export default function WatchlistCard({ items, categories }: {
+  items: WatchedTransaction[];
+  /** For the editor's picker. Empty renders the rows without one — see the note on the button. */
+  categories: CategoryOption[];
+}) {
   const oldest = items[0]?.daysOpen ?? 0; // The read orders oldest first.
 
   return (
@@ -66,18 +72,31 @@ export default function WatchlistCard({ items }: { items: WatchedTransaction[] }
           // a refund landing is often exactly the thing being waited for.
           const inbound = item.amount < 0;
           return (
-            <div key={item.id} className="flex items-baseline gap-3 text-sm">
+            // WRAPS ON A PHONE, one line from `sm:` up. Five things already shared this row and
+            // the edit button is a sixth; at 358px the note is what loses, and the note is half of
+            // why a row is on this list. Below `sm:` the reason takes a line of its own.
+            <div key={item.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm">
               <Flag size={13} className={`shrink-0 translate-y-0.5 ${stale ? 'text-amber-500' : 'text-slate-300'}`} />
-              <span className="text-slate-900 truncate max-w-[14rem]">{item.label}</span>
-              <span className="text-xs text-slate-400 truncate flex-1">
+              <span className="text-slate-900 truncate max-w-[10rem] sm:max-w-[14rem]">{item.label}</span>
+              <span className="order-last sm:order-none basis-full sm:basis-auto sm:flex-1 text-xs text-slate-400 truncate pl-6 sm:pl-0">
                 {item.note ?? <span className="text-slate-300">no reason given</span>}
               </span>
-              <span className={`font-mono text-sm tabular-nums ${inbound ? 'text-green-600' : 'text-slate-700'}`}>
+              <span className={`ml-auto sm:ml-0 font-mono text-sm tabular-nums ${inbound ? 'text-green-600' : 'text-slate-700'}`}>
                 {inbound ? '+' : ''}{fmt(item.amount)}
               </span>
-              <span className={`text-xs w-16 text-right ${stale ? 'font-semibold text-amber-600' : 'text-slate-400'}`}>
+              <span className={`text-xs w-14 sm:w-16 text-right ${stale ? 'font-semibold text-amber-600' : 'text-slate-400'}`}>
                 {age(item.daysOpen)}
               </span>
+              {/* Every row here is watched by definition, so the editor opens with the flag on —
+                  and unflagging is the commonest thing to do from this list, which is why the
+                  button is on the row rather than behind "Manage". */}
+              <TransactionEditButton
+                categories={categories}
+                row={{
+                  id: item.id, label: item.label, date: item.date, amount: item.amount,
+                  category: item.category, watched: true, note: item.note,
+                }}
+              />
             </div>
           );
         })}

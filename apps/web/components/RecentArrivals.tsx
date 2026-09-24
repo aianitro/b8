@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { Inbox } from 'lucide-react';
 import type { RecentArrival } from '@/app/dashboard/page';
+import TransactionEditButton from './TransactionEditButton';
+import type { CategoryOption } from '@/lib/transactionEdits';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Math.abs(n));
@@ -20,8 +22,11 @@ const dayLabel = (iso: string) => {
  * A refund is shown as what it is rather than as a negative expense, because a row reading
  * "−$150.00" in a list of spending is read as spending by anyone moving quickly.
  */
-export default function RecentArrivals({ arrivals, staleFeed }: {
-  arrivals: RecentArrival[]; staleFeed: boolean;
+export default function RecentArrivals({ arrivals, staleFeed, categories }: {
+  arrivals: RecentArrival[];
+  staleFeed: boolean;
+  /** For the editor's picker — the reason this list is worth opening most days. */
+  categories: CategoryOption[];
 }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">
@@ -52,13 +57,16 @@ export default function RecentArrivals({ arrivals, staleFeed }: {
           {arrivals.map((a) => {
             const refund = a.amount < 0;
             return (
-              <div key={a.id} className="flex items-center gap-3 py-2 first:pt-0 last:pb-0">
+              // Wraps below `sm:`, same as the watchlist beside it: a date, a label, a category
+              // chip, a figure and an edit button do not fit 358px on one line, and the label is
+              // what would lose. The chip and the figure take the second line.
+              <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 first:pt-0 last:pb-0">
                 <span className="text-[10px] font-mono text-slate-300 w-11 shrink-0">{dayLabel(a.date)}</span>
-                <span className="text-sm text-slate-700 truncate flex-1">{a.label}</span>
+                <span className="text-sm text-slate-700 truncate flex-1 min-w-0">{a.label}</span>
                 {a.category ? (
                   <Link
                     href={`/transactions?category=${encodeURIComponent(a.category)}&from=dashboard`}
-                    className="text-[10px] px-1.5 py-0.5 rounded bg-slate-50 text-slate-500 hover:bg-slate-100 shrink-0 max-w-[9rem] truncate"
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-slate-50 text-slate-500 hover:bg-slate-100 shrink-0 max-w-[7rem] sm:max-w-[9rem] truncate"
                   >
                     {a.category}
                   </Link>
@@ -75,6 +83,17 @@ export default function RecentArrivals({ arrivals, staleFeed }: {
                 }`}>
                   {refund ? `+${fmt(a.amount)}` : fmt(a.amount)}
                 </span>
+                {/* FILING IS WHY THIS LIST IS OPENED. The category chip beside it navigates away
+                    to the ledger; this changes the row where it sits, which is the whole point of
+                    reading arrivals in the morning. An arrival can also already be watched — the
+                    reader carries the flag and the note for exactly this. */}
+                <TransactionEditButton
+                  categories={categories}
+                  row={{
+                    id: a.id, label: a.label, date: a.date, amount: a.amount,
+                    category: a.category, watched: a.watched, note: a.note,
+                  }}
+                />
               </div>
             );
           })}

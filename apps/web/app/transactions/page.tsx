@@ -3,7 +3,8 @@ export const dynamic = 'force-dynamic';
 import { Suspense } from 'react';
 import Link from 'next/link';
 import db from '@/lib/db';
-import type { Transaction, BudgetCategory } from '@b8/contracts/types';
+import type { Transaction } from '@b8/contracts/types';
+import { loadCategoryOptions } from '@/lib/categoryOptionsRead';
 import TransactionFilter from '@/components/TransactionFilter';
 import TransactionTable from '@/components/TransactionTable';
 
@@ -136,9 +137,10 @@ async function getData(
        WHERE 1=1 AND a.track_transactions = TRUE ${where} ORDER BY t.date DESC, t.id DESC`,
       args
     ),
-    db.query<Pick<BudgetCategory, 'name' | 'landscape' | 'exclude_from_budget'>>(
-      'SELECT name, landscape, exclude_from_budget FROM budget_categories ORDER BY name'
-    ),
+    // Was this query, spelled here. Lifted to `lib/categoryOptionsRead.ts` when the dashboard's
+    // row editors needed the same list: `ORDER BY name` is load-bearing for the grouping that
+    // follows, and two spellings of one list eventually order differently.
+    loadCategoryOptions(),
     db.query<{ total: string; uncategorized: string; watched: string; sum: string; sum_budgeted: string;
                 sum_out: string; sum_in: string }>(
       `SELECT COUNT(*)::text AS total,
@@ -178,7 +180,7 @@ async function getData(
   ]);
   return {
     transactions: txns.rows,
-    categories: cats.rows,
+    categories: cats,
     total: Number(counts.rows[0].total),
     uncategorized: Number(counts.rows[0].uncategorized),
     watched: Number(counts.rows[0].watched),

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { BudgetCategory } from '@b8/contracts/types';
+import { groupCategories, setCategory } from '@/lib/transactionEdits';
 
 interface Props {
   transactionId: number;
@@ -36,30 +37,20 @@ export default function CategorySelect({ transactionId, current, categories, des
     return () => clearTimeout(t);
   }, [undoPrev, router]);
 
-  const isPayment = /payment/i.test(description ?? '');
-
-  const sorted = categories.slice().sort((a, b) => {
-    if (!isPayment) return a.name.localeCompare(b.name);
-    const aT = a.name.toLowerCase().includes('transfer');
-    const bT = b.name.toLowerCase().includes('transfer');
-    if (aT !== bT) return aT ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  const operational = sorted.filter((c) => !c.exclude_from_budget && c.landscape === 'operational');
-  const capital     = sorted.filter((c) => !c.exclude_from_budget && c.landscape === 'capital');
-  const excluded    = sorted.filter((c) => c.exclude_from_budget);
+  // The grouping moved to `lib/transactionEdits.ts` when the dashboard's row editor needed the
+  // same three optgroups in the same order. One list, sorted once.
+  const { operational, capital, excluded } = groupCategories(categories, /payment/i.test(description ?? ''));
 
   async function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const prev = value;
     const next = e.target.value;
     setValue(next);
     setSaving(true);
-    await fetch(`/api/v1/transactions/${transactionId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mapped_category: next || null }),
-    });
+    // Failures are swallowed here as they always were: the undo affordance that follows is what
+    // the owner uses when a change does not look right, and it re-sends rather than asserting the
+    // first send worked. Worth stating because the shared helper now THROWS where the bare fetch
+    // returned — without this catch, a refused save would blank the page.
+    await setCategory(transactionId, next || null).catch(() => {});
     setSaving(false);
     setUndoPrev(prev);
   }
@@ -70,11 +61,7 @@ export default function CategorySelect({ transactionId, current, categories, des
     setUndoPrev(null);
     setValue(restore);
     setSaving(true);
-    await fetch(`/api/v1/transactions/${transactionId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mapped_category: restore || null }),
-    });
+    await setCategory(transactionId, restore || null).catch(() => {});
     setSaving(false);
     router.refresh();
   }
