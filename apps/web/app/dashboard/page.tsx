@@ -9,7 +9,7 @@ import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
 import JobHealthCard from '@/components/JobHealthCard';
 import AlertBell from '@/components/AlertBell';
-import CategoryHeatmap, { type HeatmapCategory } from '@/components/CategoryHeatmap';
+import WhereTheMonthSits, { type MonthCategoryView } from '@/components/WhereTheMonthSits';
 import RecentArrivals from '@/components/RecentArrivals';
 import WatchlistCard from '@/components/WatchlistCard';
 import ExpandableKpiCards from '@/components/ExpandableKpiCards';
@@ -266,7 +266,7 @@ export default async function DashboardPage() {
   // the bubbles are a map, not a judgement, and a map that omits groceries, fuel and utilities is
   // the wrong shape. Scoping and shaping now happen in `lib/overviewRead.ts`, once, for this page
   // and the mobile client alike.
-  const heatmapCategories: HeatmapCategory[] = monthCategories;
+  const monthShape: MonthCategoryView[] = monthCategories;
 
   // `p-4` on a phone, the original `p-8` from `sm:` up. 32px of padding each side costs 64px of a
   // 390px screen — a sixth of it — spent on whitespace beside figures that need the room.
@@ -423,7 +423,7 @@ export default async function DashboardPage() {
           request — this dashboard is mostly read in the PWA now, and circle packing spends a third
           of a phone-width box on the gaps between circles. `asOf.month` rather than the component's
           own clock: the tiles and the link out of them should name one month. */}
-      <CategoryHeatmap categories={heatmapCategories} month={asOf.month} />
+      <WhereTheMonthSits categories={monthShape} month={asOf.month} />
 
       {/* Charts */}
       <div className="space-y-6">

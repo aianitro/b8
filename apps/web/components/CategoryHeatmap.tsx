@@ -2,19 +2,19 @@
 
 // Where the month sits, as a market heatmap — the phone's widget, brought to the web.
 //
-// ─── What this replaced, and why the owner was right ──────────────────────────────────────────
+// ─── THE NARROW HALF OF ONE SLOT — `WhereTheMonthSits.tsx` picks between this and the circles ─
 //
-// It replaced `CategoryBubbles`, which packed the same categories as circles. Bubbles are a fine
-// picture at 1000px and a poor one in the PWA, which is where this dashboard is mostly read now:
-// circle packing spends about a third of the box on the gaps BETWEEN circles, and the smallest
-// categories fall under the radius at which a label — or anything — can be drawn inside them. A
-// treemap spends every pixel. The phone got this shape first, the owner liked it there, and asking
-// for it here is the same judgement applied to the surface that shares its width.
+// This replaced `CategoryBubbles` outright for a few hours, then took the screens below `lg` and
+// gave the rest back. Both readings were right about their own width, which is why the switch is
+// width: circle packing spends about a third of the box on the gaps BETWEEN circles, and the
+// smallest categories fall under the radius at which a label — or anything — can be drawn inside
+// them. That is affordable at 1000px and ruinous at 390. A treemap spends every pixel.
 //
-// Bubbles are not gone: the daily digest email still draws them (`lib/domain/digestBubbles.ts`) and
-// should. An email has no hover and no tap, so a name only a pointer can uncover is not a name
-// there — and the circle packer leaves room beneath each circle to print one, which a treemap by
-// definition does not.
+// So this is what the PWA gets, and what any narrow window gets, installed or not. The phone had
+// this shape first; bringing it here is the same judgement applied to the surface that shares its
+// width. The daily digest email keeps circles for a third reason again — no hover and no tap, so a
+// name a pointer must uncover is not a name there, and the packer leaves room beneath each circle
+// to print one, which a treemap by definition does not.
 //
 // ─── Shared with the phone down to the paint ──────────────────────────────────────────────────
 //
@@ -50,18 +50,8 @@ import {
   HEATMAP_LEGEND as LEGEND,
 } from '@b8/contracts/heatmapPalette';
 import { drillHref } from '@/lib/drilldown';
+import type { MonthCategoryView } from './WhereTheMonthSits';
 
-export interface HeatmapCategory {
-  category: string;
-  /** This month's allocation. Drives the AREA of the tile. */
-  budgeted: number;
-  /** Spent so far this month. */
-  actual: number;
-  /** Where the month is heading, as a fraction of budget. Null when there is no basis yet. */
-  projectedRatio: number | null;
-  /** True while the month is too young to project from — drawn, but never coloured as a verdict. */
-  tooEarly: boolean;
-}
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -137,7 +127,7 @@ function useBoxSize(ref: React.RefObject<HTMLElement | null>): { w: number; h: n
  *              replaced did read their own clock, which was a latent bug for one second a month.
  */
 export default function CategoryHeatmap({ categories, month }: {
-  categories: HeatmapCategory[];
+  categories: MonthCategoryView[];
   month: number;
 }) {
   const router = useRouter();
