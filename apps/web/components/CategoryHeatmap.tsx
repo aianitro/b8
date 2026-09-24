@@ -26,7 +26,7 @@
 // ─── Percentage geometry, so a resize needs no measurement ────────────────────────────────────
 //
 // `layoutTreemap` is called on a 100x100 box and the tiles are positioned in `%`. The map is then
-// correct at every width from the first server-rendered byte, with no ResizeObserver in the
+// correct at every width from the first server-rendered byte, with nothing measured in the
 // critical path and no hydration guess about a viewport the server cannot see.
 //
 // The measurement below exists only to decide WHICH TILES CARRY A LABEL, which is a question about
@@ -70,43 +70,51 @@ const AMOUNT_LINE = 14;
 /**
  * The map's rendered size in CSS pixels, or `null` until it has been measured.
  *
- * ─── MEASURED SYNCHRONOUSLY FIRST, OBSERVED AFTER. Both, and the first one is load-bearing. ────
+ * ─── MEASURED BY HAND, ON EVERY EVENT THAT CAN CHANGE IT. NOT BY ResizeObserver ALONE. ────────
  *
- * This began as a ResizeObserver alone, on the reasoning that `observe()` delivers an initial
- * observation and there was therefore no need to measure by hand. Deployed, every tile came out
- * bare: sixteen correctly-sized, correctly-coloured squares with no glyph and no figure on any of
- * them. Dragging the window fixed all sixteen at once, which is the shape of the bug in one
- * gesture — the observer was alive and delivering CHANGES, and the initial delivery never arrived.
+ * This was a ResizeObserver, twice, and it was wrong twice.
  *
- * It is not worth guessing why. An observer's first callback is a race against whatever else the
- * page is doing on load, and the failure mode when it is lost is silent and total: nothing errors,
- * nothing retries, and the widget simply has no labels for the rest of its life.
+ * The first version relied on `observe()` delivering an initial observation. Deployed, every tile
+ * came out bare — sixteen correctly-sized, correctly-coloured squares with no glyph and no figure
+ * on any of them — and dragging the window fixed all sixteen at once. The observer was alive and
+ * reporting CHANGES; its first delivery never arrived.
  *
- * So the first value comes from `getBoundingClientRect()` in the effect, where it cannot be lost,
- * and the observer's job is narrowed to what it is actually good at — reporting subsequent changes.
- * A zero reading is still ignored, and is now survivable: a box that is 0 when the effect runs and
- * non-zero once the stylesheet applies has CHANGED, which is exactly the case the observer catches.
+ * The fix was to take the first value from `getBoundingClientRect()` and leave changes to the
+ * observer. That was still too much faith. Once the map became the narrow half of a pair and its
+ * box was `display: none` above `lg`, the first measurement was legitimately 0, and crossing the
+ * breakpoint left the tiles bare again: an element going from not-rendered to 1038x380 is the
+ * clearest size change there is, and the observer did not report it either.
+ *
+ * So the observer is gone and the measuring is explicit. It runs at mount and on `resize`, and
+ * `resize` is not a heuristic here — the box only changes width when the window does, because
+ * crossing the `lg` breakpoint IS a window resize. A 0 reading is ignored rather than stored, so
+ * the hidden half simply has no size until it has a reason to.
+ *
+ * The lesson, recorded because it cost two deploys: an observer that fails silently and totally
+ * is worse than a listener that fires too often. This one recomputes sixteen rectangles on a
+ * resize, and that is a price worth paying to never render a labelless map again.
  */
 function useBoxSize(ref: React.RefObject<HTMLElement | null>): { w: number; h: number } | null {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // Sub-pixel changes are dropped rather than re-rendering sixteen tiles mid-drag; `prev` is
-    // returned unchanged so React bails out of the update entirely.
-    const apply = (width: number, height: number) => {
+    const measure = () => {
+      const el = ref.current;
+      if (!el) return;
+      const { width, height } = el.getBoundingClientRect();
+      // A hidden box measures 0. Storing that would be storing "no tile has room for anything",
+      // which is true while it is hidden and wrong the instant it is not.
       if (width < 1 || height < 1) return;
+      // Sub-pixel changes return `prev` unchanged, so React bails out of the update entirely
+      // rather than re-rendering sixteen tiles for a fraction of a pixel mid-drag.
       setSize((prev) =>
         prev && Math.abs(prev.w - width) < 1 && Math.abs(prev.h - height) < 1
           ? prev
           : { w: width, h: height }
       );
     };
-    const rect = el.getBoundingClientRect();
-    apply(rect.width, rect.height);
-    const ro = new ResizeObserver(([entry]) => apply(entry.contentRect.width, entry.contentRect.height));
-    ro.observe(el);
-    return () => ro.disconnect();
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
   }, [ref]);
   return size;
 }
