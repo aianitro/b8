@@ -342,6 +342,13 @@ which commit was bad.
 Build before migrate, so a commit that does not compile never reaches the database. Migrate before
 restart, so the new code never starts against the old schema.
 
+**The app returns 500 for the duration of the build**, roughly twenty seconds, not just across the
+restart: `npm run build` writes into `.next` while the standalone server is serving out of it.
+Building to a side directory and renaming it in does not fix this — Next bakes the directory's name
+into the standalone output, so the server would then look for its static assets under the old name
+and every chunk would 404. The real fix is to run the app from a copy of the standalone tree, which
+is a change to `start-web.sh` too. Until then: push when you are not reading the app.
+
 ### Why it pulls rather than being pushed to
 
 Three constraints, and together they leave one answer.

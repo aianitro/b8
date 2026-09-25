@@ -95,6 +95,24 @@ if [ "$(shasum package-lock.json 2>/dev/null | cut -d' ' -f1)" != "$LOCK_BEFORE"
   npm ci || fail "npm ci"
 fi
 
+# ─── THE BUILD IS THE OUTAGE, AND IT IS LONGER THAN THE RESTART ───────────────────────────────
+#
+# `npm run build` writes into `.next` while the standalone server is serving out of it, so the app
+# returns 500 for the whole build — about twenty seconds — not merely across the `pkill` below.
+# Measured on the first unattended deploy: a request at 21:04:31, nine seconds into a build that
+# started at 21:04:22, came back 500.
+#
+# NOT FIXED, and the obvious fix does not work. Building to a side directory via `distDir` and
+# renaming it in fails because Next BAKES THE NAME into the standalone output — `server.js` carries
+# `"distDir":"./.next-incoming"` and the inner directory keeps that name — so after the rename
+# `start-web.sh` would copy static assets into `.next/static` while the server looked for them in
+# `.next-incoming/static`, and every chunk would 404. Tried, caught before shipping, reverted.
+#
+# What would work is running the app from a copy of the standalone tree rather than from `.next`
+# itself, so a rebuild cannot touch what is being served. That is a change to `start-web.sh` as
+# well as this file, and it is worth doing the day this app has a reader who is not its owner.
+# Twenty seconds of 500s once per push, on a single-user app, is a cost worth naming rather than
+# a cost worth a hasty fix.
 log "building"
 npm run build >/dev/null 2>&1 || fail "build"
 
