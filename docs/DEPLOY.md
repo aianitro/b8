@@ -324,6 +324,56 @@ curl -s -H "Authorization: Bearer $TOKEN" https://<machine>.ts.net/api/v1/overvi
 
 ---
 
+## Deploying a change — `com.b8.deploy`
+
+The server polls `origin/main` every two minutes and deploys what it finds. **Pushing is the
+deploy**; there is nothing to run.
+
+```
+git push          # ...and within two minutes the server is on it
+tail -f ~/b8-logs/deploy.log     # on the server, to watch a deploy happen
+```
+
+Each pass: `git fetch`, and exit if the commit has not moved. Otherwise reset to it, `npm ci` only
+if the lockfile changed, build, migrate, restart, then poll `/login` for a 200. **If no 200 arrives
+within 45 seconds it resets to the commit that was serving, rebuilds and restarts it**, and logs
+which commit was bad.
+
+Build before migrate, so a commit that does not compile never reaches the database. Migrate before
+restart, so the new code never starts against the old schema.
+
+### Why it pulls rather than being pushed to
+
+Three constraints, and together they leave one answer.
+
+- **The runners cannot reach this machine.** It is behind NAT and published only inside the tailnet
+  — `tailscale serve status` says "tailnet only", Funnel is off, and step 6 above keeps it that way
+  on purpose.
+- **The build has to happen here.** Darwin x86_64, resolving `sharp-darwin-x64`; GitHub has retired
+  its x86_64 macOS runners, so no hosted runner can produce a `.next` this machine can load.
+- **The machine sleeps.** A push-based deploy fails whenever the lid is down. A pull catches up on
+  wake, unattended.
+
+It needs no credential and opens no port: the repo is public, so `git fetch` is unauthenticated,
+and nothing here adds a secret to GitHub or a listener to this machine.
+
+### The tree is a git clone now
+
+`~/b8` has a `.git` and is reset `--hard` on every deploy, so the only honest answer to "what is
+running" is a commit. Untracked files are never touched — `.env.local`, `apps/backups/` and
+`node_modules/` all survive, which is why it is a reset and never a `clean`.
+
+`ops/deploy.sh` (rsync from a laptop) still exists for the two cases this cannot serve: trying
+something uncommitted, and rescuing a machine whose `.git` has gone wrong. Anything sent that way
+that is not committed is overwritten within two minutes.
+
+### If a deploy fails
+
+`~/b8-logs/deploy.log` names the commit and the step. A rolled-back deploy leaves the previous
+commit serving and says so; the fix is another commit, not another deploy.
+
+---
+
 ## What this step does NOT give you
 - **No process supervision beyond `restart: unless-stopped`.** If the machine reboots, Docker
   restarts the containers; if the app crashes in a loop, nothing tells you.

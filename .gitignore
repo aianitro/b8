@@ -67,3 +67,8 @@ apps/*/.expo/
 *.p12
 *.key
 *.mobileprovision
+
+# Database dumps, written on the server by scripts/backup.ts. Never in the repo, and named here
+# so `git status` on the server is quiet and `git clean` can never reach them.
+apps/backups/
+backups/

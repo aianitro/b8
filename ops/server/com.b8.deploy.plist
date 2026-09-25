@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Polls origin/main and deploys when it moves.
+
+  A system LaunchDaemon like its siblings, and for the same reason: agents only start once someone
+  logs in at the screen, so after a power cut a headless server would sit on an old commit until
+  somebody opened the lid. UserName drops privileges — nothing here runs as root, and the deploy
+  needs nothing that would.
+
+  StartInterval rather than a calendar: "within two minutes of a push" is the useful promise, and a
+  poll that finds nothing costs one `git fetch` against a public repo. RunAtLoad means a machine
+  that was asleep during a push catches up as soon as it wakes, which is the whole argument for
+  pulling rather than being pushed to.
+
+  NO KeepAlive. This is a task that finishes, not a service that should be running; KeepAlive would
+  restart it the instant it exited and rebuild the app in a loop.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.b8.deploy</string>
+  <key>UserName</key><string>__USER__</string>
+  <key>ProgramArguments</key>
+  <array><string>__APP__/ops/server/pull-deploy.sh</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>HOME</key><string>__HOME__</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>120</integer>
+  <key>StandardOutPath</key><string>__HOME__/b8-logs/deploy.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/b8-logs/deploy.log</string>
+</dict>
+</plist>

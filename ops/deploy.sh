@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 # Push this working tree to the server, build it there, and restart the app.
 #
+# ─── NOT THE NORMAL PATH ANY MORE ─────────────────────────────────────────────────────────────
+#
+# `ops/server/pull-deploy.sh` is: the server polls origin/main every two minutes and deploys what
+# it finds, with a health check and a rollback. Pushing a commit is the deploy.
+#
+# This script stays for the two cases that one cannot serve. Trying something on the server that is
+# not committed — which is exactly what the pull deployer is designed to make impossible, so it is
+# a deliberate act rather than a habit. And getting a fix onto a machine whose `.git` has gone
+# wrong, where the thing that pulls is the thing that is broken.
+#
+# IT WILL BE OVERWRITTEN. The deployer resets --hard to origin/main on its next pass, so anything
+# sent this way that is not committed lives for at most two minutes. That is a feature; it is also
+# a surprise if you have forgotten, so: commit it, or expect to lose it.
+#
 # ─── WHY THIS EXISTS: A HAND-WRITTEN rsync DELETED THE SERVER'S BACKUPS ────────────────────────
 #
 # On 2026-09-23 a deploy was typed at the prompt as `rsync -az --delete` with the obvious excludes
