@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Pulls the server's backups to this laptop. Installed by ops/laptop/install.sh.
+
+  A LaunchAGENT, in ~/Library/LaunchAgents, not a LaunchDaemon like the four services on the
+  server. A daemon runs as root at boot, which this must not: it needs the login keychain's reach,
+  the ssh key in this account's ~/.ssh, and a logged-in session to raise a notification. It also
+  has no reason to run when nobody is here — the server keeps thirty days, so a laptop that was
+  shut for a fortnight still misses nothing when it comes back.
+
+  Consequently NO sudo is needed to install or remove it, and it cannot touch anything this account
+  could not already touch.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.b8.backup-pull</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>__SCRIPT__</string>
+  </array>
+
+  <!-- Hourly, not daily-at-a-time. A laptop is asleep at any hour you might pick, and launchd
+       runs a missed StartInterval once on wake rather than skipping it — so an hourly job is
+       self-healing where a 06:30 job silently does nothing on every day the lid was down. The run
+       costs one ssh round trip and transfers nothing 23 times out of 24. -->
+  <key>StartInterval</key>
+  <integer>3600</integer>
+
+  <!-- Also on login, so plugging in after a trip catches up immediately instead of up to an hour
+       later. -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Both streams to one file beside the backups themselves: the log and the thing it is about
+       stay together, and `tail` on one directory answers both "do I have backups" and "is the
+       puller still alive". The prune in the script matches only the dump naming pattern, so this
+       file is never a candidate for deletion. -->
+  <key>StandardOutPath</key>
+  <string>__LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG__</string>
+
+  <!-- Deliberately NOT KeepAlive. This is a job that runs and exits, not a service; KeepAlive
+       would restart it the instant it finished, forever. That mistake took the server's web
+       service down for a morning when the start script exited. -->
+</dict>
+</plist>

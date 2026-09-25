@@ -227,6 +227,82 @@ psql -d b8_restore_check -c 'SELECT count(*) FROM transactions;'
 
 Never restore over `b8_finance` without taking a dump of it first.
 
+### Encrypted to a key the server does not have
+
+**Done 2026-09-25.** Set `BACKUP_AGE_RECIPIENT` and every dump is written as `<name>.dump.age`,
+encrypted with [age](https://github.com/FiloSottile/age) **after** the restore rehearsal passes — so
+what gets encrypted is a dump already proven to come back.
+
+The recipient in the server's `.env.local` is a **public** key. The private half lives on the laptop
+at `~/.config/b8/backup-key.txt` and in the password manager, and deliberately nowhere else:
+
+> **The server encrypts backups it cannot itself read.** It is the machine most likely to be lost —
+> nine years old, a battery macOS reports as failing, and physically in a flat. Whoever ends up with
+> that disk gets a directory of files none of them can open, and that property is worth more than
+> the inconvenience of needing the laptop to restore.
+
+Consequences worth knowing before you need them:
+
+- **Lose the private key and every backup is lost with it.** That is the trade, stated plainly. It
+  is why the key is in the password manager as well as on disk — one copy of it is a worse position
+  than no encryption at all.
+- If `BACKUP_AGE_RECIPIENT` is unset the dump is still written, unencrypted, and the log says so at
+  WARN. Silently skipping encryption and silently refusing to back up are both worse.
+
+### A second copy, on the laptop — `com.b8.backup-pull`
+
+**Done 2026-09-25.** `ops/laptop/install.sh`, run on the **laptop**, without sudo. Hourly, it
+rsyncs the server's backup directory to `~/b8-backups` over the tailnet.
+
+Three decisions in it, each with a reason:
+
+- **The laptop pulls; the server does not push.** A push would need the server to hold a key to the
+  laptop, and the server is the machine at risk. Pulling keeps the trust one-directional: losing the
+  server costs nothing on the laptop.
+- **It never deletes.** `rsync --delete` would mirror, and mirroring is wrong for a backup — the
+  server prunes at 30 days, and the copy worth having on the day it matters is the one the server has
+  already discarded. So the laptop only adds, and prunes on its own longer count (90).
+- **Not under `~/Documents`.** On this laptop `~/Library/Mobile Documents/com~apple~CloudDocs/Documents`
+  is a symlink to `~/Documents`, so anything there is in iCloud within the minute. The installer
+  *refuses* a destination under `Documents`, `Desktop` or the iCloud folder rather than warning about
+  it. Sending these to Apple may be a reasonable choice; it must not be one a default path made
+  quietly.
+
+Every run decrypt-checks the newest file, which tests the whole chain at once — the transfer was
+complete, the file is intact, and the laptop's key still opens what the server is producing. It also
+raises a macOS notification if nothing newer than two days has arrived, because **the failure mode of
+every backup system is silence**, and an hourly log is a thing nobody reads.
+
+```bash
+launchctl kickstart gui/$(id -u)/com.b8.backup-pull   # run it now
+tail ~/b8-backups/pull.log                            # a healthy run prints nothing
+launchctl bootout gui/$(id -u)/com.b8.backup-pull     # remove it
+```
+
+This is two copies on two machines. It is **not** offsite — one flat, one fire — and the third copy
+is still open.
+
+### Restoring from an encrypted backup
+
+Decrypt first, then restore exactly as above. On the **laptop**, which is where the key is:
+
+```bash
+age -d -i ~/.config/b8/backup-key.txt -o /tmp/restore.dump ~/b8-backups/<newest>.dump.age
+createdb b8_restore_check
+pg_restore -d b8_restore_check --no-owner /tmp/restore.dump
+psql -d b8_restore_check -c 'SELECT count(*) FROM transactions;'
+rm /tmp/restore.dump
+```
+
+Verified end to end on 2026-09-25: a server-written backup decrypted on the laptop, restored, and
+every table's row count matched the live database. The three dumps predating encryption were
+encrypted in place and each ciphertext checked to reproduce the original bytes byte-for-byte before
+its plaintext was removed.
+
+**`.env.local` is not backed up** — not by this, not by anything. It holds the Plaid secret, the SMTP
+credentials and the VAPID private key, so a restore onto a new machine gets the data back and none of
+the connections. That gap is still open.
+
 ---
 
 ## Cutover — done 2026-09-17
