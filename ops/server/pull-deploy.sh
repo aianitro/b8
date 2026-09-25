@@ -151,26 +151,18 @@ if [ "$(shasum package-lock.json 2>/dev/null | cut -d' ' -f1)" != "$LOCK_BEFORE"
   npm ci || fail "npm ci"
 fi
 
-# ─── THE BUILD IS THE OUTAGE, AND IT IS LONGER THAN THE RESTART ───────────────────────────────
-#
-# `npm run build` writes into `.next` while the standalone server is serving out of it, so the app
-# returns 500 for the whole build — about twenty seconds — not merely across the `pkill` below.
-# Measured on the first unattended deploy: a request at 21:04:31, nine seconds into a build that
-# started at 21:04:22, came back 500.
-#
-# NOT FIXED, and the obvious fix does not work. Building to a side directory via `distDir` and
-# renaming it in fails because Next BAKES THE NAME into the standalone output — `server.js` carries
-# `"distDir":"./.next-incoming"` and the inner directory keeps that name — so after the rename
-# `start-web.sh` would copy static assets into `.next/static` while the server looked for them in
-# `.next-incoming/static`, and every chunk would 404. Tried, caught before shipping, reverted.
-#
-# What would work is running the app from a copy of the standalone tree rather than from `.next`
-# itself, so a rebuild cannot touch what is being served. That is a change to `start-web.sh` as
-# well as this file, and it is worth doing the day this app has a reader who is not its owner.
-# Twenty seconds of 500s once per push, on a single-user app, is a cost worth naming rather than
-# a cost worth a hasty fix.
+# The build writes into `apps/web/.next`, which nothing serves from any more — `publish.sh` copies
+# what it produces into `~/b8-run` and the app runs from there. So a build no longer disturbs the
+# running app at all, and the outage is the restart below rather than the twenty seconds this used
+# to cost.
 log "building"
 npm run build >/dev/null 2>&1 || fail "build"
+
+# The swap is a rename, so the running process keeps serving from the tree it already has open
+# until it is deliberately restarted. The tree it was using is kept as `b8-run.previous`, which is
+# what lets the rollback below be a rename rather than another build.
+log "publishing"
+"$APP/ops/server/publish.sh" >/dev/null 2>&1 || fail "publish"
 
 log "migrating"
 npm run migrate:up >/dev/null 2>&1 || fail "migrate"
@@ -193,13 +185,27 @@ done
 
 # ─── ROLLBACK ─────────────────────────────────────────────────────────────────────────────────
 #
-# Back to the commit that was serving, rebuilt and restarted. It costs another build — a couple of
-# minutes — and the alternative was keeping a spare `.next` around, which is a second copy of the
-# build to get out of step with the tree that produced it. A slow correct recovery beats a fast one
-# that can restore a build nobody can name.
+# A RENAME, NOT A REBUILD. `publish.sh` keeps the tree that was serving as `b8-run.previous`, so
+# recovery restores the exact bytes that were working a minute ago — no compile, and nothing that
+# depends on the broken commit building a second time. It used to rebuild from git, which took
+# another twenty seconds and could itself fail.
+#
+# Git is reset alongside it so the checkout and the running tree agree about which commit this is.
 log "no 200 from $HEALTH_URL after ${i}s — rolling back to ${CURRENT%${CURRENT#???????}}"
-git reset --hard --quiet "$CURRENT" || fail "rollback reset"
-npm run build >/dev/null 2>&1 || fail "rollback build"
+git reset --hard --quiet "$CURRENT" || log "WARNING: could not reset the checkout; the running tree is still restored below"
+
+if [ -d "$HOME/b8-run.previous" ]; then
+  rm -rf "$HOME/b8-run.failed"
+  mv "$HOME/b8-run" "$HOME/b8-run.failed" 2>/dev/null
+  mv "$HOME/b8-run.previous" "$HOME/b8-run" || fail "rollback could not restore the previous tree"
+else
+  # Nothing kept — the first deploy after this change, or a publish that never completed. Rebuild,
+  # which is slower and is why the previous tree is kept at all.
+  log "no previous tree kept; rebuilding ${CURRENT%${CURRENT#???????}}"
+  npm run build >/dev/null 2>&1 || fail "rollback build"
+  "$APP/ops/server/publish.sh" >/dev/null 2>&1 || fail "rollback publish"
+fi
+
 pkill -f "next-server" 2>/dev/null
 sleep 10
 if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "$HEALTH_URL")" = "200" ]; then

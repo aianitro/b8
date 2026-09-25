@@ -8,26 +8,33 @@ set -eu
 APP="$HOME/b8"
 "$APP/ops/server/wait-for-clock.sh"
 
-# P1-10a MOVED ALL OF THESE. The Next app is a workspace at `apps/web`, and because
-# `outputFileTracingRoot` is the repo root, the standalone output nests the app under its own path
-# and hoists node_modules beside it:
+# ─── IT RUNS FROM A COPY, NOT FROM THE BUILD DIRECTORY ────────────────────────────────────────
 #
-#   apps/web/.next/standalone/apps/web/server.js      <- the entry point
-#   apps/web/.next/standalone/node_modules/           <- hoisted, shared
+# `~/b8-run` is a complete standalone tree assembled by `publish.sh`. The app used to run straight
+# out of `apps/web/.next/standalone`, which is inside the folder `npm run build` rewrites — so a
+# deploy served from a half-replaced directory for the whole build and returned intermittent 500s
+# for about twenty seconds. Running from a copy the build never touches reduces the outage to the
+# restart below.
 #
-# Verified by building and booting it: /login answered 200 and /api/v1/overview answered 401.
+# The old copying of `public` and `.next/static` moved into `publish.sh` with it; this script now
+# starts a tree that is already complete.
+#
+# PUBLISHES IF THERE IS NOTHING TO RUN. On a machine that has never deployed — a fresh install, or
+# the first boot after this change — `~/b8-run` does not exist yet, and a start script that simply
+# failed would leave launchd restarting it every ten seconds forever. Building is NOT attempted
+# here: if there is no build either, that is a real failure and the log should say so rather than
+# have a service quietly compile the app at boot.
 WEB="$APP/apps/web"
-STANDALONE="$WEB/.next/standalone/apps/web"
+RUN="$HOME/b8-run"
 
-# Standalone output omits these two directories by design; they must sit beside server.js.
-rm -rf "$STANDALONE/public" "$STANDALONE/.next/static"
-cp -R "$WEB/public" "$STANDALONE/public"
-cp -R "$WEB/.next/static" "$STANDALONE/.next/static"
+if [ ! -f "$RUN/apps/web/server.js" ]; then
+  echo "start-web: no published tree at $RUN; publishing from the current build"
+  "$APP/ops/server/publish.sh"
+fi
 
-# Wait for the database, so the first request after a power cut is not a 500.
 until "$HOME/opt/pg16/bin/pg_isready" -h 127.0.0.1 -q; do sleep 2; done
 
-cd "$STANDALONE"
+cd "$RUN/apps/web"
 # Loopback only. Phones reach this through `tailscale serve`, which terminates TLS — passkeys need a
 # secure context, so the app must never be reached over plain http from another machine.
 export HOSTNAME=127.0.0.1
