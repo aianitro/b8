@@ -124,12 +124,21 @@ export default async function PropertiesPage() {
               <Link
                 key={p.id}
                 href={`/properties/${p.id}`}
-                className={`flex items-center justify-between gap-4 px-6 py-4 hover:bg-slate-50/50 transition-colors ${
+                /* WRAPS ON A PHONE, one line from `sm:` up. Value, Mortgage and Equity are three
+                   `shrink-0` blocks and the chevron is a fourth; together with the gaps they want
+                   about 290px of the 313 inside a 393px screen, which left the address some 55px
+                   and wrapped "4057 Port Richmond Ave, Gastonia NC 28056" down seven lines with
+                   the figures painted across it. Nothing overflowed — the address simply wrapped
+                   — so the page measured as fitting while being unreadable.
+
+                   The address takes the first line to itself below `sm:` and the three figures
+                   share the second, where 290px fits comfortably. */
+                className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 sm:px-6 py-4 hover:bg-slate-50/50 transition-colors ${
                   i < properties.length - 1 ? 'border-b border-slate-50' : ''
                 }`}
               >
-                <div className="flex items-center gap-4 flex-1 min-w-0">
-                  <div className="w-1 h-8 rounded-full shrink-0 bg-violet-500" />
+                <div className="flex items-center gap-3 sm:gap-4 basis-full sm:basis-0 sm:flex-1 min-w-0">
+                  <div className="w-1 self-stretch min-h-8 sm:h-8 sm:self-auto rounded-full shrink-0 bg-violet-500" />
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="text-sm font-medium text-slate-800 truncate">{p.nickname}</span>
@@ -167,7 +176,7 @@ export default async function PropertiesPage() {
                   </span>
                 </div>
 
-                <ChevronRight size={15} className="text-slate-300 shrink-0" />
+                <ChevronRight size={15} className="text-slate-300 shrink-0 ml-auto sm:ml-0" />
               </Link>
             );
           })}
