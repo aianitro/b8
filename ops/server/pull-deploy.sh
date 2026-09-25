@@ -72,7 +72,13 @@ if [ "$CURRENT" = "$TARGET" ] && [ "${1:-}" != "--force" ]; then
   exit 0
 fi
 
-log "deploying ${CURRENT%${CURRENT#???????}}..${TARGET%${TARGET#???????}}"
+# `--force` on an unchanged commit read "deploying 108ee22..108ee22", which describes a move
+# that did not happen and reads like a bug in the range. Say what it is instead.
+if [ "$CURRENT" = "$TARGET" ]; then
+  log "forced rebuild at ${TARGET%${TARGET#???????}}"
+else
+  log "deploying ${CURRENT%${CURRENT#???????}}..${TARGET%${TARGET#???????}}"
+fi
 
 # The lockfile is compared BEFORE the reset moves it, so `npm ci` runs only when dependencies
 # actually changed. It takes about a minute; most deploys touch no dependency at all.
