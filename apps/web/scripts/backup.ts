@@ -42,6 +42,29 @@ const DIR = process.env.BACKUP_DIR ?? join(process.cwd(), '..', 'backups');
 /** Thirty at ~140 KB each is about 4 MB. Small enough that the answer to "how many" is "a month". */
 const KEEP = Number(process.env.BACKUP_KEEP ?? 30);
 
+/**
+ * The age public key every dump is encrypted to, or unset to keep writing them in the clear.
+ *
+ * ─── THE MACHINE CANNOT READ ITS OWN BACKUPS ──────────────────────────────────────────────────
+ *
+ * This is a PUBLIC key, and the private half is not on this server and must never be. So the box
+ * can create backups and cannot open them — which is the property worth having on a nine-year-old
+ * laptop that lives in a flat and may one day be carried out of it. A dump is the whole ledger:
+ * every merchant, balance, mortgage and valuation. Encrypting at rest costs nothing and means
+ * losing the machine is not the same as losing the data to whoever has it.
+ *
+ * It also means the destination stops mattering. Ciphertext can go to Drive, iCloud or anywhere
+ * else without that being a decision about who gets to read the household's finances.
+ *
+ * UNSET IS A LEGITIMATE STATE, not a failure: the laptop, CI and any throwaway run have no key and
+ * should still be able to take a backup. It is logged loudly either way, because silently writing
+ * plaintext when someone believed otherwise is the worse error of the two.
+ */
+const RECIPIENT = process.env.BACKUP_AGE_RECIPIENT?.trim() || null;
+
+/** `age` is a single static binary; on the server it lives outside PATH's usual places. */
+const AGE_BIN = process.env.AGE_BIN ?? 'age';
+
 /** The rehearsal's target. Dropped and recreated on every run, so it must never be the real one. */
 const REHEARSAL_DB = 'b8_restore_rehearsal';
 
@@ -120,8 +143,27 @@ async function main(): Promise<void> {
     await run('dropdb', ['--if-exists', REHEARSAL_DB]).catch(() => undefined);
   }
 
-  await rename(tempPath, finalPath);
-  log.info('backup written', { file: finalName, kb: Math.round(size / 1024) });
+  // ── Encryption, AFTER the rehearsal ─────────────────────────────────────────────────────────
+  //
+  // The order is the point. The rehearsal restores the dump to prove it is readable, and it cannot
+  // do that to ciphertext without the private key — which is deliberately not on this machine. So
+  // the plaintext exists only as the temp file, is verified there, and is encrypted on its way to
+  // its final name. What lands on disk has been restored once and can be read by nobody here.
+  if (RECIPIENT) {
+    const encryptedPath = `${finalPath}.age`;
+    await run(AGE_BIN, ['-r', RECIPIENT, '-o', encryptedPath, tempPath]);
+    const encrypted = await stat(encryptedPath);
+    if (encrypted.size === 0) throw new Error('backup: age produced an empty file');
+    await rm(tempPath);
+    log.info('backup written', {
+      file: `${finalName}.age`, kb: Math.round(encrypted.size / 1024), encrypted: true,
+    });
+  } else {
+    await rename(tempPath, finalPath);
+    log.warn('backup written UNENCRYPTED — set BACKUP_AGE_RECIPIENT to encrypt it', {
+      file: finalName, kb: Math.round(size / 1024), encrypted: false,
+    });
+  }
 
   // ── Prune, last ─────────────────────────────────────────────────────────────────────────────
   // After the new dump is in place and verified, so a failure above never costs an old backup.

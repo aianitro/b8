@@ -113,3 +113,27 @@ describe('the restore rehearsal decides whether a dump is kept', () => {
     expect(compareCounts(source, { ...source, pgmigrations: 14 })).toEqual([]);
   });
 });
+
+describe('selectForDeletion with encrypted dumps', () => {
+  const plain = (s: string) => `b8_finance_${s}.dump`;
+  const sealed = (s: string) => `b8_finance_${s}.dump.age`;
+
+  // THE BUG THIS PREVENTS: the pattern matched only `.dump`, so the day encryption was switched on
+  // the pruner would have stopped recognising its own output and retained every backup forever.
+  it('prunes encrypted dumps too', () => {
+    const files = ['20260901T060000Z', '20260902T060000Z', '20260903T060000Z'].map(sealed);
+    expect(selectForDeletion(files, 1)).toEqual([sealed('20260901T060000Z'), sealed('20260902T060000Z')]);
+  });
+
+  // A directory mid-changeover holds both kinds. They must order by DATE, not by whether a file
+  // happens to be encrypted, or the changeover deletes the wrong ones.
+  it('orders a mixed directory by date rather than by extension', () => {
+    const files = [sealed('20260903T060000Z'), plain('20260901T060000Z'), sealed('20260902T060000Z')];
+    expect(selectForDeletion(files, 1)).toEqual([plain('20260901T060000Z'), sealed('20260902T060000Z')]);
+  });
+
+  it('still ignores anything it did not write', () => {
+    const files = [sealed('20260901T060000Z'), 'b8_finance_pre-P0-09a_20260831T174605Z.dump', 'notes.age'];
+    expect(selectForDeletion(files, 1)).toEqual([]);
+  });
+});

@@ -6,8 +6,18 @@
  * here is the arithmetic that tells it what to do.
  */
 
-/** Files this routine writes, and the only files it will ever consider deleting. */
-const NAME = /^b8_finance_(\d{8}T\d{6}Z)\.dump$/;
+/**
+ * Files this routine writes, and the only files it will ever consider deleting.
+ *
+ * `.age` IS OPTIONAL BECAUSE ENCRYPTION IS. A dump is encrypted when `BACKUP_AGE_RECIPIENT` is
+ * set and written plain when it is not, and the pruner has to recognise both — a pattern that
+ * matched only the plain name would quietly stop pruning the day encryption was turned on, and a
+ * retention rule that silently retains everything is the kind of bug found by a full disk.
+ *
+ * Both sort correctly together: the timestamp precedes the extension, so a mixed directory still
+ * orders by date rather than by whether a file happens to be encrypted.
+ */
+const NAME = /^b8_finance_(\d{8}T\d{6}Z)\.dump(?:\.age)?$/;
 
 /**
  * `b8_finance_20260916T224500Z.dump`.

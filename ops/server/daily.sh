@@ -7,7 +7,10 @@ set -u
 APP="$HOME/b8"
 "$APP/ops/server/wait-for-clock.sh"
 
-export PATH="$HOME/opt/node/bin:$HOME/opt/pg16/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# `~/opt/age` joins node and pg16 on the path because the backup encrypts to an age public key
+# before the dump reaches its final name. Same convention as the other two: a single binary in
+# ~/opt rather than a package manager this machine does not have.
+export PATH="$HOME/opt/node/bin:$HOME/opt/pg16/bin:$HOME/opt/age:/usr/bin:/bin:/usr/sbin:/sbin"
 # The backup's restore rehearsal calls createdb/psql/dropdb with no connection string. On this
 # server the only role is `b8` and the socket is /tmp, so without these they would try to connect
 # as the macOS user and fail — every night, silently, with no backup kept.
