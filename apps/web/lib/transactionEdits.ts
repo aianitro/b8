@@ -156,13 +156,14 @@ export interface Counterpart {
  * link that was there before — the reader can still pair in the ledger — where a thrown error would
  * put a failure notice on a dialog whose actual edit succeeded.
  */
-export async function fetchCounterparts(id: number): Promise<Counterpart[]> {
+export async function fetchCounterparts(id: number): Promise<{ paired: boolean; candidates: Counterpart[] }> {
   try {
     const res = await fetch(`/api/v1/transactions/${id}/counterparts`);
     const data = await res.json();
-    return data?.success ? (data.data as Counterpart[]) : [];
+    return data?.success ? data.data : { paired: false, candidates: [] };
   } catch {
-    return [];
+    // A failed lookup degrades to the link, not to a claim about the row's pairing.
+    return { paired: false, candidates: [] };
   }
 }
 

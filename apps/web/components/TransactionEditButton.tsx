@@ -107,7 +107,18 @@ export default function TransactionEditButton({ row, categories }: {
   const [dirty, setDirty] = useState(false);
   /** Rows that could be the other side, once this row owes a pair. `null` while unasked. */
   const [counterparts, setCounterparts] = useState<Counterpart[] | null>(null);
+  /**
+   * Whether this row is in a transfer group — set by a pairing done HERE, or reported by the
+   * lookup for a row that arrived already paired.
+   *
+   * The row itself does not carry `transfer_group_id`, so before the lookup answers there is no
+   * way to know. That is why the warning waits for `counterparts !== null` rather than rendering
+   * on the strength of the category alone: it used to, and every already-paired transfer opened
+   * with "a transfer needs its matching transaction" over a row that had one.
+   */
   const [paired, setPaired] = useState(false);
+  /** Set only by a pairing made in this dialog — see the confirmation below. */
+  const [justPaired, setJustPaired] = useState(false);
   /** Whether the note editor is showing. Closed on open — see the note beside it. */
   const [noteOpen, setNoteOpen] = useState(false);
   /** How many earlier rows the rule just re-filed, or null while no rule has been made here. */
@@ -174,6 +185,7 @@ export default function TransactionEditButton({ row, categories }: {
     setDirty(false);
     setCounterparts(null);
     setPaired(false);
+    setJustPaired(false);
     setNoteOpen(false);
     setRuleMade(null);
     setError(null);
@@ -182,6 +194,8 @@ export default function TransactionEditButton({ row, categories }: {
 
   const groups = groupCategories(categories, row.label);
   const owesAPair = isTransferCategory(category) && !paired;
+  /** The warning waits for the lookup: until it answers, whether a pair is owed is unknown. */
+  const showsPairWarning = owesAPair && counterparts !== null;
 
   /**
    * Asked for only once the row actually owes a pair, and never on open. Most rows edited here are
@@ -190,7 +204,11 @@ export default function TransactionEditButton({ row, categories }: {
   useEffect(() => {
     if (!open || !owesAPair) return;
     let live = true;
-    fetchCounterparts(row.id).then((found) => { if (live) setCounterparts(found); });
+    fetchCounterparts(row.id).then((found) => {
+      if (!live) return;
+      setCounterparts(found.candidates);
+      if (found.paired) setPaired(true);
+    });
     return () => { live = false; };
   }, [open, owesAPair, row.id]);
 
@@ -349,23 +367,22 @@ export default function TransactionEditButton({ row, categories }: {
                 already computing that (it is what the link's absolute-amount filter did) and then
                 making the owner do the finding by eye. It offers instead. The link survives for
                 the cases one tap cannot serve: no candidate found, or a three-way group. */}
-            {paired && (
+            {/* `justPaired` rather than `paired`: the latter is also true of a row that arrived
+                already in a group, and telling someone "both sides are NOW one transfer" about a
+                pairing they made last week is a claim about something that did not just happen. */}
+            {justPaired && (
               <p className="mt-2 flex items-center gap-1.5 text-[11px] text-emerald-700">
                 <ArrowLeftRight size={13} className="shrink-0" />
                 Paired. Both sides are now one transfer.
               </p>
             )}
 
-            {owesAPair && (
+            {showsPairWarning && (
               <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2.5">
                 <p className="flex items-start gap-2 text-[11px] text-amber-900 leading-snug">
                   <ArrowLeftRight size={14} className="shrink-0 mt-0.5 text-amber-600" />
                   <span>A transfer needs its matching transaction.</span>
                 </p>
-
-                {counterparts === null && (
-                  <p className="mt-1.5 pl-6 text-[11px] text-amber-700/70">Looking for the other side…</p>
-                )}
 
                 {counterparts?.length === 0 && (
                   <p className="mt-1.5 pl-6 text-[11px] text-amber-900">
@@ -392,6 +409,7 @@ export default function TransactionEditButton({ row, categories }: {
                           onClick={() => run(async () => {
                             await pairAsTransfer([row.id, c.id]);
                             setPaired(true);
+                            setJustPaired(true);
                           })}
                           className="w-full flex items-center gap-2 rounded-md bg-white border border-amber-200
                                      px-2 py-1.5 text-left hover:border-amber-400 disabled:opacity-50 transition-colors"

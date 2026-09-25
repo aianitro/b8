@@ -6,6 +6,17 @@ import {
 } from '@/lib/transferValidation';
 
 /**
+ * AN EMPTY LIST MEANT TWO DIFFERENT THINGS and the caller could not tell them apart: "this row is
+ * already half of a group, there is nothing to offer" and "this row owes a pair and nothing
+ * matches". The editor assumed the second and warned that a paired transfer needed its match.
+ * `paired` is the answer to the question the caller was actually asking.
+ */
+interface CounterpartsResult {
+  paired: boolean;
+  candidates: CounterpartRow[];
+}
+
+/**
  * The rows that could be the other side of this one — the offer behind one-tap pairing.
  *
  * ─── Why this exists ──────────────────────────────────────────────────────────────────────────
@@ -44,7 +55,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // Already half of a group: there is nothing to offer, and the caller should be showing the peer
   // rather than a way to acquire one.
   if (me.transfer_group_id !== null) {
-    return Response.json({ success: true, data: [] } satisfies ApiResponse<CounterpartRow[]>);
+    return Response.json(
+      { success: true, data: { paired: true, candidates: [] } } satisfies ApiResponse<CounterpartsResult>
+    );
   }
 
   const amount = Number(me.amount);
@@ -68,12 +81,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
      LIMIT 5
   `, [id, amount, me.date, COUNTERPART_WINDOW_DAYS]);
 
-  const data: CounterpartRow[] = rows
+  const candidates: CounterpartRow[] = rows
     .filter((r) => isCounterpart(
       { amount: Number(r.amount), transfer_group_id: r.transfer_group_id, date: r.date },
       { amount, date: me.date },
     ))
     .map((r) => ({ id: r.id, date: r.date, label: r.label, amount: Number(r.amount), account: r.account }));
 
-  return Response.json({ success: true, data } satisfies ApiResponse<CounterpartRow[]>);
+  return Response.json(
+    { success: true, data: { paired: false, candidates } } satisfies ApiResponse<CounterpartsResult>
+  );
 }
