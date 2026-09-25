@@ -334,8 +334,18 @@ git push          # ...and within two minutes the server is on it
 tail -f ~/b8-logs/deploy.log     # on the server, to watch a deploy happen
 ```
 
-Each pass: `git fetch`, and exit if the commit has not moved. Otherwise reset to it, `npm ci` only
-if the lockfile changed, build, migrate, restart, then poll `/login` for a 200. **If no 200 arrives
+Each pass: `git fetch`, and exit if the commit has not moved. **Then it asks GitHub whether that
+commit's CI is green, and deploys nothing unless it is.** Otherwise reset to it, `npm ci` only if
+the lockfile changed, build, migrate, restart, then poll `/login` for a 200.
+
+The CI gate has four verdicts and only one deploys. Red refuses. Pending waits — CI usually
+finishes within a minute of the push, so the next pass finds it green. Unknown (API unreachable, or
+no checks reported) also waits, which is the conservative reading: a stalled deploy is visible in
+the log and recoverable with `--force`, where deploying an unverified commit is what the gate
+exists to prevent. Each verdict is logged once per commit, not on every pass.
+
+This means a push now reaches the server in roughly **two to three minutes** rather than one: CI has
+to finish first. `ops/server/pull-deploy.sh --force` skips the gate when you need it to. **If no 200 arrives
 within 45 seconds it resets to the commit that was serving, rebuilds and restarts it**, and logs
 which commit was bad.
 

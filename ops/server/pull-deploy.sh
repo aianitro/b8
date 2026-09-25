@@ -72,6 +72,62 @@ if [ "$CURRENT" = "$TARGET" ] && [ "${1:-}" != "--force" ]; then
   exit 0
 fi
 
+# ─── NOTHING RED REACHES THE SERVER ───────────────────────────────────────────────────────────
+#
+# CI was red for about twenty hours and seven commits went to this machine anyway, because the
+# deployer had no opinion about it: `origin/main` moved, so it deployed. One of those commits
+# carried a migration with no down section, which only the migrate job could have caught and did,
+# into a log nobody read.
+#
+# So the gate is here rather than in a habit of checking. Unauthenticated against the public repo
+# — no token, no secret, and the 60-per-hour anonymous limit is never close: this only runs when a
+# new commit appears, and at worst re-checks one commit every two minutes.
+#
+# FOUR VERDICTS, AND ONLY ONE OF THEM DEPLOYS. Red refuses. Pending waits, because CI usually
+# finishes within a minute of the push and the next pass will find it green. Unknown — the API
+# unreachable, or no checks reported for the commit — also waits, which is the conservative
+# reading: a stalled deploy is visible in this log and recoverable with --force, where deploying
+# an unverified commit is the thing this exists to prevent.
+REPO=$(git config --get remote.origin.url | sed -e 's|.*github.com[:/]||' -e 's|\.git$||')
+
+ci_verdict() {
+  curl -s --max-time 15 -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$REPO/commits/$1/check-runs" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    runs = json.load(sys.stdin).get("check_runs", [])
+except Exception:
+    print("unknown"); raise SystemExit
+if not runs:
+    print("unknown")
+elif any(r.get("status") != "completed" for r in runs):
+    print("pending")
+# `neutral` and `skipped` are not failures: a job that chose not to run has not condemned anything.
+elif all(r.get("conclusion") in ("success", "neutral", "skipped") for r in runs):
+    print("green")
+else:
+    print("red")
+' 2>/dev/null || echo unknown
+}
+
+if [ "${1:-}" != "--force" ]; then
+  VERDICT=$(ci_verdict "$TARGET")
+  if [ "$VERDICT" != "green" ]; then
+    # Logged ONCE per commit-and-verdict, not on every pass. A red commit sits until the next push
+    # — some twenty minutes of identical lines before breakfast if this said it each time.
+    SAID="$APP/.deploy-last-said"
+    if [ "$(cat "$SAID" 2>/dev/null)" != "$TARGET $VERDICT" ]; then
+      printf '%s %s' "$TARGET" "$VERDICT" > "$SAID"
+      case "$VERDICT" in
+        red)     log "NOT deploying ${TARGET%${TARGET#???????}}: CI is red. Fix it, or --force." ;;
+        pending) log "holding ${TARGET%${TARGET#???????}}: CI has not finished" ;;
+        unknown) log "holding ${TARGET%${TARGET#???????}}: cannot read CI for it" ;;
+      esac
+    fi
+    exit 0
+  fi
+fi
+
 # `--force` on an unchanged commit read "deploying 108ee22..108ee22", which describes a move
 # that did not happen and reads like a bug in the range. Say what it is instead.
 if [ "$CURRENT" = "$TARGET" ]; then

@@ -72,3 +72,7 @@ apps/*/.expo/
 # so `git status` on the server is quiet and `git clean` can never reach them.
 apps/backups/
 backups/
+
+# Deployer runtime state, created in the checkout on the server by ops/server/pull-deploy.sh.
+.deploy.lock/
+.deploy-last-said
