@@ -27,6 +27,17 @@
 // because they are independent facts and a combined save would have to decide what to do when one
 // of three succeeds.
 //
+// ─── WHAT THE DIALOG SHOWS BEFORE IT IS ASKED ─────────────────────────────────────────────────
+//
+// A picker, and two lines. The note editor is behind "Add note" because writing one is not what
+// anyone opens this for — the category is — and an empty textarea with a placeholder reads as a
+// question awaiting an answer, framing the commonest edit with one nobody asked. An existing note
+// still shows, since that is information rather than an invitation.
+//
+// The watch control lost its section heading, which repeated the word its own label already said,
+// and lost the half of its explanation that described the default: a row that is NOT flagged
+// counts toward its budget, which is true of every other row and needs no saying.
+//
 // NOTHING CLOSES THE MODAL BUT THE READER. Category used to commit and close, on the argument that
 // refiling is the verb people come here for and should cost one gesture. It cost two features the
 // ledger already had and the owner missed both: the five-second undo, which has nowhere to live on
@@ -36,7 +47,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeftRight, Flag, Pencil, Wand2, X } from 'lucide-react';
+import { ArrowLeftRight, Flag, Pencil, Plus, Wand2, X } from 'lucide-react';
 import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
 import {
   createMerchantRule, fetchCounterparts, GROUP_LABELS, groupCategories, isTransferCategory,
@@ -97,6 +108,8 @@ export default function TransactionEditButton({ row, categories }: {
   /** Rows that could be the other side, once this row owes a pair. `null` while unasked. */
   const [counterparts, setCounterparts] = useState<Counterpart[] | null>(null);
   const [paired, setPaired] = useState(false);
+  /** Whether the note editor is showing. Closed on open — see the note beside it. */
+  const [noteOpen, setNoteOpen] = useState(false);
   /** How many earlier rows the rule just re-filed, or null while no rule has been made here. */
   const [ruleMade, setRuleMade] = useState<number | null>(null);
 
@@ -161,6 +174,7 @@ export default function TransactionEditButton({ row, categories }: {
     setDirty(false);
     setCounterparts(null);
     setPaired(false);
+    setNoteOpen(false);
     setRuleMade(null);
     setError(null);
     setOpen(true);
@@ -398,44 +412,96 @@ export default function TransactionEditButton({ row, categories }: {
               </div>
             )}
 
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mt-5 mb-1.5">
-              Note
-            </label>
-            <textarea
-              value={note}
-              onChange={(e) => setNoteText(e.target.value)}
-              disabled={busy}
-              rows={2}
-              placeholder="Anything worth remembering about this one"
-              // Not `maxLength`: a hard stop swallows keystrokes with no explanation. The counter
-              // turns red and the save is refused with a reason instead.
-              className={`w-full text-sm border rounded-lg px-3 py-2 text-slate-700 disabled:opacity-50
-                          focus:outline-none focus:ring-2 focus:ring-slate-900/10 ${tooLong ? 'border-red-300' : 'border-slate-200'}`}
-            />
-            <div className="flex items-center justify-between gap-3 mt-1.5">
-              {/* Says what a note IS, because this UI taught the opposite until today. */}
-              <p className="text-[11px] text-slate-400">Just a note. It does not flag this one.</p>
-              <span className={`text-[11px] tabular-nums ${tooLong ? 'text-red-500' : 'text-slate-300'}`}>
-                {trimmed.length}/{MAX_WATCH_NOTE}
-              </span>
-            </div>
-            <button
-              type="button"
-              disabled={busy || unchanged || tooLong}
-              onClick={() => run(async () => {
-                const next = trimmed === '' ? null : trimmed;
-                await setNote(row.id, next);
-                setSavedNote(next ?? '');
-              })}
-              className="mt-2 px-3.5 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-white
-                         hover:bg-slate-700 disabled:opacity-40 transition-colors"
-            >
-              {busy ? 'Saving…' : unchanged && savedNote !== (row.note ?? '') ? 'Saved' : 'Save note'}
-            </button>
+            {/* ─── THE NOTE IS BEHIND A BUTTON ────────────────────────────────────────────────
+                A two-row textarea sat open on every transaction, and writing a note is not what
+                anyone comes here for — the category is. An input with a placeholder reads as a
+                field awaiting an answer, so the commonest edit was framed by a question nobody
+                had asked. Collapsed, the dialog is a picker and two lines.
 
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mt-5 mb-1.5">
-              Keep an eye
-            </label>
+                A note that EXISTS still shows, because that is information rather than an
+                invitation; it is the empty field that had to go. */}
+            {!noteOpen && savedNote !== '' && (
+              <div className="mt-4 flex items-start gap-2">
+                <p className="flex-1 min-w-0 text-[13px] text-slate-600 leading-snug break-words">{savedNote}</p>
+                <button
+                  type="button"
+                  onClick={() => setNoteOpen(true)}
+                  className="shrink-0 text-[11px] text-slate-400 hover:text-slate-700 underline transition-colors"
+                >
+                  Edit
+                </button>
+              </div>
+            )}
+
+            {!noteOpen && savedNote === '' && (
+              <button
+                type="button"
+                onClick={() => setNoteOpen(true)}
+                className="mt-4 flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-slate-700 transition-colors"
+              >
+                <Plus size={12} /> Add note
+              </button>
+            )}
+
+            {noteOpen && (
+              <div className="mt-4">
+                <textarea
+                  value={note}
+                  onChange={(e) => setNoteText(e.target.value)}
+                  disabled={busy}
+                  rows={2}
+                  autoFocus
+                  placeholder="Anything worth remembering about this one"
+                  // Not `maxLength`: a hard stop swallows keystrokes with no explanation. The
+                  // counter turns red and the save is refused with a reason instead.
+                  className={`w-full text-sm border rounded-lg px-3 py-2 text-slate-700 disabled:opacity-50
+                              focus:outline-none focus:ring-2 focus:ring-slate-900/10 ${tooLong ? 'border-red-300' : 'border-slate-200'}`}
+                />
+                <div className="flex items-center justify-between gap-3 mt-1.5">
+                  {/* Says what a note IS, because this UI taught the opposite until recently. */}
+                  <p className="text-[11px] text-slate-400">Just a note. It does not flag this one.</p>
+                  <span className={`text-[11px] tabular-nums ${tooLong ? 'text-red-500' : 'text-slate-300'}`}>
+                    {trimmed.length}/{MAX_WATCH_NOTE}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    type="button"
+                    disabled={busy || unchanged || tooLong}
+                    onClick={() => run(async () => {
+                      const next = trimmed === '' ? null : trimmed;
+                      await setNote(row.id, next);
+                      setSavedNote(next ?? '');
+                      setNoteOpen(false);
+                    })}
+                    className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-white
+                               hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                  >
+                    {busy ? 'Saving…' : 'Save note'}
+                  </button>
+                  {/* Restores what is stored rather than merely closing, or reopening would show
+                      an edit the reader thought they had abandoned. */}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { setNoteText(savedNote); setNoteOpen(false); }}
+                    className="text-xs text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ─── ONE ROW, NO HEADING ────────────────────────────────────────────────────────
+                This was a section header over a control whose own label said the same word, and
+                a two-line explanation that spent one of those lines describing the DEFAULT — a
+                row that is not flagged is counted toward its budget, which is what every other
+                row on the page also does and needs no saying.
+
+                The consequence survives for the state that has one. A flagged charge leaving its
+                category's overspend measurement is the whole reason the flag matters, and is not
+                something to discover later from a tile that went quiet. */}
             <button
               type="button"
               role="switch"
@@ -445,7 +511,7 @@ export default function TransactionEditButton({ row, categories }: {
                 await setWatched(row.id, !watched);
                 setWatchedState(!watched);
               })}
-              className="flex items-start gap-2.5 text-left w-full disabled:opacity-50"
+              className="mt-4 flex items-start gap-2.5 text-left w-full disabled:opacity-50"
             >
               <span className={`shrink-0 mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
                 watched ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300 text-transparent'
@@ -453,15 +519,10 @@ export default function TransactionEditButton({ row, categories }: {
                 <Flag size={11} fill="currentColor" />
               </span>
               <span className="text-sm text-slate-700 leading-snug">
-                {watched ? 'On the list' : 'Not on the list'}
-                {/* THE CONSEQUENCE, ON SCREEN. A flagged charge is left out of its category's
-                    overspend measurement — the whole reason the flag matters, and not something
-                    to discover from a tile that went quiet. */}
-                <span className="block text-xs text-slate-400">
-                  {watched
-                    ? 'Left out of its budget grading'
-                    : 'Counted toward its budget as normal'}
-                </span>
+                Keep an eye
+                {watched && (
+                  <span className="block text-xs text-slate-400">Left out of budget grading</span>
+                )}
               </span>
             </button>
           </div>
