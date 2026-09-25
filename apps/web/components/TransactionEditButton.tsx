@@ -36,16 +36,24 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeftRight, Flag, Pencil, X } from 'lucide-react';
+import { ArrowLeftRight, Flag, Pencil, Wand2, X } from 'lucide-react';
 import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
 import {
-  fetchCounterparts, GROUP_LABELS, groupCategories, isTransferCategory, pairAsTransfer,
-  setCategory, setNote, setWatched, type CategoryOption, type Counterpart,
+  createMerchantRule, fetchCounterparts, GROUP_LABELS, groupCategories, isTransferCategory,
+  pairAsTransfer, setCategory, setNote, setWatched, type CategoryOption, type Counterpart,
 } from '@/lib/transactionEdits';
 
 export interface EditableRow {
   id: number;
   label: string;
+  /**
+   * The payee as Plaid names it, or null when the feed gave only a raw descriptor.
+   *
+   * SEPARATE FROM `label`, which falls back to the descriptor and then to 'Unnamed' so a row
+   * always has something to show. A rule keyed on a fallback would be keyed on a string that
+   * identifies one transaction rather than a payee.
+   */
+  merchant?: string | null;
   /** ISO `YYYY-MM-DD`. */
   date: string;
   /** Signed, on the app's convention: POSITIVE is money out. */
@@ -89,6 +97,8 @@ export default function TransactionEditButton({ row, categories }: {
   /** Rows that could be the other side, once this row owes a pair. `null` while unasked. */
   const [counterparts, setCounterparts] = useState<Counterpart[] | null>(null);
   const [paired, setPaired] = useState(false);
+  /** How many earlier rows the rule just re-filed, or null while no rule has been made here. */
+  const [ruleMade, setRuleMade] = useState<number | null>(null);
 
   // The window closes on its own, and closes NOTHING ELSE. An expiry that also refreshed would
   // make the dialog disappear unprompted five seconds after a category was picked. A permanent
@@ -151,6 +161,7 @@ export default function TransactionEditButton({ row, categories }: {
     setDirty(false);
     setCounterparts(null);
     setPaired(false);
+    setRuleMade(null);
     setError(null);
     setOpen(true);
   }
@@ -243,6 +254,52 @@ export default function TransactionEditButton({ row, categories }: {
                 ) : null
               )}
             </select>
+
+            {/* ─── THE RULE, OFFERED WHERE THE FILING HAPPENS ─────────────────────────────
+                The owner's ask: "some way of new rule creation should be there during setting up
+                category from Uncategorized. it should be smooth experience".
+
+                So it is not a form and not a settings page — it is one sentence with one button,
+                appearing only once a category has actually been chosen, saying exactly what it
+                will do and to whom. A checkbox BEFORE the category would ask the reader to commit
+                to a rule for a filing they have not made yet.
+
+                WHAT MAKES IT SAFE TO BE THIS EASY is that the rule's reach is stated in the same
+                breath. The button names the payee; pressing it reports how many earlier rows moved
+                with it. Nothing filed by hand is ever among them — the route only touches rows that
+                are unfiled or were filed by a rule.
+
+                Shown only for a row that HAS a merchant. A transfer or a manual import often has
+                only a raw descriptor, and a rule keyed on "CHASE CREDIT CRD AUTOPAY PPD ID:
+                4760039224" would match exactly one transaction for the rest of time. */}
+            {row.merchant && category && ruleMade === null && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => run(async () => {
+                  setRuleMade(await createMerchantRule(row.merchant!, category));
+                })}
+                className="mt-2 flex w-full items-start gap-2 rounded-lg border border-slate-200 bg-slate-50
+                           px-2.5 py-2 text-left hover:border-slate-300 disabled:opacity-50 transition-colors"
+              >
+                <Wand2 size={13} className="shrink-0 mt-0.5 text-slate-400" />
+                <span className="text-[11px] text-slate-600 leading-snug">
+                  Always file <span className="font-semibold text-slate-800">{row.merchant}</span> as{' '}
+                  <span className="font-semibold text-slate-800">{category}</span>
+                </span>
+              </button>
+            )}
+
+            {ruleMade !== null && (
+              <p className="mt-2 flex items-start gap-2 text-[11px] text-emerald-700 leading-snug">
+                <Wand2 size={13} className="shrink-0 mt-0.5" />
+                <span>
+                  {row.merchant} will file as {category} from now on
+                  {ruleMade > 0 && `, and ${ruleMade} earlier ${ruleMade === 1 ? 'row' : 'rows'} moved with it`}.
+                  {' '}<Link href="/rules" className="underline hover:text-emerald-900">Rules</Link>
+                </span>
+              </p>
+            )}
 
             {undoTo !== undefined && (
               <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-400">

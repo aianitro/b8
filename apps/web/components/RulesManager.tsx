@@ -11,8 +11,21 @@ export type RuleRow = {
   mapped_category: string | null;
 };
 
+/**
+ * A rule naming one payee. Created from the dashboard's editor as a one-tap offer while filing,
+ * which is the whole reason this list exists: rules made that easily accumulate that easily, and
+ * a rule nobody can see is a rule nobody can undo.
+ */
+export type MerchantRuleRow = {
+  merchant_name: string;
+  mapped_category: string;
+  /** Transactions of that payee in the ledger — what the rule speaks for, not what it changed. */
+  count: number;
+};
+
 interface Props {
   rows: RuleRow[];
+  merchantRules: MerchantRuleRow[];
   categories: Pick<BudgetCategory, 'name' | 'landscape'>[];
   pendingApply: number;
 }
@@ -26,11 +39,22 @@ const LANDSCAPE_BADGE: Record<string, string> = {
   capital:     'bg-violet-50 text-violet-700 border border-violet-100',
 };
 
-export default function RulesManager({ rows, categories, pendingApply }: Props) {
+export default function RulesManager({ rows, merchantRules, categories, pendingApply }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<number | null>(null);
+
+  async function removeMerchantRule(merchant: string) {
+    setBusy(merchant);
+    await fetch('/api/v1/rules', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ merchant_name: merchant }),
+    });
+    setBusy(null);
+    router.refresh();
+  }
 
   async function setRule(plaidCategory: string, mappedCategory: string | null) {
     setBusy(plaidCategory);
@@ -129,6 +153,37 @@ export default function RulesManager({ rows, categories, pendingApply }: Props) 
           </button>
         </div>
       </div>
+
+      {/* BY PAYEE, ABOVE BY CATEGORY, because a merchant rule outranks a category one and a list
+          that shows them the other way round reads as though the broad rule were the main event.
+          Deleting stops future filing and rewrites nothing: rows this rule already filed keep their
+          category, which the owner may since have checked. */}
+      {merchantRules.length > 0 && (
+        <section className="mb-6">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
+            By payee — {merchantRules.length} {merchantRules.length === 1 ? 'rule' : 'rules'}
+          </h2>
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50">
+            {merchantRules.map((r) => (
+              <div key={r.merchant_name} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 sm:px-6 py-3 text-sm">
+                <span className="font-medium text-slate-700 truncate max-w-[12rem]">{r.merchant_name}</span>
+                <span className="text-slate-300">→</span>
+                <span className="text-slate-700">{r.mapped_category}</span>
+                <span className="ml-auto text-xs text-slate-400">
+                  {r.count} {r.count === 1 ? 'transaction' : 'transactions'}
+                </span>
+                <button
+                  onClick={() => removeMerchantRule(r.merchant_name)}
+                  disabled={busy === r.merchant_name}
+                  className="text-xs text-slate-400 hover:text-red-500 disabled:opacity-40 transition-colors"
+                >
+                  {busy === r.merchant_name ? '…' : 'Remove'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Without rules */}
       {withoutRule.length > 0 && (

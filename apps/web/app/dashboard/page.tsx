@@ -63,6 +63,9 @@ export interface UnfiledTransaction {
   date: string;
   amount: number;
   label: string;
+  /** The payee as Plaid names it, or null when the feed gave only a descriptor. `label` falls back
+   *  to that descriptor; a merchant RULE must not be keyed on the fallback. */
+  merchant: string | null;
   category: string | null;
   watched: boolean;
   note: string | null;
@@ -73,6 +76,9 @@ export interface RecentArrival {
   date: string;
   amount: number;
   label: string;
+  /** The payee as Plaid names it, or null when the feed gave only a descriptor. `label` falls back
+   *  to that descriptor; a merchant RULE must not be keyed on the fallback. */
+  merchant: string | null;
   category: string | null;
   /** Carried so the row's editor opens from the truth rather than from an assumption.
    *  An arrival can ALSO be watched — the reader has no watched bound and the watchlist has no

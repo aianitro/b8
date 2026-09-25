@@ -12,7 +12,20 @@ export async function POST() {
       SET mapped_category = cr.mapped_category,
           rule_applied = TRUE
       FROM category_rules cr
-      WHERE cr.plaid_category = t.plaid_category
+      -- BOTH KINDS, with the merchant rule winning where both could claim a row. A NOT EXISTS
+      -- rather than an ordering: a category rule is skipped for any row a merchant rule also
+      -- matches, which is the same precedence lib/domain/categoryRules.ts applies at sync time
+      -- and must not disagree with it.
+      WHERE (
+              (cr.merchant_name IS NOT NULL
+                 AND LOWER(TRIM(t.merchant_name)) = LOWER(TRIM(cr.merchant_name)))
+           OR (cr.plaid_category IS NOT NULL
+                 AND cr.plaid_category = t.plaid_category
+                 AND NOT EXISTS (
+                       SELECT 1 FROM category_rules m
+                        WHERE m.merchant_name IS NOT NULL
+                          AND LOWER(TRIM(m.merchant_name)) = LOWER(TRIM(t.merchant_name))))
+            )
         AND (t.mapped_category IS NULL OR t.rule_applied = TRUE)
       RETURNING t.id
     )

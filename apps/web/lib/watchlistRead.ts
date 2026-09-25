@@ -15,6 +15,9 @@ export interface WatchedTransaction {
   date: string;
   /** Merchant, falling back to the feed's raw name. Never null. */
   label: string;
+  /** The payee as Plaid names it, or null when the feed gave only a descriptor. See the contract's
+   *  note: a merchant RULE keyed on `label`'s fallback would be keyed on one transaction. */
+  merchant: string | null;
   /** Signed, on the app's convention: POSITIVE is money out. */
   amount: number;
   /** The budget category, or null if it has none. */
@@ -29,6 +32,7 @@ interface Row {
   id: number;
   date: string;
   label: string;
+  merchant: string | null;
   amount: string;
   category: string | null;
   note: string | null;
@@ -54,6 +58,7 @@ export async function loadWatchlist(): Promise<WatchedTransaction[]> {
     SELECT t.id,
            t.date::text AS date,
            COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
+           NULLIF(t.merchant_name, '') AS merchant,
            t.amount::text,
            t.mapped_category AS category,
            t.note,
@@ -78,6 +83,7 @@ export async function loadWatchlist(): Promise<WatchedTransaction[]> {
       id: r.id,
       date: r.date,
       label: r.label,
+      merchant: r.merchant,
       amount,
       category: r.category,
       note: r.note,

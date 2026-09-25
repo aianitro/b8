@@ -201,12 +201,23 @@ CREATE TABLE IF NOT EXISTS category_balances (
 -- transactions.mapped_category below are intentionally not FKs to budget_categories(name)
 -- — name alone isn't unique (see UNIQUE(name, landscape) above), and category names are
 -- allowed to be renamed/reused loosely.
+-- A standing instruction for filing. Two kinds, exactly one match column set per row: a rule can
+-- name a Plaid category or a payee, and the payee rule wins where both could claim a transaction.
+-- Plaid's primary categories are too coarse to file with alone — FOOD_AND_DRINK covers the
+-- supermarket and the pizzeria — which is what the merchant kind exists to answer.
 CREATE TABLE IF NOT EXISTS category_rules (
   id               SERIAL PRIMARY KEY,
-  plaid_category   TEXT NOT NULL UNIQUE,
+  plaid_category   TEXT UNIQUE,
+  merchant_name    TEXT,
   mapped_category  TEXT NOT NULL,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT category_rules_one_match_kind
+    CHECK ((plaid_category IS NULL) <> (merchant_name IS NULL))
 );
+-- Matching is case-insensitive, so uniqueness is too — otherwise two spellings of one payee
+-- become two rules that disagree and whichever is read last wins.
+CREATE UNIQUE INDEX IF NOT EXISTS category_rules_merchant_lower
+  ON category_rules (LOWER(merchant_name)) WHERE merchant_name IS NOT NULL;
 
 -- A transfer is any set of 2+ transactions whose amounts sum to zero (moving money
 -- between your own accounts). Group size isn't fixed at 2 — e.g. one withdrawal

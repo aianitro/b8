@@ -186,3 +186,24 @@ async function post(url: string, body: Record<string, unknown>): Promise<void> {
     throw new TransactionEditError(data?.error?.message ?? 'Could not pair those. Try the ledger.');
   }
 }
+
+/**
+ * "This payee is always this category" — created at the moment of filing, not on a settings page.
+ *
+ * Returns how many EARLIER rows of the same payee it re-filed, so the caller can say what happened
+ * rather than implying it. Manual filings are never among them: the route touches only rows that
+ * are unfiled or were filed by a rule, which is the guarantee that let the owner's hand-corrections
+ * survive the rule that caused them.
+ */
+export async function createMerchantRule(merchant: string, category: string): Promise<number> {
+  const res = await fetch('/api/v1/rules', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ merchant_name: merchant, mapped_category: category }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!data?.success) {
+    throw new TransactionEditError(data?.error?.message ?? 'Could not save that rule.');
+  }
+  return Number(data.data?.refiled ?? 0);
+}

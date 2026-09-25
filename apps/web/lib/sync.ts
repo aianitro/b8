@@ -4,6 +4,7 @@ import { recordPlaidBalances } from './plaidBalances';
 import db from './db';
 import { createLogger } from './logger';
 import { matchReissuedTransactions } from './domain/txnMatch';
+import { ruleFor, type CategoryRule } from './domain/categoryRules';
 // Reused rather than re-written: node-postgres hands back a DATE column as a JS Date at local
 // midnight, and toISOString() would shift it a day earlier at any UTC+ offset. That trap is
 // already solved (and tested) there; duplicating the logic here is how the two drift apart.
@@ -11,18 +12,30 @@ import { toDateInputValue as toDateOnly } from './domain/property';
 
 const log = createLogger('sync');
 
-type RuleMap = Map<string, string>;
+type RuleMap = CategoryRule[];
 
+/**
+ * Every rule, of both kinds. A LIST rather than the Map this used to be: a Map keyed on
+ * `plaid_category` cannot hold a merchant rule, and keying on "whichever column is set" would make
+ * the precedence between the two a property of iteration order. `ruleFor` decides instead, in one
+ * place both this and `/api/v1/rules/apply` call.
+ */
 async function loadRules(): Promise<RuleMap> {
-  const result = await db.query<{ plaid_category: string; mapped_category: string }>(
-    'SELECT plaid_category, mapped_category FROM category_rules'
-  );
-  return new Map(result.rows.map((r) => [r.plaid_category, r.mapped_category]));
+  const result = await db.query<{
+    plaid_category: string | null; merchant_name: string | null; mapped_category: string;
+  }>('SELECT plaid_category, merchant_name, mapped_category FROM category_rules');
+  return result.rows.map((r) => ({
+    plaidCategory: r.plaid_category,
+    merchantName: r.merchant_name,
+    mappedCategory: r.mapped_category,
+  }));
 }
 
-function applyRule(plaidCategory: string | null, rules: RuleMap): { mapped: string | null; ruleApplied: boolean } {
-  if (!plaidCategory) return { mapped: null, ruleApplied: false };
-  const mapped = rules.get(plaidCategory) ?? null;
+function applyRule(
+  subject: { plaidCategory: string | null; merchantName: string | null },
+  rules: RuleMap,
+): { mapped: string | null; ruleApplied: boolean } {
+  const mapped = ruleFor(subject, rules);
   return mapped ? { mapped, ruleApplied: true } : { mapped: null, ruleApplied: false };
 }
 
@@ -102,7 +115,8 @@ async function syncItem(
       // `added` or `modified` event.
       if (txn.pending) continue;
       const plaidCategory = txn.personal_finance_category?.primary ?? null;
-      const { mapped, ruleApplied } = applyRule(plaidCategory, rules);
+      const { mapped, ruleApplied } = applyRule(
+        { plaidCategory, merchantName: txn.merchant_name ?? null }, rules);
       // Re-identified rows now carry this id, so the upsert below finds them by conflict and
       // refreshes their Plaid-sourced fields — deliberately without touching mapped_category,
       // which the DO UPDATE clause already leaves alone.
@@ -136,7 +150,8 @@ async function syncItem(
       // though we never stored it while pending.
       if (txn.pending) continue;
       const plaidCategory = txn.personal_finance_category?.primary ?? null;
-      const { mapped, ruleApplied } = applyRule(plaidCategory, rules);
+      const { mapped, ruleApplied } = applyRule(
+        { plaidCategory, merchantName: txn.merchant_name ?? null }, rules);
       await db.query(
         `INSERT INTO transactions
            (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied)

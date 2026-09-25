@@ -252,6 +252,16 @@ export const RecentArrivalSchema = z.object({
   date: dateString,
   amount: moneyString,
   label: z.string(),
+  /**
+   * The payee as Plaid names it, or null when the feed gave only a raw descriptor.
+   *
+   * SEPARATE FROM `label`, which falls back to the descriptor and then to 'Unnamed' so every row
+   * has something to show. A merchant RULE keyed on a fallback would be keyed on a string that
+   * identifies one transaction rather than a payee — "CHASE CREDIT CRD AUTOPAY PPD ID: 4760039224"
+   * will never be seen again. Carried so the editor can offer a rule only where one would mean
+   * something.
+   */
+  merchant: z.string().nullable(),
   category: z.string().nullable(),
   /**
    * The watch flag and the note, so an editor opened from this list starts from the truth.
@@ -286,6 +296,16 @@ export const UnfiledTransactionSchema = z.object({
   date: dateString,
   amount: moneyString,
   label: z.string(),
+  /**
+   * The payee as Plaid names it, or null when the feed gave only a raw descriptor.
+   *
+   * SEPARATE FROM `label`, which falls back to the descriptor and then to 'Unnamed' so every row
+   * has something to show. A merchant RULE keyed on a fallback would be keyed on a string that
+   * identifies one transaction rather than a payee — "CHASE CREDIT CRD AUTOPAY PPD ID: 4760039224"
+   * will never be seen again. Carried so the editor can offer a rule only where one would mean
+   * something.
+   */
+  merchant: z.string().nullable(),
   category: z.string().nullable(),
   watched: z.boolean(),
   note: z.string().nullable(),
@@ -739,6 +759,16 @@ export const WatchedTransactionSchema = z.object({
   id: serialId,
   date: dateString,
   label: z.string(),
+  /**
+   * The payee as Plaid names it, or null when the feed gave only a raw descriptor.
+   *
+   * SEPARATE FROM `label`, which falls back to the descriptor and then to 'Unnamed' so every row
+   * has something to show. A merchant RULE keyed on a fallback would be keyed on a string that
+   * identifies one transaction rather than a payee — "CHASE CREDIT CRD AUTOPAY PPD ID: 4760039224"
+   * will never be seen again. Carried so the editor can offer a rule only where one would mean
+   * something.
+   */
+  merchant: z.string().nullable(),
   amount: moneyString,
   category: z.string().nullable(),
   note: z.string().min(1).max(200).nullable(),

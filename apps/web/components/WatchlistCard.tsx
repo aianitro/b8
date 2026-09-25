@@ -93,8 +93,8 @@ export default function WatchlistCard({ items, categories }: {
               <TransactionEditButton
                 categories={categories}
                 row={{
-                  id: item.id, label: item.label, date: item.date, amount: item.amount,
-                  category: item.category, watched: true, note: item.note,
+                  id: item.id, label: item.label, merchant: item.merchant, date: item.date,
+                  amount: item.amount, category: item.category, watched: true, note: item.note,
                 }}
               />
             </div>

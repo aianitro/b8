@@ -234,6 +234,7 @@ export interface OverviewSources {
     date: string;
     amount: number;
     label: string;
+    merchant: string | null;
     category: string | null;
     watched: boolean;
     note: string | null;
@@ -244,6 +245,7 @@ export interface OverviewSources {
     date: string;
     amount: number;
     label: string;
+    merchant: string | null;
     category: string | null;
     watched: boolean;
     note: string | null;
@@ -527,6 +529,7 @@ export function composeOverview(sources: OverviewSources): OverviewData {
       date: r.date,
       amount: wireMoney(r.amount),
       label: r.label,
+      merchant: r.merchant,
       watched: r.watched,
       note: r.note,
       // `null` for an uncategorized row, never `''` and never the string `'Uncategorized'`.
@@ -537,6 +540,7 @@ export function composeOverview(sources: OverviewSources): OverviewData {
       date: r.date,
       amount: wireMoney(r.amount),
       label: r.label,
+      merchant: r.merchant,
       category: r.category,
       watched: r.watched,
       note: r.note,
@@ -564,6 +568,7 @@ export function composeOverview(sources: OverviewSources): OverviewData {
       id: w.id,
       date: w.date,
       label: w.label,
+      merchant: w.merchant,
       amount: wireMoney(w.amount),
       category: w.category,
       note: w.note,
@@ -656,12 +661,13 @@ async function readRecentArrivals(): Promise<{
   // the rows reads "12" whether twelve arrived or forty did. Two queries would be two copies of
   // the WHERE clause, and the day they drift the count stops describing the list beneath it.
   const { rows } = await db.query<{
-    id: number; date: string; amount: string; label: string;
+    id: number; date: string; amount: string; label: string; merchant: string | null;
     category: string | null; created_at: string; watched: boolean; note: string | null;
     total: string;
   }>(`
     SELECT t.id, t.date::text, t.amount::text,
            COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
+           NULLIF(t.merchant_name, '') AS merchant,
            t.mapped_category AS category, t.created_at::text,
            -- An arrival can ALSO be watched: this read has no watched bound and loadWatchlist has
            -- no date bound. Carried so an editor opened from this list starts from the truth
@@ -683,7 +689,7 @@ async function readRecentArrivals(): Promise<{
     total: rows.length > 0 ? Number(rows[0].total) : 0,
     rows: rows.map((r) => ({
       id: r.id, date: r.date, amount: Number(r.amount),
-      label: r.label, category: r.category, watched: r.watched, note: r.note,
+      label: r.label, merchant: r.merchant, category: r.category, watched: r.watched, note: r.note,
     })),
   };
 }
@@ -813,11 +819,12 @@ async function readWeek(): Promise<OverviewSources['week']> {
  */
 async function readUncategorized(): Promise<OverviewSources['uncategorized']> {
   const { rows } = await db.query<{
-    id: number; date: string; amount: string; label: string;
+    id: number; date: string; amount: string; label: string; merchant: string | null;
     watched: boolean; note: string | null;
   }>(`
     SELECT t.id, t.date::text, t.amount::text,
            COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
+           NULLIF(t.merchant_name, '') AS merchant,
            (t.watched_at IS NOT NULL) AS watched,
            t.note
       FROM transactions t
@@ -831,6 +838,7 @@ async function readUncategorized(): Promise<OverviewSources['uncategorized']> {
     date: r.date,
     amount: Number(r.amount),
     label: r.label,
+    merchant: r.merchant,
     // Null by construction — the predicate above is what makes these rows unfiled. Carried because
     // the editor these open reads it; see the contract's note on the field.
     category: null,

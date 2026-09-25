@@ -90,7 +90,7 @@ export default function RecentArrivals({ arrivals, staleFeed, categories }: {
                 <TransactionEditButton
                   categories={categories}
                   row={{
-                    id: a.id, label: a.label, date: a.date, amount: a.amount,
+                    id: a.id, label: a.label, merchant: a.merchant, date: a.date, amount: a.amount,
                     category: a.category, watched: a.watched, note: a.note,
                   }}
                 />

@@ -85,7 +85,7 @@ function fabricatedSources(): OverviewSources {
       { category: 'Pets', budgeted: 120, actual: 0, projectedRatio: null, tooEarly: true },
     ],
     watchlist: [
-      { id: 11406, date: '2026-09-11', label: 'Zara', amount: 120.17, category: null, note: 'returning', daysOpen: 3 },
+      { id: 11406, date: '2026-09-11', label: 'Zara', merchant: 'Zara', amount: 120.17, category: null, note: 'returning', daysOpen: 3 },
     ],
     jobHealth: { status: 'fresh', daysSince: 0, message: 'The daily job ran today.' },
     today: {
@@ -113,17 +113,17 @@ function fabricatedSources(): OverviewSources {
     // fixture where they agree would not exercise the distinction the field exists for.
     recentArrivalsTotal: 17,
     recentArrivals: [
-      { id: 9001, date: '2026-09-12', amount: 142.19, label: 'Fabricated Grocer', category: 'Fabricated Groceries', watched: false, note: null },
+      { id: 9001, date: '2026-09-12', amount: 142.19, label: 'Fabricated Grocer', merchant: 'Fabricated Grocer', category: 'Fabricated Groceries', watched: false, note: null },
       // Negative — income, this ledger's convention. And uncategorized, so `category` is null.
       // Watched AND arriving: the two lists overlap, which the phone briefly assumed they could not.
-      { id: 9002, date: '2026-09-11', amount: -742.5, label: 'Fabricated Payroll', category: null, watched: true, note: 'double paid?' },
+      { id: 9002, date: '2026-09-11', amount: -742.5, label: 'Fabricated Payroll', merchant: null, category: null, watched: true, note: 'double paid?' },
     ],
     // A CAPPED SAMPLE, not the count. `stats.uncategorized` says how many there are; this says
     // what some of them look like. The second row is watched AND unfiled — the overlap the
     // editor opened from this list has to start from, rather than assuming a blank note.
     uncategorized: [
-      { id: 9101, date: '2026-09-10', amount: 418.4, label: 'Fabricated Unfiled', category: null, watched: false, note: null },
-      { id: 9102, date: '2026-09-09', amount: 22.75, label: 'Fabricated Unfiled Two', category: null, watched: true, note: 'chase this' },
+      { id: 9101, date: '2026-09-10', amount: 418.4, label: 'Fabricated Unfiled', merchant: 'Fabricated Unfiled', category: null, watched: false, note: null },
+      { id: 9102, date: '2026-09-09', amount: 22.75, label: 'Fabricated Unfiled Two', merchant: null, category: null, watched: true, note: 'chase this' },
     ],
     budgetVsActual: [
       { category: 'Fabricated Groceries', budget: 12000, spent: 8450.12 },
