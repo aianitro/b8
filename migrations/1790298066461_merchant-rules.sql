@@ -1,3 +1,4 @@
+-- Up Migration
 -- A rule can now name a MERCHANT, not only a Plaid category.
 --
 -- ─── Why ──────────────────────────────────────────────────────────────────────────────────────
@@ -35,3 +36,19 @@ CREATE UNIQUE INDEX category_rules_merchant_lower ON category_rules (LOWER(merch
 -- still right; it now has to tolerate the NULLs that merchant rules carry. Postgres treats NULLs as
 -- distinct in a unique constraint, so this needs no change — recorded here because reading the
 -- constraint list and assuming otherwise is the easy mistake.
+
+-- Down Migration
+
+-- MERCHANT RULES CANNOT EXIST IN THE OLD SHAPE, so they are deleted rather than converted. There
+-- is nothing to convert them to: "always file Panda Express as Restoraunts" has no expression in a
+-- table that can only match a Plaid category, and `plaid_category` is NOT NULL again below. Said
+-- out loud because a down migration that quietly drops rows is worse than one that warns it will.
+DELETE FROM category_rules WHERE merchant_name IS NOT NULL;
+
+DROP INDEX IF EXISTS category_rules_merchant_lower;
+ALTER TABLE category_rules DROP CONSTRAINT IF EXISTS category_rules_one_match_kind;
+ALTER TABLE category_rules DROP COLUMN IF EXISTS merchant_name;
+
+-- Restored last: it can only hold once the rows that violate it are gone and the CHECK that
+-- allowed them has been dropped.
+ALTER TABLE category_rules ALTER COLUMN plaid_category SET NOT NULL;
