@@ -635,24 +635,29 @@ export default function TransactionTable({ transactions, categories, accounts, p
 
   return (
     <div className="relative">
-      {/* `-mx-4 md:mx-0` lets the scroll region reach the screen edges on a phone, so the last
-          column can be brought fully into view instead of stopping against a 16px gutter. */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto -mx-4 md:mx-0">
-        {/* `min-w-[56rem]` IS WHAT MAKES THE SCROLL WORK. The wrapper has had `overflow-x-auto`
-            all along and it did nothing, because `w-full` told the table to be exactly as wide as
-            its container — so nine columns compressed into 390px rather than overflowing it, and
-            every cell wrapped to three lines. A table that cannot exceed its container has nothing
-            to scroll.
+      {/* NO SCROLL REGION BELOW `sm:`, because there is nothing to scroll there any more — the
+          rows stack into cards. `-mx-4` still lets the desktop scroll region reach the screen
+          edges so the last column can be brought fully into view. */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm sm:overflow-x-auto sm:-mx-4 md:mx-0">
+        {/* ─── CARDS ON A PHONE, THE TABLE FROM `sm:` UP ───────────────────────────────────
+            `min-w-[56rem]` is what made the desktop scroll work, and what made the phone
+            unusable: nine columns pinned to 896px inside 358px is some 500px of sideways
+            dragging, which the owner reported after the dashboard's tiles started landing here.
+            The note this replaces predicted it — "if this page becomes a daily phone destination
+            rather than an occasional one, cards are the answer" — and the tile drill-down is what
+            made it one.
 
-            HORIZONTAL SCROLL RATHER THAN RESTACKING INTO CARDS, deliberately, and it is the weaker
-            of the two. Cards read better on a phone — the phone app's own lists are two-line rows
-            for exactly that reason. But this table carries nine columns, bulk selection, inline
-            category editing, transfer pairing and a row menu, and restacking it is a rewrite of 873
-            lines rather than a layout change. Scroll loses no column and no control. If this page
-            becomes a daily phone destination rather than an occasional one, cards are the answer
-            and this comment is the argument for doing it properly. */}
-        <table className="w-full min-w-[56rem] text-sm">
-          <thead className="sticky top-0 z-10">
+            It is done with DISPLAY, not with a second component. Restacking in CSS keeps one DOM,
+            every control and every column; rendering a phone list beside the table would mean
+            rendering the ledger twice, and this page paginates nothing — 1,500 rows built to be
+            hidden. Below `sm:` the table, its rows and its cells become a grid; above it they are
+            a table again and nothing has changed.
+
+            Two cells are dropped on a phone rather than stacked. Plaid category is noise next to
+            the budget category beneath it, and Transfer is empty on all but a handful of rows —
+            and the row that needs pairing says so on its own line when it is not. */}
+        <table className="w-full text-sm block sm:table sm:min-w-[56rem]">
+          <thead className="hidden sm:table-header-group sticky top-0 z-10">
             <tr className="bg-slate-50 border-b border-slate-100">
               <th className="px-4 py-3 w-10">
                 <input
@@ -689,7 +694,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
               <th className="px-4 py-3 w-14" />
             </tr>
           </thead>
-          <tbody>
+          <tbody className="block sm:table-row-group">
             {sorted.map((t, i) => {
               const isChecked = selected.has(t.id);
               const isTransfer = Boolean(t.mapped_category?.toLowerCase().includes('transfer'));
@@ -703,7 +708,13 @@ export default function TransactionTable({ transactions, categories, accounts, p
               return (
                 <tr
                   key={t.id}
+                  /* A GRID ON A PHONE, a table row from `sm:` up. Three columns — the
+                     checkbox, everything that reads left, and the figure that reads right — and
+                     each cell below is placed into it explicitly. Implicit flow would have put
+                     nine cells in nine rows. */
                   className={`group border-b border-slate-50 last:border-0 transition-colors
+                    grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1 px-4 py-3
+                    sm:table-row sm:p-0
                     ${isChecked
                       ? 'bg-blue-50/60'
                       : t.transfer_group_id
@@ -716,7 +727,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
                     ${t.hidden ? 'opacity-40' : ''}
                     hover:bg-slate-50`}
                 >
-                  <td className="px-4 py-3.5">
+                  <td className="col-start-1 row-start-1 self-start pt-0.5 sm:table-cell sm:px-4 sm:py-3.5">
                     <input
                       type="checkbox"
                       checked={isChecked}
@@ -724,21 +735,21 @@ export default function TransactionTable({ transactions, categories, accounts, p
                       className="rounded border-slate-300 text-slate-800 focus:ring-slate-900/20 cursor-pointer"
                     />
                   </td>
-                  <td className="px-6 py-3.5 text-slate-400 whitespace-nowrap text-xs font-mono">{t.date}</td>
-                  <td className="px-4 py-3.5">
+                  <td className="col-start-2 row-start-1 text-slate-400 whitespace-nowrap text-xs font-mono sm:table-cell sm:px-6 sm:py-3.5">{t.date}</td>
+                  <td className="col-start-2 col-span-2 row-start-2 min-w-0 sm:table-cell sm:px-4 sm:py-3.5">
                     <span className="font-medium text-slate-800">
                       {t.merchant_name ?? t.name ?? <span className="text-slate-300">—</span>}
                     </span>
                     {t.name && t.merchant_name && t.name !== t.merchant_name && (
-                      <div className="text-xs text-slate-400 mt-0.5">{t.name}</div>
+                      <div className="hidden sm:block text-xs text-slate-400 mt-0.5">{t.name}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-center gap-1.5">
+                  <td className="col-start-2 col-span-2 row-start-3 min-w-0 sm:table-cell sm:px-4 sm:py-3.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <a href={`/accounts/${t.account_id}`} className="text-xs text-slate-500 whitespace-nowrap hover:text-blue-600 transition-colors">
                         {t.account_name}
                       </a>
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${LANDSCAPE_BADGE[t.account_landscape] ?? ''}`}>
+                      <span className={`hidden sm:inline text-xs px-1.5 py-0.5 rounded-full font-medium ${LANDSCAPE_BADGE[t.account_landscape] ?? ''}`}>
                         {t.account_landscape}
                       </span>
                       {/* Shown only for an explicit tag, in amber to match the ledger's marker
@@ -754,11 +765,14 @@ export default function TransactionTable({ transactions, categories, accounts, p
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3.5 text-slate-400 text-xs whitespace-nowrap">{t.plaid_category ?? '—'}</td>
-                  <td className={`px-4 py-3.5 text-right font-mono font-medium whitespace-nowrap ${Number(t.amount) < 0 ? 'text-emerald-600' : 'text-slate-900'}`}>
+                  <td className="hidden sm:table-cell px-4 py-3.5 text-slate-400 text-xs whitespace-nowrap">{t.plaid_category ?? '—'}</td>
+                  <td className={`col-start-3 row-start-1 text-right font-mono font-medium whitespace-nowrap sm:table-cell sm:px-4 sm:py-3.5 ${Number(t.amount) < 0 ? 'text-emerald-600' : 'text-slate-900'}`}>
                     {Number(t.amount) < 0 ? '+' : ''}{fmt(Number(t.amount))}
                   </td>
-                  <td className="px-4 py-3.5">
+                  {/* COLUMN 2 ONLY, not spanning to 3 — the row's controls live in column 3
+                      on this same line, and a span put the select underneath them. Caught in a
+                      screenshot: the four icons were drawn over the picker's right edge. */}
+                  <td className="col-start-2 row-start-4 min-w-0 sm:table-cell sm:px-4 sm:py-3.5">
                     <CategorySelect
                       transactionId={t.id}
                       current={t.mapped_category}
@@ -766,7 +780,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
                       description={t.name ?? t.merchant_name}
                     />
                   </td>
-                  <td className="px-6 py-3.5">
+                  <td className="col-start-2 col-span-2 row-start-5 empty:hidden min-w-0 sm:table-cell sm:px-6 sm:py-3.5">
                     <TransferLinkButton
                       transactionId={t.id}
                       groupId={t.transfer_group_id}
@@ -775,7 +789,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
                       isTransfer={isTransfer}
                     />
                   </td>
-                  <td className="px-4 py-3.5">
+                  <td className="col-start-3 row-start-4 sm:table-cell sm:px-4 sm:py-3.5">
                     <div className="flex items-center gap-2">
                       <DuplicateButton transaction={t} accounts={accounts} categories={categories} />
                       <WatchToggleButton transaction={t} />
