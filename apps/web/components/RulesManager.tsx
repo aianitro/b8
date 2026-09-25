@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { BudgetCategory } from '@b8/contracts/types';
 
@@ -169,9 +170,16 @@ export default function RulesManager({ rows, merchantRules, categories, pendingA
                 <span className="font-medium text-slate-700 truncate max-w-[12rem]">{r.merchant_name}</span>
                 <span className="text-slate-300">→</span>
                 <span className="text-slate-700">{r.mapped_category}</span>
-                <span className="ml-auto text-xs text-slate-400">
+                {/* The count opens the rows it counts. `merchant=` is an EXACT filter, the same
+                    match the rule itself makes — `search=` would have been one character cheaper
+                    and would bring back rows this rule does not cover, so the figure and the list
+                    it opened would disagree. */}
+                <Link
+                  href={`/transactions?merchant=${encodeURIComponent(r.merchant_name)}`}
+                  className="ml-auto text-xs text-slate-400 hover:text-slate-700 hover:underline transition-colors"
+                >
                   {r.count} {r.count === 1 ? 'transaction' : 'transactions'}
-                </span>
+                </Link>
                 <button
                   onClick={() => removeMerchantRule(r.merchant_name)}
                   disabled={busy === r.merchant_name}

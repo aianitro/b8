@@ -58,6 +58,8 @@ async function getData(
   amountMin: number | null,
   amountMax: number | null,
   transferGroup: number | null,
+  /** Exact payee, case- and whitespace-insensitive — see the note at the WHERE clause. */
+  merchant: string | null,
 ) {
   const conds: string[] = [];
   const args: (string | number | string[])[] = [];
@@ -110,6 +112,14 @@ async function getData(
   if (amountMax !== null) {
     args.push(amountMax);
     conds.push(`ABS(t.amount) <= $${args.length}`);
+  }
+  if (merchant) {
+    args.push(merchant);
+    // EXACT, matching `lib/domain/categoryRules.ts` rather than the substring `search` above. This
+    // is how the /rules page opens the rows behind a payee rule's count, and a substring would show
+    // rows that rule does not cover — "Tony's" would bring back "Tony's Auto Body", and the figure
+    // on the rules page would disagree with the list it just opened.
+    conds.push(`LOWER(TRIM(t.merchant_name)) = LOWER(TRIM($${args.length}))`);
   }
   if (transferGroup !== null) {
     args.push(transferGroup);
@@ -246,11 +256,13 @@ export default async function TransactionsPage({
   searchParams: Promise<{
     filter?: string; account?: string; category?: string | string[]; month?: string; search?: string;
     dateFrom?: string; dateTo?: string; amountMin?: string; amountMax?: string; transferGroup?: string;
+    merchant?: string;
     from?: string;
   }>;
 }) {
   const {
     filter, account, category, month, search, dateFrom, dateTo, amountMin, amountMax, transferGroup,
+    merchant,
     from,
   } = await searchParams;
 
@@ -267,6 +279,7 @@ export default async function TransactionsPage({
   const amountMinValue = amountMin ? parseFloat(amountMin) : null;
   const amountMaxValue = amountMax ? parseFloat(amountMax) : null;
   const transferGroupValue = transferGroup ? parseInt(transferGroup, 10) : null;
+  const merchantValue = merchant?.trim() || null;
 
   const { transactions, categories, total, uncategorized, watched, sum, sumBudgeted, sumOut, sumIn, accounts, properties } = await getData(
     uncategorizedOnly, watchedOnly, accountId, drillCategories, drillMonth, searchQuery,
@@ -274,6 +287,7 @@ export default async function TransactionsPage({
     amountMinValue !== null && !isNaN(amountMinValue) ? amountMinValue : null,
     amountMaxValue !== null && !isNaN(amountMaxValue) ? amountMaxValue : null,
     transferGroupValue !== null && !isNaN(transferGroupValue) ? transferGroupValue : null,
+    merchantValue,
   );
 
   const isDrilldown = drillCategories.length > 0 && Boolean(drillMonth);
@@ -318,7 +332,8 @@ export default async function TransactionsPage({
    * tomorrow, when a heading reading "Today" over yesterday's rows would be a lie the page tells
    * with a straight face.
    */
-  const isDateRange = !isDrilldown && !isTransferGroup
+  const isMerchant = merchantValue !== null;
+  const isDateRange = !isDrilldown && !isTransferGroup && !isMerchant
     && Boolean(dateFromValue && dateToValue)
     && drillCategories.length === 0 && !searchQuery && !accountId
     && !uncategorizedOnly && !watchedOnly
@@ -382,6 +397,7 @@ export default async function TransactionsPage({
         <h1 className="text-2xl font-bold text-slate-900">
           {isDrilldown ? drillLabel
             : isTransferGroup ? 'Linked transfer'
+            : isMerchant ? merchantValue
             : isDateRange ? dateRangeLabel
             : 'Transactions'}
         </h1>
