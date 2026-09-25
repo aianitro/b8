@@ -179,7 +179,13 @@ function Group({
                   its own — without that the text overflowed its box and painted over the
                   controls to its right, which is what made the row look broken. */}
               <div className="min-w-0 col-start-2 row-start-1 sm:col-auto sm:row-auto">
-                <div className="flex items-center gap-2 mb-0.5 min-w-0">
+                {/* WRAPS. `min-w-0` lets this cell shrink but does nothing for children that
+                    refuse to: the type and `manual` chips are `shrink-0` by design, so at 361px
+                    they walked straight out of the column and off the card, and the valuation
+                    figure in the next column was painted on top of them. A second line inside the
+                    cell is the only place for them to go. Above `sm:` the column is 362px and
+                    this never wraps. */}
+                <div className="flex flex-wrap items-center gap-2 mb-0.5 min-w-0">
                   <AccountNameEdit accountId={a.id} current={a.name} />
                   <AccountTypeEdit accountId={a.id} type={a.type} subtype={a.subtype} />
                   {a.is_manual && (
@@ -188,7 +194,7 @@ function Group({
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-2 min-w-0 text-xs text-slate-400">
+                <div className="flex flex-wrap items-center gap-2 min-w-0 text-xs text-slate-400">
                   <AccountBankEdit accountId={a.id} current={a.bank} />
                   {(txnCounts[a.id] ?? 0) > 0 && (
                     <>
@@ -223,7 +229,7 @@ function Group({
 
               {/* Fixed-width cell rather than a conditional element, so the numbers line up
                   down the column even though only valuation-mode accounts have one. */}
-              <div className="text-right col-start-3 row-start-1 sm:col-auto sm:row-auto">
+              <div className="text-right col-start-3 row-start-1 self-start sm:col-auto sm:row-auto sm:self-auto">
                 {a.valuation_mode === 'valuation' ? (
                   <AccountValuationEdit
                     accountId={a.id}
