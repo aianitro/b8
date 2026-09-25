@@ -20,7 +20,22 @@ type Section = 'operational' | 'capital';
 // vertically, and the whole thing overflowed once a fifth control was added. Fixed tracks for
 // the controls plus a single minmax(0,1fr) for the name is what keeps that from recurring —
 // minmax(0,...) rather than 1fr because a bare 1fr floors at min-content and refuses to shrink.
-const ROW_GRID = 'grid grid-cols-[14px_4px_minmax(0,1fr)_112px_44px_150px_116px_24px] gap-3 items-center';
+/**
+ * A CARD ON A PHONE, THE EIGHT-COLUMN ROW FROM `sm:` UP.
+ *
+ * The desktop tracks come to 464px of fixed width plus 84px of gaps — 548px before the name
+ * column is given anything — inside a card 361px wide on an iPhone 15 Pro. The `1fr` name
+ * collapsed to nothing and the rest ran off the right edge, where the wrapper's `overflow-hidden`
+ * clipped it. That is why the page measured as fitting while the Balance-from select was visibly
+ * cut in half: a scrollbar reports an overflow, a clip hides one. Same fault as the dashboard's
+ * budget bar had, found the same way — by looking at it.
+ *
+ * Below `sm:` it is three columns: the landscape stripe, everything that reads left, and the
+ * control that reads right. Each cell is placed explicitly, because implicit flow would put eight
+ * cells on eight lines.
+ */
+const ROW_GRID = 'grid grid-cols-[4px_minmax(0,1fr)_auto] gap-x-3 gap-y-2 items-center '
+  + 'sm:grid-cols-[14px_4px_minmax(0,1fr)_112px_44px_150px_116px_24px] sm:gap-3';
 
 interface Props {
   operational: Account[];
@@ -131,7 +146,7 @@ function Group({
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {/* Column headers: with five controls per row, the compact ones (an eye, two short
             selects) only read unambiguously once the column is named. */}
-        <div className={`${ROW_GRID} px-6 py-2 bg-slate-50/60 border-b border-slate-100`}>
+        <div className={`${ROW_GRID} hidden sm:grid px-6 py-2 bg-slate-50/60 border-b border-slate-100`}>
           <span />
           <span />
           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Account</span>
@@ -151,17 +166,19 @@ function Group({
               onDragOver={(e) => onDragOver(e, a.id)}
               onDrop={() => onDrop(section, a.id)}
               onDragEnd={onDragEnd}
-              className={`${ROW_GRID} px-6 py-3 cursor-grab active:cursor-grabbing transition-colors ${
+              className={`${ROW_GRID} px-4 py-3 sm:px-6 cursor-grab active:cursor-grabbing transition-colors ${
                 i < items.length - 1 ? 'border-b border-slate-50' : ''
               } hover:bg-slate-50/50 ${isDragOver ? 'border-t-2 border-t-blue-400' : ''}`}
             >
-              <GripVertical size={14} className="text-slate-300" />
-              <div className={`w-1 h-8 rounded-full ${accent}`} />
+              <GripVertical size={14} className="hidden sm:block text-slate-300" />
+              {/* The stripe runs the height of the card on a phone rather than sitting beside one
+                  line of it — it is the only thing saying which book this account is in. */}
+              <div className={`w-1 self-stretch min-h-8 rounded-full col-start-1 row-span-3 sm:col-auto sm:row-auto sm:row-span-1 sm:h-8 sm:self-auto ${accent}`} />
 
               {/* min-w-0 lets this cell shrink, but every child must then truncate or clip on
                   its own — without that the text overflowed its box and painted over the
                   controls to its right, which is what made the row look broken. */}
-              <div className="min-w-0">
+              <div className="min-w-0 col-start-2 row-start-1 sm:col-auto sm:row-auto">
                 <div className="flex items-center gap-2 mb-0.5 min-w-0">
                   <AccountNameEdit accountId={a.id} current={a.name} />
                   <AccountTypeEdit accountId={a.id} type={a.type} subtype={a.subtype} />
@@ -206,7 +223,7 @@ function Group({
 
               {/* Fixed-width cell rather than a conditional element, so the numbers line up
                   down the column even though only valuation-mode accounts have one. */}
-              <div className="text-right">
+              <div className="text-right col-start-3 row-start-1 sm:col-auto sm:row-auto">
                 {a.valuation_mode === 'valuation' ? (
                   <AccountValuationEdit
                     accountId={a.id}
@@ -218,10 +235,21 @@ function Group({
                 )}
               </div>
 
-              <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
-              <AccountValuationModeToggle accountId={a.id} mode={a.valuation_mode} isLiability={a.is_liability} />
-              <AccountLandscapeToggle accountId={a.id} current={a.landscape} />
-              <AccountDeleteButton accountId={a.id} accountName={a.name} />
+              {/* Each wrapped so it can be PLACED on the phone grid — these four are components
+                  and carry no className of their own. On a desktop the wrapper is the grid item
+                  the component used to be, in the same track, which changes nothing there. */}
+              <div className="col-start-3 row-start-2 justify-self-end sm:col-auto sm:row-auto sm:justify-self-auto">
+                <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
+              </div>
+              <div className="col-start-2 row-start-2 min-w-0 sm:col-auto sm:row-auto">
+                <AccountValuationModeToggle accountId={a.id} mode={a.valuation_mode} isLiability={a.is_liability} />
+              </div>
+              <div className="col-start-2 row-start-3 min-w-0 sm:col-auto sm:row-auto">
+                <AccountLandscapeToggle accountId={a.id} current={a.landscape} />
+              </div>
+              <div className="col-start-3 row-start-3 justify-self-end sm:col-auto sm:row-auto sm:justify-self-auto">
+                <AccountDeleteButton accountId={a.id} accountName={a.name} />
+              </div>
             </div>
           );
         })}

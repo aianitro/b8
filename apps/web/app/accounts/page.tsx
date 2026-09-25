@@ -60,12 +60,19 @@ export default async function AccountsPage() {
     // balance-mode and valuation columns, and five controls plus an account name genuinely do
     // not fit in 768px — cramming them there is what caused the overlapping row content.
     <div className="p-4 sm:p-8 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      {/* WRAPS ON A PHONE, one line from `sm:` up. The three controls come to 311px together and
+          the title needs the rest; on an iPhone 15 Pro that is 62px more than the 361px inside the
+          page's gutters, and the row simply ran off the screen. Nothing here can be made narrower
+          without taking a word off a button, so the row is allowed a second line instead.
+
+          `justify-between` still applies per line, so the controls sit at the start of their own
+          line rather than being pushed to the right edge under the title. */}
+      <div className="flex flex-wrap items-center justify-between gap-y-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Accounts</h1>
           <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <AddAccountForm />
           <PlaidLinkButton />
           {plaidCount > 0 && <SyncControls />}
