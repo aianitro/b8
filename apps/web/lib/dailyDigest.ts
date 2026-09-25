@@ -2,6 +2,7 @@ import { createTransport } from 'nodemailer';
 import db from './db';
 import { createLogger } from './logger';
 import { loadDigest } from './digestRead';
+import { TAILNET_HOSTNAME } from './hostGuard';
 import { renderDigest, type DigestData, type DigestMessage } from './domain/digest';
 import { alreadySentToday } from './domain/digestWindow';
 import { BUBBLES_CID, CHART_CID, renderBubblesPng, renderChartPng } from './digestImage';
@@ -74,7 +75,13 @@ export async function runDailyDigest(): Promise<AlertKind[]> {
     // Rendered BEFORE the suppression check is answered? No — after. The chart is the one expensive
     // step in this job (an SVG rasterised through a native library), and a suppressed run should
     // not pay for a picture nobody receives.
-    const message = renderDigest(data, `cid:${CHART_CID}`, `cid:${BUBBLES_CID}`);
+    // The tailnet name the app already answers to — `lib/hostGuard.ts` owns it, derived from one
+    // environment variable. An email has no origin to resolve a relative path against, so the
+    // links inside it have to be absolute, and a second literal spelling of where this app lives
+    // is the kind of copy that survives a machine move by pointing at nothing.
+    const message = renderDigest(
+      data, `cid:${CHART_CID}`, `cid:${BUBBLES_CID}`, `https://${TAILNET_HOSTNAME}`,
+    );
 
     // Every row for this fingerprint, unfiltered, handed to the pure predicate. The `delivered`
     // test is deliberately NOT in this WHERE clause: written as `AND delivered LIMIT 1` the SQL

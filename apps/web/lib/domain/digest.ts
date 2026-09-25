@@ -349,7 +349,20 @@ function chartText(points: YearEndPoint[]): string[] {
  * severity banner, and four of these five are not severe. Rendered as a table cell with a width,
  * because an inline-block with a background is the first thing Outlook drops.
  */
-function widget(title: string, rightRail: string, body: string, accent: string = FAINT): string {
+/**
+ * Wraps `inner` in a link when there is somewhere to go, and returns it untouched when there is
+ * not — so a digest rendered without an app URL is exactly the email it was before.
+ *
+ * `color:inherit;text-decoration:none` because these are not links in the prose sense: the title
+ * and the counter should look identical to the reader, and only behave differently. A blue
+ * underline on every widget heading would turn a quiet morning email into a page of hyperlinks.
+ */
+function linked(href: string | null, inner: string): string {
+  if (!href) return inner;
+  return `<a href="${esc(href)}" style="color:inherit;text-decoration:none">${inner}</a>`;
+}
+
+function widget(title: string, rightRail: string, body: string, accent: string = FAINT, href: string | null = null): string {
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ` +
     `style="background-color:${PAPER};border:1px solid ${RULE};border-radius:10px;margin:0 0 16px">` +
@@ -360,7 +373,7 @@ function widget(title: string, rightRail: string, body: string, accent: string =
     `<div style="width:6px;height:6px;background-color:${accent};border-radius:2px;font-size:0;line-height:0">&nbsp;</div>` +
     `</td>` +
     `<td style="font-family:${FONT};font-size:11px;font-weight:600;letter-spacing:.07em;` +
-    `text-transform:uppercase;color:${MUTED}">${title}</td>` +
+    `text-transform:uppercase;color:${MUTED}">${linked(href, title)}</td>` +
     `<td align="right" style="font-family:${FONT};font-size:11px;color:${FAINT}">${rightRail}</td>` +
     `</tr></table>` +
     `<div style="height:12px;font-size:0;line-height:0">&nbsp;</div>` +
@@ -437,18 +450,63 @@ function emptyState(message: string): string {
  * Gmail's mobile app ignores those, so a layout that depends on one is a layout that breaks
  * exactly where this email is read.
  */
-function counters(data: DigestData): string {
+/**
+ * Where each part of this email points, derived once from the app's own URL.
+ *
+ * ─── Why absolute, and why it may be absent ───────────────────────────────────────────────────
+ *
+ * An email has no origin to resolve a relative path against, so every destination has to be
+ * spelled out in full. The host is the tailnet name the app already answers to — there is no
+ * second place that knows where this app lives, and a literal in here would be the kind of copy
+ * that survives a machine move by pointing at nothing.
+ *
+ * `null` when no app URL was supplied, which is the state the test suite and any caller that has
+ * not been told the hostname are in. Every use site renders the unlinked element it always
+ * rendered, so an absent URL costs the links and nothing else — an email that quietly drops a
+ * feature is better than one that ships `href="undefined/transactions"`.
+ */
+interface DigestLinks {
+  unfiled: string | null;
+  arrivals: string | null;
+  watchlist: string | null;
+  dashboard: string | null;
+  budget: string | null;
+}
+
+function digestLinks(appUrl: string): DigestLinks {
+  if (!appUrl) {
+    return { unfiled: null, arrivals: null, watchlist: null, dashboard: null, budget: null };
+  }
+  const base = appUrl.replace(/\/+$/, '');
+  return {
+    unfiled: `${base}/transactions?filter=uncategorized`,
+    arrivals: `${base}/transactions`,
+    watchlist: `${base}/transactions?filter=watched`,
+    dashboard: `${base}/dashboard`,
+    budget: `${base}/budget`,
+  };
+}
+
+function counters(data: DigestData, links: DigestLinks): string {
   const unfiled = data.uncategorized.totalCount;
   const posted = data.arrivals.rows.length;
 
-  const card = (value: number, caption: string, alarming: boolean): string =>
+  // THE WHOLE CARD IS THE TARGET, not the figure inside it. A 32px number is a large thing to
+  // aim at and a poor one: the caption under it is what says which list it opens, and a reader
+  // pressing the words rather than the digit should not miss. `display:block` with the padding
+  // moved onto the anchor is what makes the link fill the card in an email client, which has no
+  // layout engine worth relying on for anything cleverer.
+  const card = (value: number, caption: string, alarming: boolean, href: string | null): string =>
     `<td width="50%" valign="top" style="padding:0">` +
     `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ` +
     `style="background-color:${PAPER};border:1px solid ${alarming ? AMBER_RULE : RULE};border-radius:10px">` +
-    `<tr><td style="padding:16px 18px">` +
+    `<tr><td style="padding:0">` +
+    (href ? `<a href="${esc(href)}" style="display:block;padding:16px 18px;color:inherit;text-decoration:none">`
+          : `<div style="padding:16px 18px">`) +
     `<div style="font-family:${FONT};font-size:32px;font-weight:600;line-height:1;` +
     `color:${alarming ? AMBER_INK : INK}">${value}</div>` +
     `<div style="font-family:${FONT};font-size:12px;color:${MUTED};padding:6px 0 0">${caption}</div>` +
+    (href ? `</a>` : `</div>`) +
     `</td></tr></table></td>`;
 
   return (
@@ -456,11 +514,11 @@ function counters(data: DigestData): string {
     `<tr>` +
     // Amber only when there is something to do. A zero in a warning colour trains the reader to
     // ignore the colour, which costs the one day it actually means something.
-    card(unfiled, unfiled === 1 ? 'needs a category' : 'need a category', unfiled > 0) +
+    card(unfiled, unfiled === 1 ? 'needs a category' : 'need a category', unfiled > 0, links.unfiled) +
     `<td width="12" style="font-size:0;line-height:0">&nbsp;</td>` +
     // Not "new transactions yesterday": the extra word wrapped the caption onto a second line
     // at phone width, which is where this is read.
-    card(posted, posted === 1 ? 'new transaction' : 'new transactions', false) +
+    card(posted, posted === 1 ? 'new transaction' : 'new transactions', false, links.arrivals) +
     `</tr></table>`
   );
 }
@@ -477,9 +535,9 @@ function counters(data: DigestData): string {
  *
  * Largest first, because filing the biggest row moves every other figure in this email the most.
  */
-function uncategorizedWidget(d: DigestData['uncategorized']): string {
+function uncategorizedWidget(d: DigestData['uncategorized'], href: string | null): string {
   if (d.totalCount === 0) {
-    return widget('Needs a category', '', emptyState(`Nothing outstanding ${MDASH} every record this month is filed.`), GREEN);
+    return widget('Needs a category', '', emptyState(`Nothing outstanding ${MDASH} every record this month is filed.`), GREEN, href);
   }
 
   const shown = d.rows.length;
@@ -491,7 +549,7 @@ function uncategorizedWidget(d: DigestData['uncategorized']): string {
   // protecting against is a reader summing a TRUNCATED list and getting a figure nothing else was
   // computed from; the rail above still says "8 of 14 shown", which states the truncation without
   // restating the arithmetic.
-  return widget('Needs a category', rail, txnTable(d.rows, false), AMBER_MARK);
+  return widget('Needs a category', rail, txnTable(d.rows, false), AMBER_MARK, href);
 }
 
 /**
@@ -511,7 +569,7 @@ function uncategorizedWidget(d: DigestData['uncategorized']): string {
  * Oldest first, from the read layer's own ORDER BY. The newest entry needs no reminding; the owner
  * flagged it yesterday and remembers why.
  */
-function watchlistWidget(items: WatchedItem[]): string {
+function watchlistWidget(items: WatchedItem[], href: string | null): string {
   if (items.length === 0) return '';
 
   const cell = `font-family:${FONT};font-size:13px;color:${INK};padding:7px 0;border-bottom:1px solid ${RULE}`;
@@ -544,7 +602,8 @@ function watchlistWidget(items: WatchedItem[]): string {
       `</table>`,
     // Amber only when something has gone stale. A permanently amber card is a card the eye stops
     // reading, and the whole point of this one is the day it changes.
-    oldest >= 14 ? AMBER_MARK : SLATE_MARK
+    oldest >= 14 ? AMBER_MARK : SLATE_MARK,
+    href
   );
 }
 
@@ -572,10 +631,10 @@ function watchlistText(items: WatchedItem[]): string[] {
  * Listed completely, unlike the dashboard's twelve: a screen has a fold and an email does not, and
  * a truncated list is one that cannot be reconciled against a statement.
  */
-function arrivalsWidget(d: DigestData['arrivals']): string {
+function arrivalsWidget(d: DigestData['arrivals'], href: string | null): string {
   const since = esc(shortDate(d.sinceDate));
   if (d.rows.length === 0) {
-    return widget('Just arrived', `since ${since}`, emptyState('Nothing new has posted.'), SLATE_MARK);
+    return widget('Just arrived', `since ${since}`, emptyState('Nothing new has posted.'), SLATE_MARK, href);
   }
 
   const net = d.totalOut - d.totalIn;
@@ -583,7 +642,7 @@ function arrivalsWidget(d: DigestData['arrivals']): string {
     `since ${since} ${MIDDOT} ${d.rows.length} record${d.rows.length === 1 ? '' : 's'} ${MIDDOT} ` +
     `<span style="color:${net > 0 ? INK : GREEN};font-weight:600">${net > 0 ? '' : '+'}${exact(net)}</span> net`;
 
-  return widget('Just arrived', rail, txnTable(d.rows, true, false), SLATE_MARK);
+  return widget('Just arrived', rail, txnTable(d.rows, true, false), SLATE_MARK, href);
 }
 
 /**
@@ -602,7 +661,7 @@ function arrivalsWidget(d: DigestData['arrivals']): string {
  * The legend travels with the image. On a screen a reader can hover a bubble; in an email the
  * colour is the only thing that says what it means.
  */
-function bubblesWidget(bubbles: DigestBubble[], src: string): string {
+function bubblesWidget(bubbles: DigestBubble[], src: string, href: string | null): string {
   if (bubbles.length === 0) return '';
   return widget(
     'This month',
@@ -612,7 +671,8 @@ function bubblesWidget(bubbles: DigestBubble[], src: string): string {
       `style="display:block;width:100%;max-width:${BUBBLES_DISPLAY_WIDTH}px;height:auto;border:0"/>` +
       `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:8px 0 0">` +
       `Circle area is what the category was given this month.</div>`,
-    BLUE_MARK
+    BLUE_MARK,
+    href
   );
 }
 
@@ -626,7 +686,7 @@ function bubblesWidget(bubbles: DigestBubble[], src: string): string {
  * `netToDate` is printed beside it, labelled as fact, because the projection is the figure people
  * argue with and the settled number is the one that anchors it.
  */
-function yearEndWidget(d: DigestData['yearEnd'], chartSrc: string): string {
+function yearEndWidget(d: DigestData['yearEnd'], chartSrc: string, href: string | null): string {
   const positive = d.profitLoss >= 0;
 
   const headline =
@@ -661,7 +721,8 @@ function yearEndWidget(d: DigestData['yearEnd'], chartSrc: string): string {
     '',
     headline + `<div style="height:18px;font-size:0;line-height:0">&nbsp;</div>` + chart(chartSrc) + legend,
     // The verdict's own colour, matching the headline figure directly beneath it.
-    positive ? GREEN : RED
+    positive ? GREEN : RED,
+    href
   );
 }
 
@@ -699,11 +760,20 @@ function subjectFor(data: DigestData): string {
  * mail client that shows it is a client the HTML failed in, and the failure mode of sending HTML
  * alone is a blank message rather than a plain one.
  */
-export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: string): DigestMessage {
+/**
+ * @param appUrl Where this app can be reached, e.g. `https://<machine>.<tailnet>.ts.net`. An email
+ *   has no origin to resolve a relative path against, so every link has to be absolute — and an
+ *   empty string is legitimate, meaning "render the email with no links", which is what it was
+ *   before and what the test suite still checks.
+ */
+export function renderDigest(
+  data: DigestData, chartSrc: string, bubblesSrc: string, appUrl = '',
+): DigestMessage {
   if (data.yearEnd.points.length !== 12) {
     throw new RangeError(`digest: the year-end track needs 12 points, got ${data.yearEnd.points.length}`);
   }
 
+  const links = digestLinks(appUrl);
   const u = data.uncategorized;
   const a = data.arrivals;
   const ye = data.yearEnd;
@@ -782,12 +852,12 @@ export function renderDigest(data: DigestData, chartSrc: string, bubblesSrc: str
         `<tr><td style="padding:14px 18px;font-family:${FONT};font-size:13px;color:${AMBER_INK};line-height:1.5">` +
         `${esc(data.jobGap)}</td></tr></table>`
       : '') +
-    counters(data) +
-    uncategorizedWidget(data.uncategorized) +
-    watchlistWidget(data.watchlist) +
-    arrivalsWidget(data.arrivals) +
-    bubblesWidget(data.bubbles, bubblesSrc) +
-    yearEndWidget(data.yearEnd, chartSrc) +
+    counters(data, links) +
+    uncategorizedWidget(data.uncategorized, links.unfiled) +
+    watchlistWidget(data.watchlist, links.watchlist) +
+    arrivalsWidget(data.arrivals, links.arrivals) +
+    bubblesWidget(data.bubbles, bubblesSrc, links.dashboard) +
+    yearEndWidget(data.yearEnd, chartSrc, links.budget) +
     `<div style="font-family:${FONT};font-size:11px;color:${FAINT};padding:2px 0 0;text-align:center">` +
     `Sent by b8 on this machine. Figures exclude uncategorized money.</div>` +
     `</td></tr></table></td></tr></table>`;

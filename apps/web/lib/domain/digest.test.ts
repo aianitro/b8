@@ -596,3 +596,60 @@ describe('the missed-job banner', () => {
     expect(renderDigest(d, CHART_SRC, BUBBLES_SRC).html).toContain('&lt;b&gt;never&lt;/b&gt; &amp; so on');
   });
 });
+
+describe('renderDigest links', () => {
+  const APP = 'https://b8.tailnet.ts.net';
+
+  it('renders no links at all without an app url, exactly as before', () => {
+    const { html } = renderDigest(data(), CHART_SRC, BUBBLES_SRC);
+    expect(html).not.toContain('<a href');
+  });
+
+  // An email has no origin: a relative path in an inbox resolves against the mail client, or
+  // against nothing. Every destination has to be spelled out in full.
+  it('makes every link absolute', () => {
+    const { html } = renderDigest(data(), CHART_SRC, BUBBLES_SRC, APP);
+    const hrefs = [...html.matchAll(/<a href="([^"]+)"/g)].map((m) => m[1]);
+    expect(hrefs.length).toBeGreaterThan(0);
+    for (const href of hrefs) expect(href.startsWith('https://')).toBe(true);
+  });
+
+  // The one the owner asked for by name.
+  it('sends the unfiled counter and its widget to the uncategorized filter', () => {
+    const { html } = renderDigest(data(), CHART_SRC, BUBBLES_SRC, APP);
+    const target = `${APP}/transactions?filter=uncategorized`;
+    // Twice: the counter card at the top and the widget heading below it.
+    expect(html.split(attr(target)).length - 1).toBe(2);
+  });
+
+  it('sends each widget somewhere different', () => {
+    const { html } = renderDigest(data(), CHART_SRC, BUBBLES_SRC, APP);
+    for (const path of ['/transactions?filter=uncategorized', '/transactions?filter=watched', '/dashboard', '/budget']) {
+      expect(html).toContain(attr(`${APP}${path}`));
+    }
+  });
+
+  // A trailing slash on the configured URL must not produce `//transactions`.
+  it('tolerates a trailing slash on the app url', () => {
+    const { html } = renderDigest(data(), CHART_SRC, BUBBLES_SRC, `${APP}/`);
+    expect(html).not.toContain('.ts.net//');
+  });
+
+  // The counter is a 32px number with a caption under it; the caption is what says which list it
+  // opens, so the anchor has to cover both rather than just the digit.
+  it('makes the whole counter card the target, not just the figure', () => {
+    const { html } = renderDigest(data(), CHART_SRC, BUBBLES_SRC, APP);
+    const card = html.slice(html.indexOf('need a category') - 900, html.indexOf('need a category'));
+    expect(card).toContain('display:block');
+  });
+});
+
+/**
+ * The escaping `digest.ts` applies to an attribute, so the assertions above match what it emits.
+ *
+ * NOT called `esc`: this file imports and tests the real one, and a same-named function
+ * declaration here hoists over the import and silently replaces it in every other test.
+ */
+function attr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
