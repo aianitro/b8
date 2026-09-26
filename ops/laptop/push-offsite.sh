@@ -85,7 +85,7 @@ fi
 # ordinary case of "nothing new to upload" would have been logged as a failed upload every hour.
 out=$(mktemp -t b8offsite)
 rclone copy "$LOCAL_DIR" "$REMOTE:$REMOTE_PATH" \
-  --filter '+ *.dump.age' --filter '+ *.env.age' --filter '- *' \
+  --filter '+ *.dump.age' --filter '+ *.env.age' --filter '+ *.sql.age' --filter '- *' \
   --no-traverse --transfers 2 --retries 3 --low-level-retries 5 \
   --stats 0 -v >"$out" 2>&1
 rc=$?
@@ -123,19 +123,30 @@ rm -f "$out"
 #
 # This is the same reasoning as the server's restore rehearsal. An offsite copy nobody has ever read
 # back is a directory of files that merely look like backups.
-remote_list=$(rclone lsf "$REMOTE:$REMOTE_PATH" --filter '+ *.dump.age' --filter '+ *.env.age' --filter '- *' 2>/dev/null)
-newest=$(echo "$remote_list" | grep '\.dump\.age$' | sort | tail -1)
+remote_list=$(rclone lsf "$REMOTE:$REMOTE_PATH" --filter '+ *.dump.age' --filter '+ *.env.age' --filter '+ *.sql.age' --filter '- *' 2>/dev/null)
+
+# ─── THE DAILY NAMING PATTERN ONLY, NEVER A BARE `*.age` GLOB ──────────────────────────────────
+#
+# Encrypting the hand-made archives into this directory put names like `b8_finance_pre-P0-09a_...`
+# and `budget_categories_backup_...` beside the dailies, and both `p` and `b` sort after a digit —
+# so "newest by lexical sort" silently became a file from August that never changes again. Harmless
+# for a decrypt check and FATAL for a staleness one: a sentinel that is always present and always
+# offsite can never report that anything is wrong.
+#
+# Lexical order equals chronological order only inside the generated naming scheme, which is exactly
+# why the pruner matches this same pattern rather than reasoning about "the oldest files".
+DAILY='^b8_finance_[0-9]{8}T[0-9]{6}Z\.dump\.age$'
+newest=$(echo "$remote_list" | grep -E "$DAILY" | sort | tail -1)
 
 # ─── HAS THE OFFSITE COPY FALLEN BEHIND? ──────────────────────────────────────────────────────
 #
 # The question that matters is not "did this run fail" but "is my newest backup off the premises".
-# A local dump that is still missing from Drive after six hours means six hourly attempts have not
-# got it there, which is a real state worth a notification; anything younger is a blip mid-retry.
-newest_local=$(ls -1 "$LOCAL_DIR"/*.dump.age 2>/dev/null | sort | tail -1)
-if [ -n "$newest_local" ]; then
-  base=$(basename "$newest_local")
+# A local dump still missing offsite after six hours means six hourly attempts have not got it there,
+# which is a real state worth a notification; anything younger is a blip mid-retry.
+base=$(ls -1 "$LOCAL_DIR" 2>/dev/null | grep -E "$DAILY" | sort | tail -1)
+if [ -n "$base" ]; then
   if ! echo "$remote_list" | grep -qxF "$base"; then
-    if [ -z "$(find "$newest_local" -mmin -360 2>/dev/null)" ]; then
+    if [ -z "$(find "$LOCAL_DIR/$base" -mmin -360 2>/dev/null)" ]; then
       log "ALARM: $base is over six hours old and still not offsite"
       notify "Backups are not reaching the offsite copy"
     else

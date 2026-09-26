@@ -80,7 +80,13 @@ rm -f "$err"
 # hour would be work for nothing. It tests the whole chain at once: the transfer was complete,
 # the file is intact, and the private key on this laptop still opens what the server is producing.
 # A backup nobody has ever opened is a hope, not a backup.
-newest=$(ls -1 "$LOCAL_DIR"/*.age 2>/dev/null | sort | tail -1)
+# The DAILY naming pattern only, never a bare `*.age` glob. Encrypting the hand-made archives into
+# this directory put `b8_finance_pre-P0-09a_...` and `budget_categories_backup_...` beside the
+# dailies, and both `p` and `b` sort after a digit — so "newest by lexical sort" became a file from
+# August. Lexical order equals chronological order only inside the generated scheme, which is why the
+# pruner below matches this same pattern instead of reasoning about "the oldest files".
+newest=$(ls -1 "$LOCAL_DIR" 2>/dev/null | grep -E '^b8_finance_[0-9]{8}T[0-9]{6}Z\.dump\.age$' | sort | tail -1)
+[ -n "$newest" ] && newest="$LOCAL_DIR/$newest"
 if [ -n "$newest" ] && [ -f "$AGE_KEY" ]; then
   if age -d -i "$AGE_KEY" -o /dev/null "$newest" 2>/dev/null; then
     :
@@ -113,7 +119,7 @@ fi
 # newer than two days means something is broken — the daily job, the disk, the machine — and the
 # only place that would otherwise show is a log nobody reads.
 if [ -n "$newest" ]; then
-  if [ -z "$(find "$LOCAL_DIR" -name '*.age' -mtime -2 2>/dev/null | head -1)" ]; then
+  if [ -z "$(find "$LOCAL_DIR" -name 'b8_finance_*Z.dump.age' -mtime -2 2>/dev/null | head -1)" ]; then
     log "ALARM: no backup newer than two days; the server may have stopped producing them"
     notify "No new b8 backup in over two days"
   fi
