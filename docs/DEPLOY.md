@@ -268,6 +268,19 @@ Three decisions in it, each with a reason:
   it. Sending these to Apple may be a reasonable choice; it must not be one a default path made
   quietly.
 
+**The agent runs an installed copy in `~/opt/b8`, not the checkout.** macOS TCC protects
+`~/Documents`, `~/Desktop` and `~/Downloads`, and a LaunchAgent is granted access to none of them —
+so an agent pointed at `ops/laptop/pull-backups.sh` inside the repo installs cleanly, loads cleanly,
+and then fails every run with `Operation not permitted` and exit 126. That is EPERM, not EACCES: the
+file's own `755` never gets consulted, because the privacy layer refuses launchd first. The remedy is
+not Full Disk Access — that would mean granting it to `/bin/sh` — it is to run from outside the
+protected tree. A symlink does not work either; TCC follows it back and refuses identically. So
+`install.sh` copies both scripts to `~/opt/b8`, and **the copy does not track the repo — re-run the
+installer after editing either script.**
+
+This is the same rule that put the backups at `~/b8-backups`. It was simply not obvious that an
+executable is subject to it exactly as a data file is.
+
 Every run decrypt-checks the newest file, which tests the whole chain at once — the transfer was
 complete, the file is intact, and the laptop's key still opens what the server is producing. It also
 raises a macOS notification if nothing newer than two days has arrived, because **the failure mode of
