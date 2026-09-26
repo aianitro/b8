@@ -36,6 +36,37 @@ const bash = (command: string) => run({ tool_name: 'Bash', tool_input: { command
 
 const openLease = () => writeFileSync(path.join(root, '.claude/.contract-lease'), 'T1\n');
 
+/**
+ * The environment for a `git` call that must act on the throwaway repo in `root` and nowhere else.
+ *
+ * ─── WITHOUT THIS, RUNNING THE SUITE FROM A WORKTREE CORRUPTS THE REAL INDEX ───────────────────
+ *
+ * Git exports `GIT_DIR` (and friends) to the processes a hook runs. In the main checkout `GIT_DIR`
+ * is the relative `.git`, so a child with `cwd: root` resolves it to `<root>/.git` and the damage is
+ * nil — which is why this went unnoticed. In a LINKED WORKTREE it is absolute
+ * (`…/.git/worktrees/<name>`), so `cwd` no longer redirects anything: `git add .` below then staged
+ * the temp directory's contents into the repository's own index, which meant staging the deletion of
+ * every tracked file and overwriting the baseline migration IN THE INDEX with this test's
+ * `-- baseline` fixture. `git commit` from any worktree was therefore impossible, and the failure
+ * looked like a test failure rather than like the repo being edited underneath it.
+ *
+ * Found on 2026-09-25 by an agent working in a worktree, which is where this harness puts them by
+ * default — so the bug was reachable by ordinary use and had simply never been triggered from the
+ * main checkout, where it is invisible.
+ *
+ * Deleting the variables rather than overriding them: `GIT_DIR` set to anything at all wins over
+ * `cwd`, so the fix is absence, not a different value.
+ */
+function gitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  delete env.GIT_OBJECT_DIRECTORY;
+  delete env.GIT_COMMON_DIR;
+  return env;
+}
+
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'scope-guard-'));
   mkdirSync(path.join(root, '.claude'), { recursive: true });
@@ -136,10 +167,11 @@ describe('committed migrations are immutable', () => {
 
   beforeEach(() => {
     writeFileSync(path.join(root, migration), '-- baseline\n');
-    execFileSync('git', ['init', '-q'], { cwd: root });
-    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['init', '-q'], { cwd: root, env: gitEnv() });
+    execFileSync('git', ['add', '.'], { cwd: root, env: gitEnv() });
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'x'], {
       cwd: root,
+      env: gitEnv(),
     });
   });
 

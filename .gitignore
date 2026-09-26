@@ -76,3 +76,7 @@ backups/
 # Deployer runtime state, created in the checkout on the server by ops/server/pull-deploy.sh.
 .deploy.lock/
 .deploy-last-said
+
+# Agent worktrees (Claude Code subagent isolation). Transient, and a nested checkout would
+# otherwise be staged as untracked content by any `git add .`.
+.claude/worktrees/
