@@ -84,11 +84,23 @@ rc=$?
 # are real uploads worth counting.
 copied=$(grep -c ': Copied' "$out" 2>/dev/null || true)
 
+# ─── A FAILED RUN IS LOGGED; ONLY A FALLEN-BEHIND COPY IS WORTH INTERRUPTING ANYONE ───────────
+#
+# The first version raised a macOS notification on any non-zero exit, and the very first integrated
+# run produced one: a transient `CRITICAL: Failed to create ...` that a manual retry ninety seconds
+# later did not reproduce, on files that were already safely in Drive. That notification was pure
+# noise, and noise is expensive here -- an alarm that cries on every blip stops being read, which
+# costs exactly the alert that matters. This is the lesson the PULL side already encodes by alarming
+# on staleness rather than on one unreachable run; it was simply not carried across.
+#
+# So: a failure is recorded in the log, with its full text kept in a sidecar for diagnosis, and
+# nothing interrupts anyone. Whether the offsite copy has actually fallen behind is decided below,
+# against the remote listing, which is the question a person would want answered anyway.
 if [ "$rc" -ne 0 ]; then
-  log "ALARM: upload failed (rclone exit $rc): $(tr '\n' ' ' < "$out" | cut -c1-300)"
-  notify "Offsite backup upload failed"
-  rm -f "$out"
-  exit 0
+  cp "$out" "$LOCAL_DIR/.offsite-last-error" 2>/dev/null
+  log "upload failed (rclone exit $rc); full text in .offsite-last-error: $(tr '\n' ' ' < "$out" | tail -c 400)"
+else
+  rm -f "$LOCAL_DIR/.offsite-last-error"
 fi
 rm -f "$out"
 [ "$copied" -gt 0 ] && log "uploaded $copied new file(s) to $REMOTE:$REMOTE_PATH"
@@ -102,7 +114,27 @@ rm -f "$out"
 #
 # This is the same reasoning as the server's restore rehearsal. An offsite copy nobody has ever read
 # back is a directory of files that merely look like backups.
-newest=$(rclone lsf "$REMOTE:$REMOTE_PATH" --filter '+ *.dump.age' --filter '- *' 2>/dev/null | sort | tail -1)
+remote_list=$(rclone lsf "$REMOTE:$REMOTE_PATH" --filter '+ *.dump.age' --filter '+ *.env.age' --filter '- *' 2>/dev/null)
+newest=$(echo "$remote_list" | grep '\.dump\.age$' | sort | tail -1)
+
+# ─── HAS THE OFFSITE COPY FALLEN BEHIND? ──────────────────────────────────────────────────────
+#
+# The question that matters is not "did this run fail" but "is my newest backup off the premises".
+# A local dump that is still missing from Drive after six hours means six hourly attempts have not
+# got it there, which is a real state worth a notification; anything younger is a blip mid-retry.
+newest_local=$(ls -1 "$LOCAL_DIR"/*.dump.age 2>/dev/null | sort | tail -1)
+if [ -n "$newest_local" ]; then
+  base=$(basename "$newest_local")
+  if ! echo "$remote_list" | grep -qxF "$base"; then
+    if [ -z "$(find "$newest_local" -mmin -360 2>/dev/null)" ]; then
+      log "ALARM: $base is over six hours old and still not in Drive"
+      notify "Backups are not reaching Drive"
+    else
+      log "$base not offsite yet; the next run will retry"
+    fi
+  fi
+fi
+
 [ -n "$newest" ] || { log "nothing offsite yet"; exit 0; }
 
 last=$(cat "$MARKER" 2>/dev/null || echo '')
