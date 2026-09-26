@@ -8,7 +8,7 @@
 // below are not padding; they are the half of the specification that regressed.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +35,43 @@ const edit = (file_path: string) => run({ tool_name: 'Edit', tool_input: { file_
 const bash = (command: string) => run({ tool_name: 'Bash', tool_input: { command } });
 
 const openLease = () => writeFileSync(path.join(root, '.claude/.contract-lease'), 'T1\n');
+
+/**
+ * `process.env` with git's own plumbing variables stripped, for the nested repos these tests build.
+ *
+ * ─── THIS TEST COMMITTED TO THE REAL REPOSITORY ───────────────────────────────────────────────
+ *
+ * `npm test` runs from `.husky/pre-commit`, and git exports `GIT_DIR` and `GIT_INDEX_FILE` into a
+ * hook's environment. `execFileSync` inherits them, and those variables OUTRANK `cwd` — so the
+ * `git add .` / `git commit` below, meant for a throwaway repo under `tmpdir()`, resolved to the
+ * checkout being committed instead. Since the temp directory holds none of the repo's files, `add`
+ * staged the deletion of every tracked path and `commit` recorded it: a real commit, titled `x`
+ * from the `-qm x` below, whose diff removed the entire tree and replaced the baseline migration
+ * with the two-word stub on the line above.
+ *
+ * It then failed its own assertion, so the suite went red and the outer commit aborted — which is
+ * the only reason anyone noticed. The stray commit had already been written, and `git status` was
+ * left reporting the whole repository as untracked.
+ *
+ * Passing an explicit env is the fix, not `cwd`: no value of `cwd` can outvote `GIT_DIR`. Every
+ * nested git invocation in this file must use this, and a new one that forgets is the same defect
+ * again — it is silent until it runs inside a hook, which is exactly where CI does not look.
+ */
+const GIT_ENV: NodeJS.ProcessEnv = (() => {
+  const env = { ...process.env };
+  for (const key of [
+    'GIT_DIR',
+    'GIT_INDEX_FILE',
+    'GIT_WORK_TREE',
+    'GIT_COMMON_DIR',
+    'GIT_PREFIX',
+    'GIT_OBJECT_DIRECTORY',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  ]) {
+    delete env[key];
+  }
+  return env;
+})();
 
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'scope-guard-'));
@@ -136,11 +173,25 @@ describe('committed migrations are immutable', () => {
 
   beforeEach(() => {
     writeFileSync(path.join(root, migration), '-- baseline\n');
-    execFileSync('git', ['init', '-q'], { cwd: root });
-    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['init', '-q'], { cwd: root, env: GIT_ENV });
+    execFileSync('git', ['add', '.'], { cwd: root, env: GIT_ENV });
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'x'], {
       cwd: root,
+      env: GIT_ENV,
     });
+  });
+
+  // The false-positive half of the fix above, per BUILD.md amendment A3. Asserting on `GIT_ENV`'s
+  // keys would only restate the constant; this asks git where it actually is, which is the thing
+  // that was wrong. Under the old code inside a hook this resolves to the checkout, not the temp
+  // repo, and the deletion commit that follows is the damage.
+  it('builds its throwaway repo under tmpdir, never the checkout running the tests', () => {
+    const gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd: root,
+      env: GIT_ENV,
+      encoding: 'utf8',
+    }).trim();
+    expect(realpathSync(gitDir).startsWith(realpathSync(root))).toBe(true);
   });
 
   it('blocks editing a committed migration even with the lease open', () => {
