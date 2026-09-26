@@ -20,6 +20,28 @@
 const NAME = /^b8_finance_(\d{8}T\d{6}Z)\.dump(?:\.age)?$/;
 
 /**
+ * Captures of `.env.local`: `b8_env_20260926T130000Z_1f3a9c2b4d5e.env.age`.
+ *
+ * ─── `.age` IS NOT OPTIONAL HERE, UNLIKE THE DUMP ABOVE ───────────────────────────────────────
+ *
+ * A dump is written plain when no recipient is set, because the trade is worth it: that data already
+ * sits in Postgres on the same disk, so a plaintext dump beside it adds little, and refusing to back
+ * up at all would be worse. `.env.local` inverts both halves. It is nothing but credentials, and the
+ * backup directory is replicated to a laptop and to Google Drive — neither of which `.env.local`
+ * reaches today. A plaintext capture there would MANUFACTURE exposure that does not otherwise exist,
+ * in two places outside this machine. So the routine skips the capture rather than writing one in
+ * the clear, and says so; there is no plain form of this name to match.
+ *
+ * THE HASH IN THE NAME IS WHAT MAKES RETENTION MEAN SOMETHING. The server cannot read its own
+ * captures back — the private key is deliberately elsewhere — so it cannot ask "has this changed
+ * since last time" by decrypting. Carrying the digest of the plaintext in the filename answers it
+ * without a sidecar file and without the key: a capture is written only when the newest existing one
+ * carries a different hash. Ten captures are therefore ten distinct configurations, which may span
+ * years, rather than ten copies of last week.
+ */
+const ENV_NAME = /^b8_env_(\d{8}T\d{6}Z)_([0-9a-f]{12})\.env\.age$/;
+
+/**
  * `b8_finance_20260916T224500Z.dump`.
  *
  * UTC, and sortable as text. A local-time name would reorder itself twice a year at the daylight
@@ -29,6 +51,39 @@ const NAME = /^b8_finance_(\d{8}T\d{6}Z)\.dump(?:\.age)?$/;
 export function backupFilename(now: Date, prefix = 'b8_finance'): string {
   const iso = now.toISOString();
   return `${prefix}_${iso.slice(0, 10).replace(/-/g, '')}T${iso.slice(11, 19).replace(/:/g, '')}Z.dump`;
+}
+
+/**
+ * `b8_env_20260926T130000Z_1f3a9c2b4d5e.env.age`, from the same clock and the plaintext's digest.
+ *
+ * Twelve hex characters of a SHA-256, which is not a secret: it is the digest of a whole file, so it
+ * cannot be walked back to the contents, and the only thing it reveals is WHETHER the configuration
+ * changed between two dates — already evident from there being two files.
+ */
+export function envBackupFilename(now: Date, sha256: string): string {
+  const short = sha256.slice(0, 12);
+  if (!/^[0-9a-f]{12}$/.test(short)) throw new RangeError(`backupPlan: expected a hex digest, got ${sha256.slice(0, 20)}`);
+  const iso = now.toISOString();
+  return `b8_env_${iso.slice(0, 10).replace(/-/g, '')}T${iso.slice(11, 19).replace(/:/g, '')}Z_${short}.env.age`;
+}
+
+/** The digest the newest env capture carries, or `null` if there is not one yet. */
+export function newestEnvHash(names: readonly string[]): string | null {
+  const mine = names.filter((n) => ENV_NAME.test(n)).sort();
+  const newest = mine[mine.length - 1];
+  return newest ? (ENV_NAME.exec(newest)?.[2] ?? null) : null;
+}
+
+/**
+ * Which env captures to delete. Separate from `selectForDeletion` rather than a parameter on it,
+ * because the two retentions answer different questions and should be free to disagree: dumps are
+ * kept by DAY, and a month of them is a month of history. Env captures are kept by CHANGE, so a
+ * count of ten is ten configurations however long they took to accumulate.
+ */
+export function selectEnvForDeletion(names: readonly string[], keep: number): string[] {
+  if (keep < 1) throw new RangeError(`backupPlan: keep must be at least 1, got ${keep}`);
+  const mine = names.filter((n) => ENV_NAME.test(n)).sort();
+  return mine.slice(0, Math.max(0, mine.length - keep));
 }
 
 /**

@@ -90,6 +90,23 @@ if [ -n "$newest" ] && [ -f "$AGE_KEY" ]; then
   fi
 fi
 
+# ─── AND THE CREDENTIALS CAPTURE, WHICH NOTHING ELSE EVER READS BACK ──────────────────────────
+#
+# `b8_env_*.env.age` is the only artifact here that no other step opens: the dump gets a rehearsal on
+# the server and a decrypt above, the offsite copy gets fetched back and checked. Without this the
+# credentials backup would be the one file in the system that has never been proven readable -- and
+# it is the file wanted on the worst day, restoring onto a machine that has nothing.
+#
+# Checked for a `=` rather than just a clean exit, because age succeeding says the ciphertext was
+# well-formed, not that what came out is a configuration file.
+newest_env=$(ls -1 "$LOCAL_DIR"/b8_env_*.env.age 2>/dev/null | sort | tail -1)
+if [ -n "$newest_env" ] && [ -f "$AGE_KEY" ]; then
+  if ! age -d -i "$AGE_KEY" "$newest_env" 2>/dev/null | grep -q '='; then
+    log "ALARM: $(basename "$newest_env") did not decrypt to a readable env file"
+    notify "Credentials backup did not decrypt"
+  fi
+fi
+
 # ─── HAVE THEY STOPPED ARRIVING? ──────────────────────────────────────────────────────────────
 #
 # The failure mode of every backup system is silence. The server writes one a day, so nothing
@@ -117,6 +134,11 @@ fi
 # Same rule the server uses: only files this system's own naming pattern matches, sorted by the
 # timestamp IN the name rather than by mtime — a file copied here gets a fresh mtime and would
 # sort as new. Anything else in the directory is left alone forever.
+#
+# WHICH INCLUDES THE `b8_env_*` CAPTURES, ON PURPOSE. They are written only when the configuration
+# changes and run to a few hundred bytes, so the entire history of them is smaller than one dump and
+# unbounded is the right answer — where ninety dumps are already about 16 MB. Deliberate, not an
+# oversight in the pattern.
 # `head -n -N` is a GNU extension; BSD head refuses a negative count outright ("illegal line
 # count"), so the first draft of this would have failed silently on every run and never pruned
 # anything. Counting first and taking that many from the front is portable and says the same thing.

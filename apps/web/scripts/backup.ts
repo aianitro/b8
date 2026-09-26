@@ -26,10 +26,14 @@
  * risky migrations, which are the only copies of what they contain.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { backupFilename, compareCounts, selectForDeletion } from '../lib/backupPlan';
+import {
+  backupFilename, compareCounts, envBackupFilename, newestEnvHash,
+  selectEnvForDeletion, selectForDeletion,
+} from '../lib/backupPlan';
 import { createLogger } from '../lib/logger';
 import { REAL_DATABASE_NAME, databaseNameFromUrl } from '../lib/testDbGuard';
 
@@ -64,6 +68,15 @@ const RECIPIENT = process.env.BACKUP_AGE_RECIPIENT?.trim() || null;
 
 /** `age` is a single static binary; on the server it lives outside PATH's usual places. */
 const AGE_BIN = process.env.AGE_BIN ?? 'age';
+
+/**
+ * The credentials file, and how many distinct versions of it to keep.
+ *
+ * Ten rather than thirty, because captures are written only when the contents CHANGE: ten of these
+ * may be several years of configuration, where thirty dumps are a month of data.
+ */
+const ENV_FILE = process.env.BACKUP_ENV_FILE ?? join(process.cwd(), '.env.local');
+const ENV_KEEP = Number(process.env.BACKUP_ENV_KEEP ?? 10);
 
 /** The rehearsal's target. Dropped and recreated on every run, so it must never be the real one. */
 const REHEARSAL_DB = 'b8_restore_rehearsal';
@@ -104,6 +117,72 @@ async function counts(db: string): Promise<Record<string, number>> {
     out[table] = Number(stdout.trim());
   }
   return out;
+}
+
+/**
+ * Capture `.env.local`, encrypted, and only when it has changed.
+ *
+ * ─── WHY THIS EXISTS ──────────────────────────────────────────────────────────────────────────
+ *
+ * Every dump in this directory restores the DATA and none of the CONNECTIONS. `.env.local` holds the
+ * Plaid secret, the SMTP credentials and the VAPID private key, so a restore onto a new machine came
+ * back with a working database and a app that could not sync, mail, or notify — and no copy of those
+ * values existed anywhere but the disk most likely to die.
+ *
+ * ─── ENCRYPTED OR NOT AT ALL ──────────────────────────────────────────────────────────────────
+ *
+ * The dump above is written plain when no recipient is set, deliberately: that data is already on
+ * this disk in Postgres, so refusing to back it up would cost more than it saves. This inverts it.
+ * The file is nothing but credentials, and this directory is replicated to a laptop and to Google
+ * Drive — neither of which `.env.local` reaches today. Writing it plain here would create exposure
+ * in two places off this machine that does not otherwise exist. So a missing recipient SKIPS the
+ * capture and says so loudly, and no plaintext copy is ever produced: `age` reads the source file
+ * directly and the only new file on disk is already encrypted.
+ *
+ * ─── AND IT NEVER LOGS A LINE OF THE FILE ─────────────────────────────────────────────────────
+ *
+ * Not the contents, not a parsed key, not a diff of what changed. The log is the one artifact here
+ * that is read casually, shipped around, and pasted into an issue. It gets a filename and a size.
+ */
+async function captureEnv(): Promise<void> {
+  let contents: Buffer;
+  try {
+    contents = await readFile(ENV_FILE);
+  } catch {
+    log.warn('no .env.local to capture — a restore will not carry the credentials', { path: ENV_FILE });
+    return;
+  }
+  if (contents.length === 0) {
+    log.warn('.env.local is empty; not capturing it over a previous good capture');
+    return;
+  }
+  if (!RECIPIENT) {
+    log.warn('NOT capturing .env.local — no BACKUP_AGE_RECIPIENT, and credentials are never written here in the clear');
+    return;
+  }
+
+  const digest = createHash('sha256').update(contents).digest('hex');
+  const existing = await readdir(DIR);
+  if (newestEnvHash(existing) === digest.slice(0, 12)) return;  // unchanged; nothing to say
+
+  const name = envBackupFilename(new Date(), digest);
+  const path = join(DIR, name);
+  // `age` reads ENV_FILE itself, so the plaintext is never duplicated — not to a temp file, not
+  // through this process's memory on its way to disk.
+  await run(AGE_BIN, ['-r', RECIPIENT, '-o', path, ENV_FILE]);
+  const { size } = await stat(path);
+  if (size === 0) {
+    await rm(path).catch(() => undefined);
+    throw new Error('backup: age produced an empty .env.local capture');
+  }
+  // 600 explicitly. This is the one file here whose plaintext is pure credential, and although the
+  // ciphertext is useless without the key, a readable-by-anyone name is a habit worth not having.
+  await chmod(path, 0o600);
+  log.info('captured .env.local (it changed)', { file: name, bytes: size });
+
+  const doomed = selectEnvForDeletion(await readdir(DIR), ENV_KEEP);
+  for (const n of doomed) await rm(join(DIR, n));
+  if (doomed.length > 0) log.info('pruned old .env.local captures', { deleted: doomed.length, keeping: ENV_KEEP });
 }
 
 async function main(): Promise<void> {
@@ -170,6 +249,18 @@ async function main(): Promise<void> {
   const doomed = selectForDeletion(await readdir(DIR), KEEP);
   for (const name of doomed) await rm(join(DIR, name));
   if (doomed.length > 0) log.info('pruned old backups', { deleted: doomed.length, keeping: KEEP });
+
+  // ── The credentials, last and non-fatally ───────────────────────────────────────────────────
+  //
+  // Caught rather than thrown, for the same reason `daily.sh` joins its steps with `;` and not
+  // `&&`: the dump is the artifact that matters, it is already written and verified by this point,
+  // and a missing `age` binary or a renamed env file must not turn a good backup into a failed run.
+  // It is loud in the log and invisible to the exit code.
+  await captureEnv().catch((err) => {
+    log.error('capturing .env.local failed; the dump above is unaffected', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 }
 
 main().then(

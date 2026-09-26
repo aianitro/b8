@@ -22,6 +22,10 @@
 # below is the thing standing between those two facts. It is an allowlist on the extension, never a
 # denylist, so a name nobody anticipated is excluded rather than included.
 #
+# `*.env.age` rides along on the same allowlist. There is deliberately NO plaintext form of that name
+# -- `backup.ts` skips the capture rather than writing credentials in the clear -- so a bare `.env`
+# in this directory is somebody else's file and is not ours to ship anywhere.
+#
 # Written with `--filter` and NOT with `--include` plus `--exclude`. rclone logs that pairing at
 # ERROR level -- "the order they are parsed in is indeterminate" -- which is exactly the property
 # being relied on here. A pair of rules whose precedence the tool declines to promise is not an
@@ -67,7 +71,7 @@ fi
 # ordinary case of "nothing new to upload" would have been logged as a failed upload every hour.
 out=$(mktemp -t b8offsite)
 rclone copy "$LOCAL_DIR" "$REMOTE:$REMOTE_PATH" \
-  --filter '+ *.dump.age' --filter '- *' \
+  --filter '+ *.dump.age' --filter '+ *.env.age' --filter '- *' \
   --no-traverse --transfers 2 --retries 3 --low-level-retries 5 \
   --stats 0 -v >"$out" 2>&1
 rc=$?

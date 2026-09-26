@@ -354,9 +354,41 @@ age -d -i <key> -o restore.dump <newest>.dump.age
 pg_restore -d b8_restore_check --no-owner restore.dump
 ```
 
-**`.env.local` is not backed up** — not by this, not by anything. It holds the Plaid secret, the SMTP
-credentials and the VAPID private key, so a restore onto a new machine gets the data back and none of
-the connections. That gap is still open.
+### The credentials, too — `b8_env_*.env.age`
+
+**Done 2026-09-25.** Every dump restores the *data* and none of the *connections*: `.env.local` holds
+the Plaid secret, the SMTP credentials and the VAPID private key, and no copy of those existed
+anywhere but the disk most likely to die. `backup.ts` now captures it alongside the dump, and it rides
+the same three copies.
+
+- **Encrypted or not at all.** The dump is written plain when `BACKUP_AGE_RECIPIENT` is unset,
+  deliberately — that data is already on the disk in Postgres, so refusing would cost more than it
+  saves. This inverts both halves: the file is nothing but credentials, and this directory replicates
+  to the laptop and to Drive, neither of which `.env.local` reaches. A plaintext capture would
+  *manufacture* exposure in two places off the machine. So a missing recipient skips the capture and
+  says so; **there is no plain form of this filename**, and the offsite allowlist therefore cannot
+  ship one.
+- **Written only when it changes**, and the digest of the plaintext is carried in the name
+  (`b8_env_<stamp>_<12 hex>.env.age`). The server cannot decrypt its own captures — the key is
+  deliberately elsewhere — so the hash in the name is how it answers "has this changed" without one.
+  Ten captures are ten *configurations*, which may be years, not ten copies of last week.
+- **Never logged.** Not the contents, not a parsed key, not a diff of what changed. The log is the
+  artifact here that gets pasted into issues; it gets a filename and a byte count.
+- **`age` reads `.env.local` directly**, so no plaintext copy is produced even transiently, and the
+  capture is `chmod 600`.
+- **Its failure never fails the dump.** Caught and logged, for the same reason `daily.sh` joins its
+  steps with `;` and not `&&`.
+- The hourly pull **decrypt-checks the newest capture**, because it is otherwise the one artifact in
+  the system nothing ever reads back — and it is the file wanted on the worst day.
+
+Restoring it, on a machine with the key from the password manager:
+
+```bash
+age -d -i <key> -o .env.local <newest>.env.age
+```
+
+Retention: `BACKUP_ENV_KEEP` (10 on the server, unbounded on the laptop — a few hundred bytes per
+configuration change is smaller than one dump, so depth is free).
 
 ---
 

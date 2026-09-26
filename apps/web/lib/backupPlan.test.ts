@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { backupFilename, compareCounts, selectForDeletion, stampOf } from './backupPlan';
+import {
+  backupFilename, compareCounts, envBackupFilename, newestEnvHash,
+  selectEnvForDeletion, selectForDeletion, stampOf,
+} from './backupPlan';
 
 /** The two files that were already in the backup directory when this routine was written. */
 const HAND_MADE = ['b8_finance_pre-P0-09a_20260831T174605Z.dump', 'budget_categories_backup_20260910.sql'];
@@ -135,5 +138,67 @@ describe('selectForDeletion with encrypted dumps', () => {
   it('still ignores anything it did not write', () => {
     const files = [sealed('20260901T060000Z'), 'b8_finance_pre-P0-09a_20260831T174605Z.dump', 'notes.age'];
     expect(selectForDeletion(files, 1)).toEqual([]);
+  });
+});
+
+describe('capturing .env.local', () => {
+  const H = 'a1b2c3d4e5f6';
+  const env = (stamp: string, hash = H) => `b8_env_${stamp}_${hash}.env.age`;
+
+  it('names a capture from the clock and the digest', () => {
+    expect(envBackupFilename(new Date('2026-09-26T13:00:00Z'), 'a1b2c3d4e5f6789'))
+      .toBe('b8_env_20260926T130000Z_a1b2c3d4e5f6.env.age');
+  });
+
+  it('refuses anything that is not a hex digest, rather than naming a file after it', () => {
+    // A thrown error loses one capture. A mis-shaped name is invisible to every pattern here, so it
+    // would be retained forever AND never recognised as a capture — a leak that looks like nothing.
+    expect(() => envBackupFilename(new Date(), 'not-a-hash')).toThrow(RangeError);
+    expect(() => envBackupFilename(new Date(), 'ABCDEF123456')).toThrow(RangeError);
+    expect(() => envBackupFilename(new Date(), 'a1b2')).toThrow(RangeError);
+  });
+
+  it('reads the digest off the newest capture, not the first or the longest', () => {
+    const names = [env('20260901T130000Z', 'aaaaaaaaaaaa'), env('20260926T130000Z', 'bbbbbbbbbbbb'), env('20260910T130000Z', 'cccccccccccc')];
+    expect(newestEnvHash(names)).toBe('bbbbbbbbbbbb');
+  });
+
+  it('reports no digest when nothing has been captured yet', () => {
+    expect(newestEnvHash([])).toBeNull();
+    expect(newestEnvHash(['b8_finance_20260926T130000Z.dump.age', ...HAND_MADE])).toBeNull();
+  });
+
+  it('never considers a dump, a hand-made file, or a plaintext env for deletion', () => {
+    // There is no plaintext form of this name BY DESIGN — the capture is skipped rather than written
+    // in the clear — so a `.env` without `.age` is somebody else's file and must stay untouched.
+    const others = [
+      'b8_finance_20260926T130000Z.dump.age',
+      'b8_env_20260926T130000Z_a1b2c3d4e5f6.env',
+      '.env.local',
+      ...HAND_MADE,
+    ];
+    expect(selectEnvForDeletion(others, 1)).toEqual([]);
+  });
+
+  it('deletes the oldest captures past the count, by the stamp in the name', () => {
+    const names = [env('20260926T130000Z'), env('20260901T130000Z'), env('20260910T130000Z')];
+    expect(selectEnvForDeletion(names, 2)).toEqual([env('20260901T130000Z')]);
+    expect(selectEnvForDeletion(names, 3)).toEqual([]);
+    expect(selectEnvForDeletion(names, 1)).toEqual([env('20260901T130000Z'), env('20260910T130000Z')]);
+  });
+
+  it('refuses to keep zero, which would delete every copy of the credentials', () => {
+    expect(() => selectEnvForDeletion([env('20260926T130000Z')], 0)).toThrow(RangeError);
+  });
+
+  it('keeps dumps and env captures on independent retentions', () => {
+    // The whole reason these are two functions. Ten env captures may span years; thirty dumps are a
+    // month. Neither count may reach into the other's files.
+    const all = [
+      ...['20260901T130000Z', '20260902T130000Z', '20260903T130000Z'].map((t) => `b8_finance_${t}.dump.age`),
+      env('20260901T130000Z', 'aaaaaaaaaaaa'), env('20260902T130000Z', 'bbbbbbbbbbbb'),
+    ];
+    expect(selectForDeletion(all, 1)).toEqual(['b8_finance_20260901T130000Z.dump.age', 'b8_finance_20260902T130000Z.dump.age']);
+    expect(selectEnvForDeletion(all, 1)).toEqual([env('20260901T130000Z', 'aaaaaaaaaaaa')]);
   });
 });
