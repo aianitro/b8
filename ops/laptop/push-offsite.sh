@@ -4,7 +4,12 @@
 #
 # One-time authorisation, done by the owner in a browser, not by any script here:
 #
-#   rclone config     # n) new remote -> name it b8-offsite -> "drive" -> defaults -> y) auto config
+#   rclone config     # n) new remote -> name it b8remote -> "drive" -> scope 3 (drive.file) -> y) auto config
+#
+# SCOPE `drive.file`, not full access: it confines this token to files rclone itself created, so the
+# credential sitting in ~/.config/rclone/rclone.conf cannot read the owner's personal Drive at all.
+# Everything here only ever writes its own backups and reads those same files back, so the narrower
+# scope costs nothing. Same reasoning as the server not holding the key to its own backups.
 #
 # ─── WHY AN UNTRUSTED PROVIDER IS FINE ────────────────────────────────────────────────────────
 #
@@ -45,7 +50,7 @@ PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export PATH
 
 LOCAL_DIR="${B8_LOCAL_BACKUPS:-$HOME/b8-backups}"
-REMOTE="${B8_OFFSITE_REMOTE:-b8-offsite}"
+REMOTE="${B8_OFFSITE_REMOTE:-b8remote}"
 REMOTE_PATH="${B8_OFFSITE_PATH:-b8-backups}"
 AGE_KEY="$HOME/.config/b8/backup-key.txt"
 MARKER="$LOCAL_DIR/.offsite-verified"

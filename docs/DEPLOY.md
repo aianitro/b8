@@ -339,6 +339,30 @@ rclone lsl b8-offsite:b8-backups        # what is offsite
 tail ~/b8-backups/pull.log              # what the last runs did
 ```
 
+#### Known expiry: rclone's shared Google client_id — act during 2026
+
+The remote was created against **rclone's shared client_id, which Google is retiring during 2026**.
+When it stops working, uploads fail — *loudly*: `rclone` exits non-zero, `push-offsite.sh` logs
+`ALARM: upload failed` and raises a macOS notification. So this surfaces as an alert rather than as an
+empty folder discovered a year later, which is why shipping the third copy first was the right order.
+
+Replacing it needs no script change and does not touch the uploaded files:
+
+```bash
+# 1. create your own OAuth client: https://rclone.org/drive/#making-your-own-client-id
+rclone config update b8remote client_id <id> client_secret <secret>
+rclone config reconnect b8remote:      # re-authorise in the browser
+```
+
+**Scope is `drive.file`, deliberately** — not full access. The token is confined to files rclone
+itself created, so the credential in `~/.config/rclone/rclone.conf` cannot read the owner's personal
+Drive. Everything here writes only its own backups and reads those same files back, so the narrow
+scope costs nothing. Widening later is easy; narrowing after the fact is the harder direction.
+
+**Quota is shared with Gmail and Photos.** At setup the account had 1.6 GiB free of 15 GiB, against a
+backup appetite of about 62 MB a year. Decades of headroom in principle, but a full Drive fails the
+upload — the alarm covers it.
+
 Now three copies, two machines, one of them off the premises.
 
 ### Restoring from an encrypted backup

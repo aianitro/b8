@@ -68,7 +68,7 @@ esac
 # Offsite is reported, never fatal. Two working copies today are worth more than three copies that
 # wait on a browser sign-in nobody has got round to; the pull is useful on its own and the offsite
 # step starts contributing the hour after it is authorised, with no reinstall.
-OFFSITE_REMOTE="${B8_OFFSITE_REMOTE:-b8-offsite}"
+OFFSITE_REMOTE="${B8_OFFSITE_REMOTE:-b8remote}"
 if ! command -v rclone >/dev/null; then
   say WARN "rclone not installed — no offsite copy (brew install rclone)"
 elif rclone listremotes 2>/dev/null | grep -q "^${OFFSITE_REMOTE}:$"; then
