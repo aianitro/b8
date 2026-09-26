@@ -66,10 +66,16 @@ export function decideClaim(handoff: StoredHandoff | null, now: Date): ClaimVerd
  * The only redirect targets the sign-in page may send a code to.
  *
  * AN OPEN REDIRECT CARRYING A SECRET IS THE OAUTH VULNERABILITY, so this is an allowlist of SCHEMES
- * rather than a check that the value looks like a URL. `b8://` is the app's own scheme, declared in
- * `apps/mobile/app.json`; `exp://` is how Expo Go addresses a development client and is what
- * `Linking.createURL` returns there. Anything else — `https://`, `javascript:`, a bare path — is
- * refused, so a crafted link cannot make an authenticated browser post a code somewhere else.
+ * rather than a check that the value looks like a URL. `b8://` was the Expo client's own scheme,
+ * declared in its `app.json`; `exp://` is how Expo Go addresses a development client. That client
+ * — `apps/mobile` — is retired, so BOTH ENTRIES NOW HAVE NO CALLER IN THIS REPO. They are left in
+ * place because narrowing an allowlist is a security-surface change on the sign-in path, which
+ * belongs in a change that can test it: a handoff link already in flight, or a device still
+ * holding one, would start failing closed. Whoever removes them should confirm no `b8://` or
+ * `exp://` handoff has been claimed since the retirement first.
+ *
+ * Anything else — `https://`, `javascript:`, a bare path — is refused, so a crafted link cannot
+ * make an authenticated browser post a code somewhere else.
  */
 const ALLOWED_SCHEMES = ['b8://', 'exp://'] as const;
 

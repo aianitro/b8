@@ -96,13 +96,17 @@ export async function runDailyJob() {
   // `plan/tasks/P3-25-push-ping/DECISION.md`, the §5.1 escalation for this destination — and it
   // resolves rather than rejects, like the mail above it: a push outage must never cost the sync, the
   // snapshot, or a digest that already went out.
-  // BOTH TRANSPORTS, FROM ONE DECISION. The Expo path addresses `apps/mobile`; the Web Push path
-  // addresses the installed PWA. They share `shouldPing` and the same `delivered` array, so there is
-  // one notion of newsworthiness and two ways of carrying it — not two notions.
+  // BOTH TRANSPORTS, FROM ONE DECISION. The Expo path addresses the retired Expo client; the Web
+  // Push path addresses the installed PWA. They share `shouldPing` and the same `delivered` array,
+  // so there is one notion of newsworthiness and two ways of carrying it — not two notions.
   //
-  // Both during the changeover, deliberately. `apps/mobile` is retired when §5 step 26b ships, and
-  // deleting the only working notification path in the same change that introduces an untested one
-  // is how an owner ends up with neither. When the Expo app goes, this line loses its first half.
+  // THE EXPO HALF OUTLIVED ITS CLIENT, DELIBERATELY. `apps/mobile` was deleted when the workspace
+  // was retired, but this transport still sends to whatever Expo push tokens are registered, and
+  // the reason it was kept then is the reason it is kept now: deleting the only notification path
+  // with a delivery record, in the same breath as the untested one that replaces it, is how an
+  // owner ends up with neither. Removing it is its own change — it needs the Web Push path proven
+  // against a real installed PWA first, and it should drop the registration route and the stored
+  // tokens with it rather than leaving a writer with no reader.
   //
   // Sequential rather than `Promise.all`: each resolves rather than rejects, so there is nothing to
   // race and nothing to lose if one is slow.

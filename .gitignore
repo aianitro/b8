@@ -59,9 +59,9 @@ ops/daily-job.log
 *[0-9].ts
 *[0-9].tsx
 
-# Expo (apps/mobile)
-.expo/
-apps/*/.expo/
+# Signing and key material. These outlived `apps/mobile`, which is why they are still here after
+# it was retired: they guard against committing a private key from ANY source, not just an Expo
+# build, and `gitleaks` in CI is a second net rather than a replacement for them.
 *.jks
 *.p8
 *.p12
