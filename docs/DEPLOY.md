@@ -556,12 +556,31 @@ which commit was bad.
 Build before migrate, so a commit that does not compile never reaches the database. Migrate before
 restart, so the new code never starts against the old schema.
 
-**The app returns 500 for the duration of the build**, roughly twenty seconds, not just across the
-restart: `npm run build` writes into `.next` while the standalone server is serving out of it.
-Building to a side directory and renaming it in does not fix this — Next bakes the directory's name
-into the standalone output, so the server would then look for its static assets under the old name
-and every chunk would 404. The real fix is to run the app from a copy of the standalone tree, which
-is a change to `start-web.sh` too. Until then: push when you are not reading the app.
+**The build no longer touches what is being served, so the outage is the restart.** `npm run build`
+writes into `apps/web/.next`, which nothing serves from: `ops/server/publish.sh` assembles a
+complete standalone tree beside the running one and swaps it in by rename, and the app runs from
+that copy at `~/b8-run`. A rename is atomic and a running process keeps serving from the directory
+it already has open, so publishing disturbs nothing — only the `pkill` that follows does. Building
+into a side directory via `distDir` is the fix that does NOT work, and `publish.sh` records why:
+Next writes the directory's name into the standalone output, so after a rename the server hunts for
+its static assets under a name that no longer exists and every chunk 404s.
+
+> **CORRECTION to commit 97663a9 (2026-09-25).** Its title — "Name the twenty seconds of 500s a
+> deploy causes" — and the paragraph that stood here both overstate the outage. This repo is
+> public, so a reader takes that sentence on trust and has no way to measure it.
+>
+> What the commit got right is the **cause**: the app was served out of
+> `apps/web/.next/standalone`, the directory `npm run build` rewrites, so a deploy served a
+> half-replaced tree for the whole build. What it got wrong is the **scale**. Those 500s were
+> intermittent, depending on whether a request happened to ask for a file mid-replacement — not
+> twenty unbroken seconds of them. And since `publish.sh` moved the served tree out of the build's
+> way there are none at all in that window: a health probe sampling `/login` about 150 times across
+> a deploy recorded **zero** non-200 responses during the ~21 second build, and **4** during the
+> process restart. **The outage a deploy costs is the restart, a few seconds, and it never was the
+> whole build's worth of 500s.**
+>
+> The commit is pushed, and its objects stay reachable by SHA whatever history does, so the remedy
+> is this note forward of it rather than a rewrite that would only look like one.
 
 ### Why it pulls rather than being pushed to
 
