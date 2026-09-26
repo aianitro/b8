@@ -4,6 +4,7 @@
 // script-readable cookie both produce a working login, and the difference only shows up when
 // somebody is attacking it.
 
+import { NextResponse } from 'next/server';
 import { describe, expect, it } from 'vitest';
 import {
   SESSION_COOKIE_NAME,
@@ -39,7 +40,7 @@ describe('the session identifier', () => {
     expect(tokens.map(hashSessionToken)).not.toContain(tokens[0]);
   });
 
-  it('the session cookie is HttpOnly, carries an explicit SameSite, and its Max-Age never exceeds the configured session TTL', () => {
+  it('the session cookie is HttpOnly and Secure, carries an explicit SameSite, and its Max-Age never exceeds the configured session TTL', () => {
     const cookie = sessionCookie(generateSessionToken());
 
     expect(cookie.name).toBe(SESSION_COOKIE_NAME);
@@ -47,6 +48,11 @@ describe('the session identifier', () => {
     // the attribute as present only for a boolean, and a string `'true'` is a bug this repo has
     // shipped once already on `ALERTS_ENABLED`.
     expect(cookie.httpOnly).toBe(true);
+    // SECURE, ALWAYS, and exactly `true` for the same reason `httpOnly` is. The app answers on
+    // https through `tailscale serve`; without this the browser would return the credential over
+    // plain http as well. Local dev is `http://localhost`, which browsers exempt — and it is the
+    // same exemption the passkey ceremony that issues this cookie already depends on.
+    expect(cookie.secure).toBe(true);
     // AN EXPLICIT SameSite: present, and one of the two values that constrain anything. Absent
     // leaves the choice to the browser and `'none'` attaches the session to cross-site requests.
     expect(cookie.sameSite).toBeDefined();
@@ -64,8 +70,32 @@ describe('the session identifier', () => {
     expect(cleared.name).toBe(SESSION_COOKIE_NAME);
     expect(cleared.path).toBe(cookie.path);
     expect(cleared.httpOnly).toBe(true);
+    expect(cleared.secure).toBe(true);
     expect(cleared.maxAge).toBe(0);
     expect(cleared.value).toBe('');
+  });
+
+  it('both cookies reach the wire with Secure on them, not just the spec object', () => {
+    // THE ASSERTION THAT MAKES THE ONE ABOVE MEAN SOMETHING. A field added to `SessionCookieSpec`
+    // and set in both builders is still a no-op if whatever turns the spec into a `Set-Cookie`
+    // header drops it — and that step is not this module's code, it is `NextResponse.cookies.set`.
+    // So the property is checked where it is actually observable: on the serialized header.
+    for (const spec of [sessionCookie(generateSessionToken()), clearedSessionCookie()]) {
+      const response = NextResponse.json({ success: true, data: null });
+      response.cookies.set(spec);
+
+      const header = response.headers
+        .getSetCookie()
+        .find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
+
+      expect(header).toBeDefined();
+      // Case as the attribute is spelled on the wire, and as a whole token — a substring match on
+      // `secure` would also pass on a cookie value that happened to contain the word.
+      expect(header?.split(/;\s*/)).toContain('Secure');
+      // The neighbours that were already required, so this fixture fails if the serializer starts
+      // dropping attributes generally rather than only the new one.
+      expect(header?.split(/;\s*/)).toContain('HttpOnly');
+    }
   });
 
   it('the stored form of a token is a lowercase 64-character hex digest, which is the only form the column accepts', () => {

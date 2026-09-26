@@ -86,15 +86,33 @@ export function hashSessionToken(token: string): string {
  * `maxAge` — the server-side TTL exactly, never longer. A cookie that outlives its row is a cookie
  * the browser keeps presenting to a boundary that will refuse it.
  *
- * NO `Secure` ATTRIBUTE, and it is an explicit non-goal rather than an oversight (SPEC.md, "No
- * `Secure` cookie attribute mandate"): the app is served over plain HTTP until Phase 2 supplies
- * TLS, and a `Secure` cookie set today would simply never be sent back. The Phase 2 task that adds
- * TLS adds it here, in one line, at the one place cookie policy is expressed.
+ * `secure` — always. This used to be documented here as a deliberate non-goal (P1-12's SPEC.md, "No
+ * `Secure` cookie attribute mandate") on the premise that the app is served over plain HTTP until
+ * Phase 2 supplies TLS. That premise has expired: `docs/DEPLOY.md` step 6 publishes the app through
+ * `tailscale serve`, which terminates TLS and answers as `https://<tailnet-name>/`, so every reader
+ * that is not on the server's own loopback is already on https. Without the attribute the browser
+ * would still hand this bearer credential back over plain http to anything that got it to try.
+ *
+ * WHY LOCAL SIGN-IN STILL WORKS, which is the question this attribute usually breaks. `npm run dev`
+ * binds `127.0.0.1` and the owner reaches it at `http://localhost:3000`; `localhost` is the one
+ * origin browsers treat as trustworthy without TLS, so a `Secure` cookie is both stored and
+ * returned there. It is the SAME exemption the sign-in already rests on — WebAuthn runs only in a
+ * secure context, and `lib/webauthnOrigins.ts` derives an `http://` expected origin for `localhost`
+ * and for no other host. A browser that refused this cookie on `http://localhost` would therefore
+ * already be refusing the passkey ceremony that issues it, so this adds no failure mode reachable
+ * from a local sign-in that works at all. The two rules are keyed on the same notion of a
+ * trustworthy origin; if some engine ever implements one and not the other, the symptom is a
+ * completed ceremony that lands back on `/login`, and the fix is to reach the app over the tailnet.
+ *
+ * The other plain-http route — the server by tailnet IP and port rather than through Serve — was
+ * never a way in: `ops/server/start-web.sh` binds loopback only, and DEPLOY.md's "do not skip the
+ * TLS part" records what happens to anyone who tries.
  */
 export interface SessionCookieSpec {
   name: string;
   value: string;
   httpOnly: boolean;
+  secure: boolean;
   sameSite: 'lax' | 'strict';
   path: string;
   maxAge: number;
@@ -105,6 +123,7 @@ export function sessionCookie(token: string): SessionCookieSpec {
     name: SESSION_COOKIE_NAME,
     value: token,
     httpOnly: true,
+    secure: true,
     sameSite: 'lax',
     path: '/',
     maxAge: SESSION_TTL_SECONDS,
@@ -118,6 +137,11 @@ export function sessionCookie(token: string): SessionCookieSpec {
  * one matching on name, path and domain, so an expiry written with a different `path` leaves the
  * original in place.
  *
+ * `secure` travels with the rest of them. It is not part of that match key, so it is not what
+ * decides whether the replacement lands; it is here because the two builders drifting apart is the
+ * defect, and because the one Set-Cookie this app can emit that is not marked `Secure` should not
+ * be the one it emits on the way out.
+ *
  * CLEARING THIS IS NOT LOGGING OUT. `POST /api/v1/auth/logout` revokes the row first; this is the
  * client-side half, and on its own it would pass "logout returns 200" while the lifted cookie kept
  * working — SPEC.md's I9 replays exactly that cookie.
@@ -127,6 +151,7 @@ export function clearedSessionCookie(): SessionCookieSpec {
     name: SESSION_COOKIE_NAME,
     value: '',
     httpOnly: true,
+    secure: true,
     sameSite: 'lax',
     path: '/',
     maxAge: 0,
