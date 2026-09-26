@@ -11,8 +11,23 @@ async function getData() {
   const [rows, merchants, cats, pending] = await Promise.all([
     db.query<RuleRow>(`
       SELECT t.plaid_category,
-             COUNT(t.id)::int                                           AS count,
-             COUNT(t.id) FILTER (WHERE t.mapped_category IS NULL)::int AS uncategorized,
+             -- TOTAL COUNTS HIDDEN ROWS, UNCATEGORIZED DOES NOT, and the asymmetry is the point.
+             -- db/schema.sql says both things on the column itself: a hidden row is excluded from
+             -- budget and dashboard calcs, and still visible (grayed out) on /transactions. So the
+             -- total, which describes the list a reader can open, admits it; the amber badge, which
+             -- says this still needs filing, must not -- filing a hidden row moves no figure in the
+             -- app, so counting it as work reports work that cannot be done.
+             --
+             -- Every other uncategorized figure here spells it mapped_category IS NULL AND
+             -- hidden = FALSE: the dashboard card and its list, the ledger's uncategorized filter
+             -- and chip, and the digest. This one omitted the second half, so it read higher than
+             -- the card and higher than the list that filter opens -- the same class of mismatch as
+             -- the payee count that read one number and opened a page showing another, one column
+             -- over from where that was fixed.
+             COUNT(t.id)::int AS count,
+             COUNT(t.id) FILTER (
+               WHERE t.mapped_category IS NULL AND t.hidden = FALSE
+             )::int AS uncategorized,
              cr.mapped_category
       FROM transactions t
       -- Same scoping as the payee counts above, for the same reason: these describe the ledger,
