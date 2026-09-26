@@ -243,9 +243,32 @@ at `~/.config/b8/backup-key.txt` and in the password manager, and deliberately n
 
 Consequences worth knowing before you need them:
 
-- **Lose the private key and every backup is lost with it.** That is the trade, stated plainly. It
-  is why the key is in the password manager as well as on disk — one copy of it is a worse position
-  than no encryption at all.
+- **Lose the private key and every backup is lost with it.** That is the trade, stated plainly. One
+  copy of that key is a worse position than no encryption at all, so it lives in the password manager
+  as well as on disk.
+
+#### Recovery, rehearsed — 2026-09-25
+
+**Verified, not assumed.** The password-manager copy was retrieved, and *on its own* it decrypted the
+newest dump and the credentials capture to byte-identical plaintext and `pg_restore`d into a throwaway
+database whose row counts matched the live server exactly across all five tables checked.
+
+Worth knowing for next time: the password manager stored **only** the `AGE-SECRET-KEY-1…` line and
+dropped the two `#` comment lines, so the entry is 75 bytes rather than the file's 189. That is fine —
+`age` needs only that line, and the copy derives the correct public key — but it means the entry is not
+byte-identical to the file, and a comparison on that basis would wrongly look like a failure.
+
+A recovery needs four things, and all four must survive losing both machines:
+
+| Need | Where it lives |
+|---|---|
+| `age` binary | `brew install age` |
+| age private key | password manager ✅ rehearsed |
+| A backup file | B2 bucket `b8-backups` |
+| B2 access | **Backblaze account login — must be in the password manager**, because the application key exists only in `~/.config/rclone/rclone.conf` on the laptop |
+
+That last row is the remaining single point of failure: if both machines are gone, the only route to the
+bucket is signing in to Backblaze in a browser.
 - If `BACKUP_AGE_RECIPIENT` is unset the dump is still written, unencrypted, and the log says so at
   WARN. Silently skipping encryption and silently refusing to back up are both worse.
 
