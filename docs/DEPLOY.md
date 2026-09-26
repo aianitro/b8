@@ -292,104 +292,85 @@ tail ~/b8-backups/pull.log                            # a healthy run prints not
 launchctl bootout gui/$(id -u)/com.b8.backup-pull     # remove it
 ```
 
-### The third copy, offsite — Google Drive
+### The third copy, offsite — Backblaze B2
 
 **Done 2026-09-25.** `ops/laptop/push-offsite.sh`, called at the end of each hourly pull. It
-`rclone copy`s the encrypted dumps to Google Drive, completing 3-2-1: two machines in the flat, one
+`rclone copy`s the encrypted artifacts to a B2 bucket, completing 3-2-1: two machines in the flat, one
 copy out of it.
 
-One manual step, which is yours and cannot be scripted — the browser sign-in:
+Setup is one command, run with a key you create in the B2 console:
 
 ```bash
 brew install rclone
-rclone config      # n) new remote -> name it: b8-offsite -> storage: drive -> accept defaults -> y) auto config
+rclone config create b8b2 b2 account <keyID> key <applicationKey>
 ```
 
-Until that is done the step logs one line an hour and exits 0. An unfinished setup must not look like
-a failing backup, and the pull is useful on its own the whole time.
+The key is scoped to **one bucket**, not the account — if this laptop is compromised the credential
+reaches the backup bucket and nothing else. Until the remote exists the step logs one line an hour and
+exits 0: an unfinished setup must not look like a failing backup, and the pull is useful on its own
+the whole time.
 
-Why Drive is an acceptable place for this, when a database dump is the most sensitive file in the
-system:
+Why an untrusted provider is fine for the most sensitive file in the system:
 
-> **The provider is untrusted storage.** These files are age-encrypted to a key that exists only on
-> the laptop and in the password manager, so Google holds ciphertext it cannot open. That is the
-> return on having done encryption before distribution — it turns "where do I dare put this" into a
-> question about reliability and cost.
+> These files are age-encrypted to a key that exists only on the laptop and in the password manager,
+> so B2 holds ciphertext it cannot open. That is the return on having done encryption before
+> distribution — it turns "where do I dare put this" into a question about reliability and cost.
 
-Three properties worth keeping if this is ever rewritten:
+#### Google Drive was tried first, and why it was abandoned
+
+Recorded because it looks like the obvious choice and it cost an evening. **Drive is OAuth-gated, and
+OAuth suits a person at a browser rather than a machine that must run unattended for years.** Every
+route out is blocked:
+
+| Route | Blocker |
+|---|---|
+| rclone's shared client_id | Being retired during 2026; its rate limit is pooled across every rclone user, and we hit `RATE_LIMIT_EXCEEDED` in ordinary testing |
+| Own client_id, "Testing" status | Google issues refresh tokens that **expire every 7 days** — weekly manual re-auth, for a backup |
+| Own client_id, published | Requires a homepage URL, a privacy-policy URL, and a domain verified in Search Console |
+| Service account | Service accounts have no Drive storage quota, so they cannot write to a personal account at all |
+
+B2 is a static API key. Nothing expires, nothing needs a consent screen, nothing needs review.
+
+One trap worth knowing if anyone retries the Drive path: **changing `client_id` on an existing remote
+invalidates the stored token**, because a refresh token can only be refreshed by the client that
+issued it. The remote keeps working until the access token lapses, roughly an hour, and then fails
+with `unauthorized_client` — so it looks fine exactly long enough to be believed. Removing the
+`client_id` and `client_secret` lines restores the previous state without a browser.
+
+#### Four properties worth keeping if this is ever rewritten
 
 - **`copy`, never `sync`.** A mirror is not a backup: the laptop prunes at 90 days, and deleting the
-  offsite copy of everything older is the opposite of the point. Drive accumulates every backup ever
-  taken — about 62 MB a year, so unbounded is the right answer and depth is the benefit.
-- **It uploads only `*.dump.age`, and that is a safety property.** `backup.ts` still writes a
-  *plaintext* dump if `BACKUP_AGE_RECIPIENT` is unset, the pull would bring it here, and an
-  unfiltered upload would then hand every transaction to Google in the clear. The rules are written
-  as ordered `--filter` rules, **not** `--include` plus `--exclude`: rclone logs that pairing at
-  ERROR level because the parse order between them is indeterminate, and a precedence the tool
-  declines to promise is not an allowlist however it behaves on the day you test it.
+  offsite copy of everything older is the opposite of the point. The bucket accumulates every backup
+  ever taken — about 62 MB a year, well inside B2's 10 GB free tier, so unbounded is the right answer
+  and depth is the benefit.
+- **It uploads only `*.dump.age` and `*.env.age`, and that is a safety property.** `backup.ts` still
+  writes a *plaintext* dump if `BACKUP_AGE_RECIPIENT` is unset, the pull would bring it here, and an
+  unfiltered upload would hand every transaction to a third party in the clear. The rules are written
+  as ordered `--filter` rules, **not** `--include` plus `--exclude`: rclone logs that pairing at ERROR
+  level because the parse order between them is indeterminate, and a precedence the tool declines to
+  promise is not an allowlist however it behaves on the day you test it.
 - **It verifies by fetching back, not by listing.** A listing proves a filename exists. Once per new
-  object the newest file is downloaded from Drive and decrypted, and the first five bytes checked for
-  `PGDMP` — pg_dump's magic — so the test is "this came back as a Postgres dump", not "age exited 0".
-  Same reasoning as the server's restore rehearsal, and it costs one 171 KB round trip a day.
+  object the newest file is downloaded and decrypted, and the first five bytes checked for `PGDMP` —
+  pg_dump's magic — so the test is "this came back as a Postgres dump", not "age exited 0". The
+  verification marker records **the remote as well as the filename**: recording only the name meant
+  that migrating provider, when the newest object has the same name, silently accepted the new copy
+  without ever reading it back.
+- **A failed run is logged; only a fallen-behind copy interrupts anyone.** The first version notified
+  on any non-zero exit and immediately cried over a transient error on files already uploaded. Noise
+  is the expensive bug in an alerting path. The notification is now reserved for the newest local dump
+  still missing offsite after six hours — six hourly attempts — and full failure text is kept in
+  `.offsite-last-error`.
 
 Uploading happens **before** the local prune, so a file can never be deleted here on its way out.
 
 ```bash
-rclone lsl b8-offsite:b8-backups        # what is offsite
-tail ~/b8-backups/pull.log              # what the last runs did
+rclone lsl b8b2:b8-backups        # what is offsite
+tail ~/b8-backups/pull.log        # what the last runs did
 ```
 
-#### Known expiry: rclone's shared Google client_id — act during 2026
-
-The remote was created against **rclone's shared client_id, which Google is retiring during 2026**.
-When it stops working, uploads fail — *loudly*: `rclone` exits non-zero, `push-offsite.sh` logs
-`ALARM: upload failed` and raises a macOS notification. So this surfaces as an alert rather than as an
-empty folder discovered a year later, which is why shipping the third copy first was the right order.
-
-Replacing it needs no script change and does not touch the uploaded files:
-
-```bash
-# 1. create your own OAuth client: https://rclone.org/drive/#making-your-own-client-id
-rclone config update b8remote client_id <id> client_secret <secret>
-rclone config reconnect b8remote:      # re-authorise in the browser
-```
-
-**Scope is `drive.file`, deliberately** — not full access. The token is confined to files rclone
-itself created, so the credential in `~/.config/rclone/rclone.conf` cannot read the owner's personal
-Drive. Everything here writes only its own backups and reads those same files back, so the narrow
-scope costs nothing. Widening later is easy; narrowing after the fact is the harder direction.
-
-**Quota is shared with Gmail and Photos.** At setup the account had 1.6 GiB free of 15 GiB, against a
-backup appetite of about 62 MB a year. Decades of headroom in principle, but a full Drive fails the
-upload — the alarm covers it.
-
-Now three copies, two machines, one of them off the premises.
-
-### Restoring from an encrypted backup
-
-Decrypt first, then restore exactly as above. On the **laptop**, which is where the key is:
-
-```bash
-age -d -i ~/.config/b8/backup-key.txt -o /tmp/restore.dump ~/b8-backups/<newest>.dump.age
-createdb b8_restore_check
-pg_restore -d b8_restore_check --no-owner /tmp/restore.dump
-psql -d b8_restore_check -c 'SELECT count(*) FROM transactions;'
-rm /tmp/restore.dump
-```
-
-Verified end to end on 2026-09-25: a server-written backup decrypted on the laptop, restored, and
-every table's row count matched the live database. The three dumps predating encryption were
-encrypted in place and each ciphertext checked to reproduce the original bytes byte-for-byte before
-its plaintext was removed.
-
-If the flat is gone and the laptop with it, the same restore works from Drive on any machine that has
-the private key from the password manager:
-
-```bash
-rclone copy b8-offsite:b8-backups . --filter '+ *.dump.age' --filter '- *' --max-age 2d
-age -d -i <key> -o restore.dump <newest>.dump.age
-pg_restore -d b8_restore_check --no-owner restore.dump
-```
+**Not yet done: Object Lock.** B2 can make uploads immutable, which is the one protection neither the
+laptop nor any synced folder offers — it survives ransomware and an accidental `rm`. Left off
+deliberately so the copy could be got working first; hardening is its own step.
 
 ### The credentials, too — `b8_env_*.env.age`
 

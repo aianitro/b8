@@ -4,12 +4,21 @@
 #
 # One-time authorisation, done by the owner in a browser, not by any script here:
 #
-#   rclone config     # n) new remote -> name it b8remote -> "drive" -> scope 3 (drive.file) -> y) auto config
+#   rclone config create b8b2 b2 account <keyID> key <applicationKey>
 #
-# SCOPE `drive.file`, not full access: it confines this token to files rclone itself created, so the
-# credential sitting in ~/.config/rclone/rclone.conf cannot read the owner's personal Drive at all.
-# Everything here only ever writes its own backups and reads those same files back, so the narrower
-# scope costs nothing. Same reasoning as the server not holding the key to its own backups.
+# ─── B2 RATHER THAN GOOGLE DRIVE, AND WHY THE SWITCH ──────────────────────────────────────────
+#
+# Drive was tried first and is OAuth-gated, which suits a person at a browser and not a machine that
+# must work unattended for years. Every route out was blocked: rclone's shared client_id is being
+# retired during 2026 and pools its rate limit across every rclone user on earth; an own client_id in
+# "Testing" status is issued refresh tokens that EXPIRE EVERY SEVEN DAYS; publishing the app to
+# escape that demands a homepage URL, a privacy-policy URL and a domain verified in Search Console;
+# and a service account has no Drive storage quota of its own, so it cannot write to a personal
+# account at all. B2 is a static API key: nothing expires, nothing needs a consent screen.
+#
+# The key is scoped to ONE bucket, which is the same reasoning the Drive attempt used `drive.file`
+# for: if this laptop is compromised the credential reaches the backup bucket and nothing else in the
+# account.
 #
 # ─── WHY AN UNTRUSTED PROVIDER IS FINE ────────────────────────────────────────────────────────
 #
@@ -50,7 +59,7 @@ PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export PATH
 
 LOCAL_DIR="${B8_LOCAL_BACKUPS:-$HOME/b8-backups}"
-REMOTE="${B8_OFFSITE_REMOTE:-b8remote}"
+REMOTE="${B8_OFFSITE_REMOTE:-b8b2}"
 REMOTE_PATH="${B8_OFFSITE_PATH:-b8-backups}"
 AGE_KEY="$HOME/.config/b8/backup-key.txt"
 MARKER="$LOCAL_DIR/.offsite-verified"
@@ -127,8 +136,8 @@ if [ -n "$newest_local" ]; then
   base=$(basename "$newest_local")
   if ! echo "$remote_list" | grep -qxF "$base"; then
     if [ -z "$(find "$newest_local" -mmin -360 2>/dev/null)" ]; then
-      log "ALARM: $base is over six hours old and still not in Drive"
-      notify "Backups are not reaching Drive"
+      log "ALARM: $base is over six hours old and still not offsite"
+      notify "Backups are not reaching the offsite copy"
     else
       log "$base not offsite yet; the next run will retry"
     fi
@@ -137,8 +146,14 @@ fi
 
 [ -n "$newest" ] || { log "nothing offsite yet"; exit 0; }
 
+# ─── THE MARKER NAMES THE REMOTE, NOT JUST THE FILE ───────────────────────────────────────────
+#
+# It recorded only a filename at first, which is wrong the one time it matters most: on migrating to
+# a different provider the newest object has the SAME name, so the marker matched and the brand-new
+# offsite copy would have been accepted without ever being read back. A verification record has to
+# say what it verified AND where, or it silently vouches for somewhere else.
 last=$(cat "$MARKER" 2>/dev/null || echo '')
-if [ "$newest" = "$last" ]; then exit 0; fi
+if [ "$last" = "$REMOTE:$REMOTE_PATH $newest" ]; then exit 0; fi
 
 if [ ! -f "$AGE_KEY" ]; then
   log "cannot verify $newest — no private key on this machine"
@@ -150,8 +165,8 @@ if rclone copyto "$REMOTE:$REMOTE_PATH/$newest" "$tmp/$newest" --retries 3 2>/de
    && age -d -i "$AGE_KEY" "$tmp/$newest" 2>/dev/null | head -c 5 | grep -q 'PGDMP'; then
   # `PGDMP` is pg_dump's custom-format magic. Checking it rather than just "age exited 0" is what
   # makes this a restore test instead of a decryption test: a file could decrypt to anything.
-  log "verified $newest — fetched back from Drive and decrypts to a Postgres dump"
-  echo "$newest" > "$MARKER"
+  log "verified $newest — fetched back from '$REMOTE' and decrypts to a Postgres dump"
+  echo "$REMOTE:$REMOTE_PATH $newest" > "$MARKER"
 else
   log "ALARM: $newest is in Drive but did not come back as a readable dump"
   notify "Offsite backup failed verification"
