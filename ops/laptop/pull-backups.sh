@@ -104,6 +104,14 @@ elif [ "$after" -gt 0 ]; then
   log "note: backups are present but none are encrypted yet"
 fi
 
+# ─── THE THIRD COPY, BEFORE ANYTHING IS DELETED ───────────────────────────────────────────────
+#
+# Offsite runs BEFORE the prune below, and the order is the point: pruning first could delete a file
+# on its way out, the one run where the two happen to coincide. Upload, then delete. It is a separate
+# script so that a Drive outage, or a sign-in nobody has done yet, cannot cost the local copy — this
+# one has already done its job by the time that one is called.
+[ -x "$(dirname "$0")/push-offsite.sh" ] && "$(dirname "$0")/push-offsite.sh"
+
 # ─── PRUNE, LAST AND BY NAME ──────────────────────────────────────────────────────────────────
 #
 # Same rule the server uses: only files this system's own naming pattern matches, sorted by the

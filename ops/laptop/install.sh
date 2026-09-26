@@ -43,6 +43,18 @@ case "$LOCAL_DIR" in
   *) say ok "$LOCAL_DIR is outside the iCloud-synced folders" ;;
 esac
 
+# Offsite is reported, never fatal. Two working copies today are worth more than three copies that
+# wait on a browser sign-in nobody has got round to; the pull is useful on its own and the offsite
+# step starts contributing the hour after it is authorised, with no reinstall.
+OFFSITE_REMOTE="${B8_OFFSITE_REMOTE:-b8-offsite}"
+if ! command -v rclone >/dev/null; then
+  say WARN "rclone not installed — no offsite copy (brew install rclone)"
+elif rclone listremotes 2>/dev/null | grep -q "^${OFFSITE_REMOTE}:$"; then
+  say ok "offsite remote '$OFFSITE_REMOTE' is configured"
+else
+  say WARN "offsite remote '$OFFSITE_REMOTE' not configured — run 'rclone config' to add the third copy"
+fi
+
 if ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=20 "$SERVER" 'ls ~/b8/apps/backups >/dev/null' 2>/dev/null; then
   say ok "server reachable and the backup directory is readable"
 else
@@ -75,6 +87,8 @@ if launchctl bootstrap "gui/$(id -u)" "$PLIST"; then
   echo "log:     $LOG"
   echo "run now: launchctl kickstart gui/$(id -u)/com.b8.backup-pull"
   echo "remove:  launchctl bootout gui/$(id -u)/com.b8.backup-pull && rm $PLIST"
+  rclone listremotes 2>/dev/null | grep -q "^${OFFSITE_REMOTE}:$" \
+    || echo "next:    rclone config   # add remote '$OFFSITE_REMOTE' (drive) for the offsite copy"
 else
   echo "FAILED to load the agent" >&2
   exit 1

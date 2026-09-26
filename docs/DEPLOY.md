@@ -279,8 +279,54 @@ tail ~/b8-backups/pull.log                            # a healthy run prints not
 launchctl bootout gui/$(id -u)/com.b8.backup-pull     # remove it
 ```
 
-This is two copies on two machines. It is **not** offsite — one flat, one fire — and the third copy
-is still open.
+### The third copy, offsite — Google Drive
+
+**Done 2026-09-25.** `ops/laptop/push-offsite.sh`, called at the end of each hourly pull. It
+`rclone copy`s the encrypted dumps to Google Drive, completing 3-2-1: two machines in the flat, one
+copy out of it.
+
+One manual step, which is yours and cannot be scripted — the browser sign-in:
+
+```bash
+brew install rclone
+rclone config      # n) new remote -> name it: b8-offsite -> storage: drive -> accept defaults -> y) auto config
+```
+
+Until that is done the step logs one line an hour and exits 0. An unfinished setup must not look like
+a failing backup, and the pull is useful on its own the whole time.
+
+Why Drive is an acceptable place for this, when a database dump is the most sensitive file in the
+system:
+
+> **The provider is untrusted storage.** These files are age-encrypted to a key that exists only on
+> the laptop and in the password manager, so Google holds ciphertext it cannot open. That is the
+> return on having done encryption before distribution — it turns "where do I dare put this" into a
+> question about reliability and cost.
+
+Three properties worth keeping if this is ever rewritten:
+
+- **`copy`, never `sync`.** A mirror is not a backup: the laptop prunes at 90 days, and deleting the
+  offsite copy of everything older is the opposite of the point. Drive accumulates every backup ever
+  taken — about 62 MB a year, so unbounded is the right answer and depth is the benefit.
+- **It uploads only `*.dump.age`, and that is a safety property.** `backup.ts` still writes a
+  *plaintext* dump if `BACKUP_AGE_RECIPIENT` is unset, the pull would bring it here, and an
+  unfiltered upload would then hand every transaction to Google in the clear. The rules are written
+  as ordered `--filter` rules, **not** `--include` plus `--exclude`: rclone logs that pairing at
+  ERROR level because the parse order between them is indeterminate, and a precedence the tool
+  declines to promise is not an allowlist however it behaves on the day you test it.
+- **It verifies by fetching back, not by listing.** A listing proves a filename exists. Once per new
+  object the newest file is downloaded from Drive and decrypted, and the first five bytes checked for
+  `PGDMP` — pg_dump's magic — so the test is "this came back as a Postgres dump", not "age exited 0".
+  Same reasoning as the server's restore rehearsal, and it costs one 171 KB round trip a day.
+
+Uploading happens **before** the local prune, so a file can never be deleted here on its way out.
+
+```bash
+rclone lsl b8-offsite:b8-backups        # what is offsite
+tail ~/b8-backups/pull.log              # what the last runs did
+```
+
+Now three copies, two machines, one of them off the premises.
 
 ### Restoring from an encrypted backup
 
@@ -298,6 +344,15 @@ Verified end to end on 2026-09-25: a server-written backup decrypted on the lapt
 every table's row count matched the live database. The three dumps predating encryption were
 encrypted in place and each ciphertext checked to reproduce the original bytes byte-for-byte before
 its plaintext was removed.
+
+If the flat is gone and the laptop with it, the same restore works from Drive on any machine that has
+the private key from the password manager:
+
+```bash
+rclone copy b8-offsite:b8-backups . --filter '+ *.dump.age' --filter '- *' --max-age 2d
+age -d -i <key> -o restore.dump <newest>.dump.age
+pg_restore -d b8_restore_check --no-owner restore.dump
+```
 
 **`.env.local` is not backed up** — not by this, not by anything. It holds the Plaid secret, the SMTP
 credentials and the VAPID private key, so a restore onto a new machine gets the data back and none of
