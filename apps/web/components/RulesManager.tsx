@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { BudgetCategory } from '@b8/contracts/types';
+import { groupRulesByCategory } from '@/lib/rulesGrouping';
 
 export type RuleRow = {
   plaid_category: string;
@@ -86,8 +87,33 @@ export default function RulesManager({ rows, merchantRules, categories, pendingA
     setApplying(false);
   }
 
-  const withRule    = rows.filter((r) => r.mapped_category !== null);
   const withoutRule = rows.filter((r) => r.mapped_category === null);
+
+  // BOTH lists grouped on the category they file into, so "what feeds Restaurants" is one scan
+  // rather than two lists sorted on two different keys. The query's order survives inside each
+  // group — payees by how many transactions they speak for, Plaid categories likewise — because
+  // that is the order each list was already useful in.
+  const payeeGroups = groupRulesByCategory(merchantRules, (r) => r.count);
+  const mappedGroups = groupRulesByCategory(rows, (r) => r.count);
+  const mappedCount = mappedGroups.reduce((n, g) => n + g.rows.length, 0);
+
+  /** The category heading both lists share, so the two groupings read as one idea. */
+  function GroupHeading({ category, rules, total }: { category: string; rules: number; total: number }) {
+    const landscape = categories.find((c) => c.name === category)?.landscape;
+    return (
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-4 sm:px-6 py-2 bg-slate-50/80">
+        <span className="text-sm font-semibold text-slate-700">{category}</span>
+        {landscape && (
+          <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${LANDSCAPE_BADGE[landscape] ?? ''}`}>
+            {landscape}
+          </span>
+        )}
+        <span className="text-xs text-slate-400">{rules} {rules === 1 ? 'rule' : 'rules'}</span>
+        {/* The group's own total, so a category's weight is legible without adding up its rows. */}
+        <span className="ml-auto text-xs font-mono text-slate-400">{total}</span>
+      </div>
+    );
+  }
 
   function RuleRowItem({ row }: { row: RuleRow }) {
     const mapped = row.mapped_category;
@@ -163,30 +189,47 @@ export default function RulesManager({ rows, merchantRules, categories, pendingA
         <section className="mb-6">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
             By payee — {merchantRules.length} {merchantRules.length === 1 ? 'rule' : 'rules'}
+            {payeeGroups.length > 1 && <> in {payeeGroups.length} categories</>}
           </h2>
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-50">
-            {merchantRules.map((r) => (
-              <div key={r.merchant_name} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 sm:px-6 py-3 text-sm">
-                <span className="font-medium text-slate-700 truncate max-w-[12rem]">{r.merchant_name}</span>
-                <span className="text-slate-300">→</span>
-                <span className="text-slate-700">{r.mapped_category}</span>
-                {/* The count opens the rows it counts. `merchant=` is an EXACT filter, the same
-                    match the rule itself makes — `search=` would have been one character cheaper
-                    and would bring back rows this rule does not cover, so the figure and the list
-                    it opened would disagree. */}
-                <Link
-                  href={`/transactions?merchant=${encodeURIComponent(r.merchant_name)}`}
-                  className="ml-auto text-xs text-slate-400 hover:text-slate-700 hover:underline transition-colors"
-                >
-                  {r.count} {r.count === 1 ? 'transaction' : 'transactions'}
-                </Link>
-                <button
-                  onClick={() => removeMerchantRule(r.merchant_name)}
-                  disabled={busy === r.merchant_name}
-                  className="text-xs text-slate-400 hover:text-red-500 disabled:opacity-40 transition-colors"
-                >
-                  {busy === r.merchant_name ? '…' : 'Remove'}
-                </button>
+          {/* `overflow-hidden` so the grouped headings' tinted band is clipped by the rounded corner
+              rather than squaring it off at the top. */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden divide-y divide-slate-100">
+            {payeeGroups.map((g) => (
+              <div key={g.category}>
+                <GroupHeading category={g.category} rules={g.rows.length} total={g.total} />
+                <div className="divide-y divide-slate-50">
+                  {g.rows.map((r) => (
+                    // The category is the heading above now, so each row drops its `→ Category`.
+                    // That is not only de-duplication: those three elements were the widest thing
+                    // in the row, and on a phone they pushed the count and Remove onto a second
+                    // line. Grouping buys the width back.
+                    <div key={r.merchant_name} className="flex items-center gap-x-3 px-4 sm:px-6 py-3 text-sm">
+                      {/* `min-w-0` IS WHAT MAKES `truncate` WORK HERE. A flex child's default
+                          `min-width: auto` refuses to shrink below its content, so without it the
+                          name pushed the count and Remove out of a container that clips — on a
+                          phone the Remove button became unreachable rather than merely cramped.
+                          Caught by rendering it at 393px; tsc, 982 tests and lint were all green. */}
+                      <span className="flex-1 min-w-0 truncate font-medium text-slate-700">{r.merchant_name}</span>
+                      {/* The count opens the rows it counts. `merchant=` is an EXACT filter, the
+                          same match the rule itself makes — `search=` would have been one character
+                          cheaper and would bring back rows this rule does not cover, so the figure
+                          and the list it opened would disagree. */}
+                      <Link
+                        href={`/transactions?merchant=${encodeURIComponent(r.merchant_name)}`}
+                        className="ml-auto shrink-0 text-xs text-slate-400 hover:text-slate-700 hover:underline transition-colors"
+                      >
+                        {r.count} {r.count === 1 ? 'transaction' : 'transactions'}
+                      </Link>
+                      <button
+                        onClick={() => removeMerchantRule(r.merchant_name)}
+                        disabled={busy === r.merchant_name}
+                        className="shrink-0 text-xs text-slate-400 hover:text-red-500 disabled:opacity-40 transition-colors"
+                      >
+                        {busy === r.merchant_name ? '…' : 'Remove'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -218,10 +261,11 @@ export default function RulesManager({ rows, merchantRules, categories, pendingA
       )}
 
       {/* With rules */}
-      {withRule.length > 0 && (
+      {mappedCount > 0 && (
         <section>
           <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">
-            Mapped — {withRule.length} categories
+            Mapped — {mappedCount} Plaid {mappedCount === 1 ? 'category' : 'categories'} in{' '}
+            {mappedGroups.length} {mappedGroups.length === 1 ? 'budget category' : 'budget categories'}
           </h2>
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-x-auto">
             <table className="w-full min-w-[48rem] text-sm">
@@ -233,9 +277,20 @@ export default function RulesManager({ rows, merchantRules, categories, pendingA
                   <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-400 w-72">Maps to</th>
                 </tr>
               </thead>
-              <tbody>
-                {withRule.map((row) => <RuleRowItem key={row.plaid_category} row={row} />)}
-              </tbody>
+              {/* ONE `tbody` PER GROUP, not one table per group. Several tbodies in a table is valid
+                  and keeps a single set of column widths, so the Total and Uncategorized columns
+                  still line up down the whole list. Separate tables would each size their own
+                  columns to their own contents and the numbers would wander left and right. */}
+              {mappedGroups.map((g) => (
+                <tbody key={g.category}>
+                  <tr>
+                    <td colSpan={4} className="p-0 border-y border-slate-100">
+                      <GroupHeading category={g.category} rules={g.rows.length} total={g.total} />
+                    </td>
+                  </tr>
+                  {g.rows.map((row) => <RuleRowItem key={row.plaid_category} row={row} />)}
+                </tbody>
+              ))}
             </table>
           </div>
         </section>
