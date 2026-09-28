@@ -40,6 +40,21 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # The eval harness's own grader/client/preflight tests — pure and offline, no server, no model
+  # calls. The golden set itself is not run here: it needs a reachable instance and costs money.
+  evals:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: evals
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest -q
+
   migrate:
     runs-on: ubuntu-latest
     services:
