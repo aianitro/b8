@@ -21,6 +21,12 @@ CREATE TABLE IF NOT EXISTS accounts (
   sort_order          INT NOT NULL DEFAULT 0,  -- manual drag-and-drop order within a landscape group on /accounts
   valuation_mode      TEXT NOT NULL DEFAULT 'ledger' CHECK (valuation_mode IN ('ledger', 'valuation')),  -- 'ledger': balance = flow-derived (below); 'valuation': balance = latest account_valuations row
   is_liability        BOOLEAN NOT NULL DEFAULT FALSE,  -- valuation-mode accounts only (see lib/domain/valuation.ts) — subtracted rather than added
+  -- Money physically counted rather than reported by a feed: wallets, gift cards. Gates the
+  -- cash-count flow (lib/cashCountStore.ts). Stored rather than inferred because every available
+  -- rule is a coincidence — `access_token IS NULL` also catches a hand-added credit card, and
+  -- `type = 'other'` only happens to fit today. "Can you hold it and count it" is a fact about the
+  -- account, like valuation_mode and is_liability, not something its transactions reveal.
+  countable           BOOLEAN NOT NULL DEFAULT FALSE,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

@@ -40,7 +40,7 @@ export interface RecordCountArgs {
 
 export type RecordCountResult =
   | { ok: true; outcome: CashCountOutcome; adjustmentTransactionId: number | null }
-  | { ok: false; code: 'NOT_FOUND' | 'NOT_A_LEDGER_ACCOUNT' | 'INVALID'; message: string };
+  | { ok: false; code: 'NOT_FOUND' | 'NOT_COUNTABLE' | 'INVALID'; message: string };
 
 /**
  * The ledger balance of an account: money in minus money out.
@@ -68,23 +68,23 @@ export async function recordCashCount(args: RecordCountArgs): Promise<RecordCoun
     // arriving together would otherwise both read the same balance and both write an adjustment for
     // the same gap, closing it twice. Locking the account serialises them, and the second one then
     // reads the balance the first produced and correctly finds nothing to adjust.
-    const account = await client.query<{ valuation_mode: string }>(
-      'SELECT valuation_mode FROM accounts WHERE id = $1 FOR UPDATE',
+    const account = await client.query<{ countable: boolean }>(
+      'SELECT countable FROM accounts WHERE id = $1 FOR UPDATE',
       [args.accountId]
     );
     if (account.rows.length === 0) {
       await client.query('ROLLBACK');
       return { ok: false, code: 'NOT_FOUND', message: 'No such account.' };
     }
-    // A valuation-mode account's balance IS its latest valuation; counting one would write an
-    // adjustment against a number nothing derives from transactions, so the row would land in the
-    // ledger and change nothing on screen.
-    if (account.rows[0].valuation_mode !== 'ledger') {
+    // Checked here and not only in the list query. A guard that lives only in what the UI offers is
+    // not a guard: this endpoint takes an account id from the caller, and the one account it must
+    // refuse is exactly the one a stale page or a hand-written request would name.
+    if (!account.rows[0].countable) {
       await client.query('ROLLBACK');
       return {
         ok: false,
-        code: 'NOT_A_LEDGER_ACCOUNT',
-        message: 'Counting applies to ledger accounts; this one is valued, not counted.',
+        code: 'NOT_COUNTABLE',
+        message: 'That account is not money you count — its balance comes from a feed or a valuation.',
       };
     }
 
@@ -129,7 +129,17 @@ export interface WalletStatus {
   lastCountedAt: string | null;
 }
 
-/** Every ledger account that has ever been counted, plus the manual ones that never have. */
+/**
+ * Every account flagged as money you physically count, with its balance and last count.
+ *
+ * Gated on `accounts.countable` rather than on "manual and ledger". That earlier rule listed a
+ * hand-added credit card under "Cash on hand" and offered to count it, which would have written a
+ * real adjustment against a card balance. Whether money can be held and counted is a stored fact.
+ *
+ * (That explanation lives here and not inside the query below: a backtick quoting a SQL identifier
+ * inside a template literal ends the string, which is the fourth time this repo has been bitten by
+ * it — including once while writing this very function.)
+ */
 export async function walletStatuses(): Promise<WalletStatus[]> {
   const { rows } = await db.query<WalletStatus>(`
     SELECT a.id AS "accountId",
@@ -140,7 +150,7 @@ export async function walletStatuses(): Promise<WalletStatus[]> {
            (SELECT max(c.counted_at) FROM cash_counts c WHERE c.account_id = a.id) AS "lastCountedAt"
       FROM accounts a
       LEFT JOIN transactions t ON t.account_id = a.id
-     WHERE a.valuation_mode = 'ledger' AND a.access_token IS NULL
+     WHERE a.countable
      GROUP BY a.id, a.name
      ORDER BY a.name
   `);
