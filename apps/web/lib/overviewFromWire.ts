@@ -132,6 +132,16 @@ export function dashboardFromWire(data: OverviewData) {
     },
     feedFindings: data.feedHealth.map(feedFindingFromWire),
     driftFindings: data.driftFindings.map(driftFindingFromWire),
+    // `balance` back from its money string. `daysSinceCount` passes through untouched, null included:
+    // coercing it to 0 here would turn "never counted" into "counted today", which is the exact
+    // inversion the schema's own comment warns against.
+    walletFindings: data.walletFindings.map((w) => ({
+      accountId: w.accountId,
+      name: w.name,
+      balance: Number(w.balance),
+      daysSinceCount: w.daysSinceCount,
+      reason: w.reason,
+    })),
     watchlist: data.watchlist.map(
       (w): WatchedTransaction => ({ ...w, amount: money(w.amount) })
     ),

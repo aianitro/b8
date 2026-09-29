@@ -8,6 +8,7 @@ import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
 import JobHealthCard from '@/components/JobHealthCard';
 import AlertBell from '@/components/AlertBell';
+import CashStalenessCard from '@/components/CashStalenessCard';
 import WhereTheMonthSits, { type MonthCategoryView } from '@/components/WhereTheMonthSits';
 import RecentArrivals from '@/components/RecentArrivals';
 import UncategorizedCard from '@/components/UncategorizedCard';
@@ -259,7 +260,7 @@ export default async function DashboardPage() {
     stats, monthlySpending: monthly,
     recentArrivals, recentArrivalsTotal, uncategorized: unfiled, watchlist, yearEnd,
     offCycleElsewhere, monthCategories,
-    feedFindings, driftFindings, jobHealth,
+    feedFindings, driftFindings, jobHealth, walletFindings,
   } = dashboardFromWire(await loadOverview(now));
   // Started before the overview and collected here, so the two reads overlap rather than queue.
   const categoryOptions = await categoryOptionsPromise;
@@ -315,12 +316,17 @@ export default async function DashboardPage() {
             feed, and five drifting accounts is one message about the ledger. The number is how
             many things there are to read, which is the only sense in which a reader counts them. */}
         <AlertBell count={(feedFindings.length > 0 ? 1 : 0) + (driftFindings.length > 0 ? 1 : 0)
-          + (jobHealth.status !== 'fresh' ? 1 : 0)}>
+          + (jobHealth.status !== 'fresh' ? 1 : 0) + (walletFindings.length > 0 ? 1 : 0)}>
           {/* First in the bell, because it outranks the other two: they each say a figure may be
               wrong, this says every figure may be old and the backups are missing as well. */}
           <JobHealthCard health={jobHealth} />
           <FeedHealthCard findings={feedFindings} />
           <DriftAlertCard findings={driftFindings} />
+          {/* Last of the four, because it is the mildest: the other three say a figure may be wrong
+              through no fault of the reader's, while this says a figure is as old as the last time
+              they chose to check it. It is also the only one whose cure the reader can apply today,
+              which is why it is the only card here carrying an action. */}
+          <CashStalenessCard findings={walletFindings} />
         </AlertBell>
       </div>
 

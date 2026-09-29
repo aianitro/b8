@@ -45,6 +45,8 @@ import type { DriftFinding } from './domain/drift';
 import { findBalanceDrift } from './drift';
 import type { JobHealth } from './domain/jobHealth';
 import { loadJobHealth } from './jobHealthRead';
+import { staleWallets, type WalletFinding } from './domain/walletStaleness';
+import { walletStatuses } from './cashCountStore';
 import type { WatchedTransaction } from './watchlistRead';
 import { loadWatchlist } from './watchlistRead';
 import { loadFeedHealth } from './feedHealthRead';
@@ -269,6 +271,7 @@ export interface OverviewSources {
   yearEnd: YearEndRead;
   feedHealth: FeedFinding[];
   driftFindings: DriftFinding[];
+  walletFindings: WalletFinding[];
   watchlist: WatchedTransaction[];
   jobHealth: JobHealth;
 }
@@ -564,6 +567,16 @@ export function composeOverview(sources: OverviewSources): OverviewData {
     yearEnd: wireYearEnd(sources.yearEnd),
     feedHealth: sources.feedHealth.map(wireFeedFinding),
     driftFindings: sources.driftFindings.map(wireDriftFinding),
+    // `balance` crosses as a money STRING like every other figure in this payload, for the reason the
+    // file's own docblock gives: a float is the one representation that can be wrong by a cent
+    // without anything noticing.
+    walletFindings: sources.walletFindings.map((w) => ({
+      accountId: w.accountId,
+      name: w.name,
+      balance: wireMoney(w.balance),
+      daysSinceCount: w.daysSinceCount,
+      reason: w.reason,
+    })),
     watchlist: sources.watchlist.map((w) => ({
       id: w.id,
       date: w.date,
@@ -941,8 +954,8 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
       loadYearEnd('operational', asOf),
     ]);
 
-  const [driftFindings, feedHealth, watchlist, jobHealth] = await Promise.all([
-    driftPromise, feedPromise, loadWatchlist(), loadJobHealth(now),
+  const [driftFindings, feedHealth, watchlist, jobHealth, wallets] = await Promise.all([
+    driftPromise, feedPromise, loadWatchlist(), loadJobHealth(now), walletStatuses(),
   ]);
 
   return composeOverview({
@@ -972,6 +985,10 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
     yearEnd,
     feedHealth,
     driftFindings,
+    // Classified HERE, from the same `now` every other as-of figure in this payload uses. Passing the
+    // raw counts through and letting each consumer decide what "stale" means is how two screens end
+    // up disagreeing about whether the same wallet needs counting.
+    walletFindings: staleWallets(wallets, now),
     watchlist,
     jobHealth,
   });

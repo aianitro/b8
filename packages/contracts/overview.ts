@@ -682,6 +682,28 @@ export const DriftFindingSchema = z.object({
   safeToDerive: z.boolean(),
 });
 
+/**
+ * A cash balance that has stopped being trustworthy.
+ *
+ * Every other account in this payload is maintained by something that reports when it stops — a feed
+ * that goes quiet, a valuation that ages. Cash has no such mechanism: a wallet's figure is exactly as
+ * true as its last count, it goes wrong silently at a rate nobody can observe, and the only cure is a
+ * person opening their wallet. This is the payload saying so.
+ *
+ * `daysSinceCount` is NULLABLE, and null is not "very stale" — it is `reason: 'never'`, a wallet
+ * asserting a figure no human has ever confirmed. The two want the same action and describe different
+ * situations, so collapsing them would mean either inventing a day count for a wallet that has none,
+ * or ranking one added this morning against one abandoned in spring. A consumer that renders
+ * `daysSinceCount ?? 0` has re-created exactly that conflation.
+ */
+export const WalletFindingSchema = z.object({
+  accountId: z.string(),
+  name: z.string(),
+  balance: moneyString,
+  daysSinceCount: z.int().min(0).nullable(),
+  reason: z.enum(['stale', 'never']),
+});
+
 // ---------------------------------------------------------------------------------------------
 
 /**
@@ -833,6 +855,14 @@ export const OverviewDataSchema = z.object({
   yearEnd: YearEndReadSchema,
   feedHealth: z.array(FeedFindingSchema),
   driftFindings: z.array(DriftFindingSchema),
+  /**
+   * Cash balances that have gone stale, worst first.
+   *
+   * Beside the other two health arrays because it answers the same question they do — which figures
+   * below should be read with suspicion — and differs only in what maintains them. Empty is the
+   * healthy state and says nothing, like the others.
+   */
+  walletFindings: z.array(WalletFindingSchema),
   watchlist: z.array(WatchedTransactionSchema),
   jobHealth: JobHealthSchema,
 });

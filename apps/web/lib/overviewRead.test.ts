@@ -233,6 +233,12 @@ function fabricatedSources(): OverviewSources {
         hoursStale: null,
       },
     ],
+    // One of each reason, so the wire conversion is exercised on a null day count as well as a
+    // number — the two are different findings, not one with a missing field.
+    walletFindings: [
+      { accountId: 'w1', name: 'Cash home', balance: 520, daysSinceCount: null, reason: 'never' as const },
+      { accountId: 'w2', name: 'Cash Andrei', balance: 173, daysSinceCount: 41, reason: 'stale' as const },
+    ],
     driftFindings: [
       {
         accountId: 'manual_fabricated_0001',
