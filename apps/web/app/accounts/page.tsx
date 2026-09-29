@@ -9,6 +9,8 @@ import AddAccountForm from '@/components/AddAccountForm';
 import AccountsList from '@/components/AccountsList';
 import SyncControls from '@/components/SyncControls';
 import SyncHealthCard from '@/components/SyncHealthCard';
+import CashCounts from '@/components/CashCounts';
+import { walletStatuses } from '@/lib/cashCountStore';
 import type { Account } from '@b8/contracts/types';
 
 async function getAccounts(): Promise<Account[]> {
@@ -41,8 +43,16 @@ async function getTxnCounts(): Promise<Map<string, number>> {
 }
 
 export default async function AccountsPage() {
-  const [accounts, txnCounts, latestValuations] = await Promise.all([
-    getAccounts(), getTxnCounts(), getLatestValuations(),
+  const [accounts, txnCounts, latestValuations, wallets, spendCategories] = await Promise.all([
+    getAccounts(), getTxnCounts(), getLatestValuations(), walletStatuses(),
+    // The categories a cash adjustment could plausibly be filed as: operational, not income, and not
+    // the transfer bucket. Money leaving a wallet was spent on something; it did not arrive, and it
+    // did not move to another account of yours.
+    db.query<{ name: string }>(
+      `SELECT name FROM budget_categories
+        WHERE landscape = 'operational' AND NOT is_income AND NOT exclude_from_budget
+        ORDER BY name`
+    ).then((r) => r.rows.map((c) => c.name)),
   ]);
   const operational = accounts.filter((a) => a.landscape === 'operational');
   const capital     = accounts.filter((a) => a.landscape === 'capital');
@@ -91,6 +101,13 @@ export default async function AccountsPage() {
           valuations={Object.fromEntries(latestValuations)}
         />
       )}
+
+      {/* ABOVE the sync card, below the accounts list. Counting is the one action on this page the
+          owner performs on a schedule rather than in reaction to something, and it is the only way a
+          cash balance is ever right — a wallet's figure is exactly as true as its last count. The
+          sync card below reports on feeds that maintain themselves; this reports on the one that
+          cannot. */}
+      <CashCounts wallets={wallets} categories={spendCategories} />
 
       {plaidCount > 0 && <SyncHealthCard />}
     </div>

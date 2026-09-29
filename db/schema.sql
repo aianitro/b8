@@ -256,6 +256,38 @@ CREATE INDEX IF NOT EXISTS idx_transactions_transfer_group ON transactions(trans
 -- Partial: watched rows are the rare ones and the only ones this predicate ever selects.
 CREATE INDEX IF NOT EXISTS idx_transactions_watched ON transactions(watched_at) WHERE watched_at IS NOT NULL;
 
+-- Counting a wallet. Cash is the one account kind with a feed on only ONE side: the withdrawal is on
+-- the bank feed, the coffee is on no feed at all, so the only way the ledger learns what a wallet
+-- holds is the owner counting it.
+--
+-- PLACED HERE, AFTER `transactions`, ONLY BECAUSE IT REFERENCES IT. Conceptually it belongs beside
+-- account_valuations with the other observation tables, but this file is written to run top to
+-- bottom — `accounts.property_id` is a deferred ALTER further down for exactly that reason — and a
+-- forward reference would break that for whoever runs it.
+--
+-- SEPARATE FROM account_valuations ON PURPOSE. That table is the valuation-mode regime — "this
+-- account's balance IS its latest observation". A wallet is a LEDGER account: its balance is still
+-- flow-derived, and a count does not replace that balance, it produces a correcting transaction
+-- against it. Folding counts into account_valuations would put a valuation row on a ledger account
+-- and blur the dual-regime split the Phase 0 keystone rests on.
+--
+-- THE COUNT THAT FINDS NOTHING IS WHY THIS IS A TABLE. If the only trace of counting were the
+-- adjustment transaction, "counted on Sunday, it matched" would leave no trace and be
+-- indistinguishable from "not counted since April" — and a wallet nobody spends from would report as
+-- freshly counted exactly when it is most stale. `expected` is stored rather than recomputed for the
+-- same reason net_worth_snapshots is: replaying a past balance through an edited ledger would quietly
+-- make every historical count agree, which is the one thing this table exists to contradict.
+CREATE TABLE IF NOT EXISTS cash_counts (
+  id           SERIAL PRIMARY KEY,
+  account_id   TEXT NOT NULL REFERENCES accounts(id) ON UPDATE CASCADE,
+  counted      NUMERIC(14, 2) NOT NULL CHECK (counted >= 0),  -- a wallet cannot hold less than nothing
+  expected     NUMERIC(14, 2) NOT NULL,                       -- may be negative: spent-before-opening-balance computes below zero
+  adjustment_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,  -- NULL when the count matched
+  counted_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS cash_counts_account_counted_at ON cash_counts (account_id, counted_at DESC);
+
 -- One row per sync run, split by phase so the incremental value of a Plaid
 -- transactionsRefresh (force) beyond a plain transactionsSync (plain) is visible over time.
 CREATE TABLE IF NOT EXISTS sync_log (
