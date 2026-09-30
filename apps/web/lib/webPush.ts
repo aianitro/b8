@@ -179,3 +179,26 @@ export async function registerSubscription(endpoint: string, label: string | nul
     [endpoint, label]
   );
 }
+
+/**
+ * Whether the server will actually push to this endpoint.
+ *
+ * The browser knowing it has a subscription is not the same question. A subscription can exist in
+ * the browser while the server has never heard of it — the registering POST failed — or while the
+ * server has marked it `revoked_at` because a send came back `gone`. In both cases a button reading
+ * "notifications are on" is a lie the reader has no way to detect: nothing arrives and nothing says
+ * why.
+ *
+ * Takes the endpoint rather than returning the list, because the list is a set of credentials and
+ * this answer is the only part a client needs.
+ */
+export async function subscriptionStatus(
+  endpoint: string
+): Promise<{ registered: boolean; revoked: boolean }> {
+  const { rows } = await db.query<{ revoked: boolean }>(
+    'SELECT revoked_at IS NOT NULL AS revoked FROM web_push_subscriptions WHERE endpoint = $1',
+    [endpoint]
+  );
+  if (rows.length === 0) return { registered: false, revoked: false };
+  return { registered: !rows[0].revoked, revoked: rows[0].revoked };
+}

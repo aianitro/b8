@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bell, BellOff } from 'lucide-react';
 
 /**
@@ -18,8 +18,65 @@ import { Bell, BellOff } from 'lucide-react';
  * answer wrong once and keeps it.
  */
 export default function PushSetup({ vapidPublicKey }: { vapidPublicKey: string | null }) {
-  const [state, setState] = useState<'idle' | 'working' | 'on' | 'error'>('idle');
+  /**
+   * `checking` until the device has been asked, because the honest opening state is "I do not know
+   * yet" rather than "off".
+   *
+   * ─── THIS USED TO START AT `idle` AND ONLY EVER LEARN FROM A CLICK ────────────────────────────
+   *
+   * So the button remembered nothing. Leave the dashboard, come back, and a device that was already
+   * subscribed was offered "Turn on notifications" again — the state lived entirely in this
+   * component's lifetime, and nothing ever asked the browser or the server what was actually true.
+   * Pressing it again did work, which is why it looked cosmetic rather than like a component that
+   * did not know its own subject.
+   *
+   * `repair` is the state that exists because two systems must agree: the browser holds a
+   * subscription AND the server must be willing to push to it. A subscription can exist here while
+   * the server never heard of it (the registering POST failed) or has revoked it (a send came back
+   * `gone`). Reporting that as "on" would be a lie nothing arriving would explain.
+   */
+  const [state, setState] = useState<'checking' | 'idle' | 'working' | 'on' | 'repair' | 'error'>('checking');
   const [message, setMessage] = useState<string | null>(null);
+
+  /**
+   * Ask what is actually true, once, on mount.
+   *
+   * `useEffect` rather than `useSyncExternalStore` — which `AlertBell` uses for its DOM read — because
+   * this answer is AWAITED: `getSubscription()` is a promise and a subscription's server status is a
+   * round trip. There is nothing to read synchronously, so there is no snapshot to give.
+   */
+  useEffect(() => {
+    if (!vapidPublicKey) return;
+    let live = true;
+
+    (async () => {
+      try {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+          if (live) setState('idle');
+          return;
+        }
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+        if (!live) return;
+        if (!subscription) { setState('idle'); return; }
+
+        const res = await fetch('/api/v1/push/web/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        });
+        const body = await res.json().catch(() => null);
+        if (!live) return;
+        setState(body?.success && body.data.registered ? 'on' : 'repair');
+      } catch {
+        // A failed check degrades to offering the button, never to claiming either state. Pressing
+        // it when already subscribed is harmless — the registration upserts.
+        if (live) setState('idle');
+      }
+    })();
+
+    return () => { live = false; };
+  }, [vapidPublicKey]);
 
   // The server has no VAPID pair, so there is nothing to subscribe to. Said plainly rather than
   // offering a button that cannot work.
@@ -82,6 +139,11 @@ export default function PushSetup({ vapidPublicKey }: { vapidPublicKey: string |
     }
   }
 
+  // Nothing at all while the answer is unknown. A button that appears saying "off" and corrects
+  // itself a moment later is worse than a short gap: the reader may press the wrong thing in the
+  // window, and the flicker reads as the app changing its mind.
+  if (state === 'checking') return null;
+
   if (state === 'on') {
     return (
       <p className="flex items-center gap-2 text-xs text-green-700">
@@ -99,8 +161,15 @@ export default function PushSetup({ vapidPublicKey }: { vapidPublicKey: string |
         className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800 text-white text-sm hover:bg-slate-700 disabled:opacity-50"
       >
         <BellOff size={14} />
-        {state === 'working' ? 'Asking…' : 'Turn on notifications'}
+        {state === 'working' ? 'Asking…' : state === 'repair' ? 'Reconnect notifications' : 'Turn on notifications'}
       </button>
+      {/* The repair case says what is wrong, because "turn on" would be misleading: this device IS
+          subscribed, and what has gone is the server's side of the arrangement. */}
+      {state === 'repair' && !message && (
+        <p className="mt-2 text-xs text-amber-700 max-w-xs leading-relaxed">
+          This device is set up, but the server is not sending to it. One tap re-registers it.
+        </p>
+      )}
       {message && <p className="mt-2 text-xs text-amber-700 max-w-xs leading-relaxed">{message}</p>}
       <p className="mt-2 text-xs text-slate-400 max-w-xs leading-relaxed">
         One a day at most, and it carries no figures — just that something needs you.
