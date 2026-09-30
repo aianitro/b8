@@ -17,12 +17,13 @@ export default function AddAccountForm() {
   const [landscape, setLandscape] = useState<'operational' | 'capital'>('operational');
   const [balanceChoice, setBalanceChoice] = useState<BalanceChoice>('ledger');
   const [initialValue, setInitialValue] = useState('');
+  const [countable, setCountable] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
     setName(''); setBank(''); setTypeKey('checking'); setLandscape('operational');
-    setBalanceChoice('ledger'); setInitialValue(''); setError(null);
+    setBalanceChoice('ledger'); setInitialValue(''); setCountable(false); setError(null);
   }
 
   function close() { setOpen(false); reset(); }
@@ -51,6 +52,10 @@ export default function AddAccountForm() {
           valuation_mode: balanceChoice === 'ledger' ? 'ledger' : 'valuation',
           is_liability: balanceChoice === 'liability',
           initial_value: parsedValue,
+          // Sent as the checkbox stands, and the route forces it false on a valuation account. The
+          // checkbox is already hidden in that case, so this is the same rule applied twice on
+          // purpose: a hidden control is a UI convention, not a guarantee about the request body.
+          countable,
         }),
       });
       const data = await res.json();
@@ -150,6 +155,27 @@ export default function AddAccountForm() {
             <option value="liability">Valuation — a value you enter (liability)</option>
           </select>
         </div>
+
+        {/* ONLY FOR A LEDGER ACCOUNT. A valuation account's balance is its latest valuation, so
+            counting one would write a correcting transaction against a figure nothing derives from
+            transactions — it would land in the ledger and change nothing on screen. */}
+        {balanceChoice === 'ledger' && (
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={countable}
+              onChange={(e) => setCountable(e.target.checked)}
+              className="mt-0.5 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-900/20"
+            />
+            <span className="text-xs text-slate-600">
+              This is cash I count
+              <span className="block text-slate-400">
+                Wallets and gift cards — money with no feed behind it. Adds it to Cash on hand, where
+                you enter what is actually there.
+              </span>
+            </span>
+          </label>
+        )}
 
         {balanceChoice !== 'ledger' && (
           <div>

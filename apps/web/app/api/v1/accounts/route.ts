@@ -9,7 +9,7 @@ const log = createLogger('accounts');
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, bank, type, subtype, landscape, valuation_mode, is_liability, initial_value } = await req.json() as {
+    const { name, bank, type, subtype, landscape, valuation_mode, is_liability, initial_value, countable } = await req.json() as {
       name: string;
       bank?: string;
       type: string;
@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
       valuation_mode?: ValuationMode;
       is_liability?: boolean;
       initial_value?: number | null;
+      countable?: boolean;
     };
 
     if (!name?.trim() || !type?.trim() || !landscape) {
@@ -29,6 +30,12 @@ export async function POST(req: NextRequest) {
 
     const valuationMode: ValuationMode = valuation_mode === 'valuation' ? 'valuation' : 'ledger';
     const isLiability = valuationMode === 'valuation' && is_liability === true;
+    // Countable only makes sense on a LEDGER account. A valuation account's balance IS its latest
+    // valuation, so a count would write a correcting transaction against a figure nothing derives
+    // from transactions — the row would land in the ledger and change nothing on screen. Forced
+    // false rather than rejected, because the combination is meaningless rather than an error worth
+    // stopping a form for.
+    const isCountable = valuationMode === 'ledger' && countable === true;
 
     // initial_value only matters in valuation mode — a ledger account's balance comes from
     // beginning_balance + transactions, not a stored value, so a number here would be silently
@@ -56,9 +63,9 @@ export async function POST(req: NextRequest) {
 
     const id = `manual_${randomUUID()}`;
     await db.query(
-      `INSERT INTO accounts (id, name, type, subtype, landscape, bank, access_token, valuation_mode, is_liability)
-       VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8)`,
-      [id, name.trim(), type, subtype ?? null, landscape, bank?.trim() || null, valuationMode, isLiability]
+      `INSERT INTO accounts (id, name, type, subtype, landscape, bank, access_token, valuation_mode, is_liability, countable)
+       VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9)`,
+      [id, name.trim(), type, subtype ?? null, landscape, bank?.trim() || null, valuationMode, isLiability, isCountable]
     );
 
     // A value is optional even in valuation mode: better to create the account now and
