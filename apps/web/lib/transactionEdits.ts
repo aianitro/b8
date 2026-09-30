@@ -208,3 +208,35 @@ export async function createMerchantRule(merchant: string, category: string): Pr
   }
   return Number(data.data?.refiled ?? 0);
 }
+
+/** A wallet a transaction's cash could have gone into. */
+export interface WalletOption { accountId: string; name: string }
+
+/**
+ * The wallets cash can be received into.
+ *
+ * Fetched lazily by the editor rather than threaded through as a prop, because the offer it feeds
+ * appears only in one branch — a transfer-shaped row with no counterpart found — and passing a
+ * wallet list through every call site of the editor would cost every render for a case most rows
+ * never reach.
+ */
+export async function fetchWallets(): Promise<WalletOption[]> {
+  try {
+    const res = await fetch('/api/v1/cash-counts');
+    const data = await res.json();
+    return data?.success ? data.data.map((w: WalletOption) => ({ accountId: w.accountId, name: w.name })) : [];
+  } catch {
+    // Degrades to no offer, which is the state before this existed — never to a failure notice on a
+    // dialog whose actual edit succeeded.
+    return [];
+  }
+}
+
+/**
+ * Record that this transaction's cash went into a wallet.
+ *
+ * Creates the far side — the row no feed will ever produce — and groups the two as a transfer, so
+ * the money leaves the bank and arrives somewhere instead of vanishing until the next count.
+ */
+export const fundWallet = (transactionId: number, accountId: string) =>
+  post('/api/v1/cash-transfers', { anchorTransactionId: transactionId, toAccountId: accountId });

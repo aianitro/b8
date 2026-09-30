@@ -50,8 +50,8 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeftRight, Flag, Pencil, Plus, Wand2, X } from 'lucide-react';
 import { MAX_WATCH_NOTE } from '@b8/contracts/overview';
 import {
-  createMerchantRule, fetchCounterparts, GROUP_LABELS, groupCategories, isTransferCategory,
-  pairAsTransfer, setCategory, setNote, setWatched, type CategoryOption, type Counterpart,
+  createMerchantRule, fetchCounterparts, fetchWallets, fundWallet, GROUP_LABELS, groupCategories, isTransferCategory,
+  pairAsTransfer, setCategory, setNote, setWatched, type CategoryOption, type Counterpart, type WalletOption,
 } from '@/lib/transactionEdits';
 
 export interface EditableRow {
@@ -119,6 +119,9 @@ export default function TransactionEditButton({ row, categories }: {
   const [paired, setPaired] = useState(false);
   /** Set only by a pairing made in this dialog — see the confirmation below. */
   const [justPaired, setJustPaired] = useState(false);
+  /** Wallets this row's cash could have gone into — empty until the counterpart lookup comes back
+   *  with nothing, which is the only case where the question makes sense. */
+  const [wallets, setWallets] = useState<WalletOption[]>([]);
   /** Whether the note editor is showing. Closed on open — see the note beside it. */
   const [noteOpen, setNoteOpen] = useState(false);
   /** How many earlier rows the rule just re-filed, or null while no rule has been made here. */
@@ -184,6 +187,7 @@ export default function TransactionEditButton({ row, categories }: {
     setUndoTo(undefined);
     setDirty(false);
     setCounterparts(null);
+    setWallets([]);
     setPaired(false);
     setJustPaired(false);
     setNoteOpen(false);
@@ -208,6 +212,14 @@ export default function TransactionEditButton({ row, categories }: {
       if (!live) return;
       setCounterparts(found.candidates);
       if (found.paired) setPaired(true);
+      // ASKED FOR ONLY WHEN NOTHING MATCHED, because the empty result IS the signal rather than a
+      // consolation prize. A wallet has no feed, so a withdrawal that funded one can never have a
+      // counterpart to find — "nothing nearby" is precisely the shape of a row that became cash.
+      // Fetching wallets before knowing that would be a second query on every transfer that pairs
+      // normally, which is most of them.
+      if (found.candidates.length === 0 && !found.paired) {
+        fetchWallets().then((w) => { if (live) setWallets(w); });
+      }
     });
     return () => { live = false; };
   }, [open, owesAPair, row.id]);
@@ -394,6 +406,35 @@ export default function TransactionEditButton({ row, categories }: {
                       Find it in the ledger
                     </Link>.
                   </p>
+                )}
+
+                {/* DID THIS BECOME CASH? Offered only where nothing matched, because that is the
+                    evidence rather than a fallback: a wallet has no feed, so money that went into
+                    one leaves a withdrawal with no counterpart anywhere, forever. Choosing a wallet
+                    writes the row that will never arrive on its own and groups the two, which is the
+                    difference between money that moved and money that vanished until the next count
+                    reported it as found. Only for money going OUT — a deposit is not a withdrawal. */}
+                {counterparts?.length === 0 && wallets.length > 0 && row.amount > 0 && (
+                  <div className="mt-2 pl-6">
+                    <p className="text-[11px] text-amber-900">Or did this cash go into a wallet?</p>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {wallets.map((w) => (
+                        <button
+                          key={w.accountId}
+                          disabled={busy}
+                          onClick={() => run(async () => {
+                            await fundWallet(row.id, w.accountId);
+                            setPaired(true);
+                            setJustPaired(true);
+                            setCounterparts([]);
+                          })}
+                          className="text-[11px] font-medium px-2 py-1 rounded-lg bg-amber-100 text-amber-900 hover:bg-amber-200 disabled:opacity-40 transition-colors"
+                        >
+                          {w.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 {/* One tap per candidate, and the candidate says enough to tell two apart: the
