@@ -232,6 +232,15 @@ export interface SyncResult {
   errors: string[];
   reconciled: string[];
   unmatchedAccountIds: string[];
+  /**
+   * Force-refresh calls Plaid refused this run.
+   *
+   * Separate from `errors`, which is the list of syncs that FAILED. A refused refresh is not a
+   * failed sync — the sync that follows it still runs and still reports what it found — so folding
+   * the two together would turn "your bank is down but we synced what we had" into a red run.
+   * Always 0 for a plain sync, which asks for no refresh at all.
+   */
+  refreshErrors: number;
 }
 
 export async function runSync({
@@ -242,8 +251,8 @@ export async function runSync({
   const result = await runSyncInner({ filterAccountId, force });
 
   await db.query(
-    'INSERT INTO sync_log (trigger, phase, synced, unmatched, errors) VALUES ($1, $2, $3, $4, $5)',
-    [trigger, force ? 'force' : 'plain', result.synced, result.unmatchedAccountIds.length, result.errors.length]
+    'INSERT INTO sync_log (trigger, phase, synced, unmatched, errors, refresh_errors) VALUES ($1, $2, $3, $4, $5, $6)',
+    [trigger, force ? 'force' : 'plain', result.synced, result.unmatchedAccountIds.length, result.errors.length, result.refreshErrors]
   ).catch((err) => log.error('failed to write sync_log', { error: err instanceof Error ? err.message : String(err) }));
 
   return result;
@@ -288,7 +297,7 @@ async function runSyncInner({
   );
 
   if (accounts.rows.length === 0) {
-    return { synced: 0, errors: [], reconciled, unmatchedAccountIds: [] };
+    return { synced: 0, errors: [], reconciled, unmatchedAccountIds: [], refreshErrors: 0 };
   }
 
   // Group by access token — one Plaid item = one API call.
@@ -307,15 +316,28 @@ async function runSyncInner({
     }
   }
 
+  // Stays 0 on a plain sync, which asks for no refresh at all — not "none were refused" but "none
+  // were requested", and the two are the same number here because there is nothing to be refused.
+  let refreshErrors = 0;
+
   // Force-refresh: ask Plaid to re-pull from the institution, then wait for it to process.
   if (force) {
-    await Promise.allSettled(
+    // COUNTED, not merely logged. The catch stays — a refusal must not fail the whole sync, exactly
+    // as the `/item/get` call above argues — but swallowing it entirely left "asked and was refused"
+    // and "asked and there was nothing new" both recording `synced: 0, errors: 0`, so a four-day
+    // institution outage produced a run of clean-looking syncs. The warning line went to a console
+    // nobody reads; the count goes where the run is recorded.
+    const outcomes = await Promise.allSettled(
       entries.map(([token]) =>
         plaidClient().transactionsRefresh({ access_token: token }).catch((e) => {
           log.warn('refresh warning', { error: e?.message });
+          // Rethrown so `allSettled` classifies it. Returning normally here is what made every
+          // refusal indistinguishable from a success in the first place.
+          throw e;
         })
       )
     );
+    refreshErrors = outcomes.filter((o) => o.status === 'rejected').length;
     // Give Plaid time to fetch from the institution before we sync.
     await new Promise((r) => setTimeout(r, 8000));
   }
@@ -338,5 +360,5 @@ async function runSyncInner({
     }
   }
 
-  return { synced: totalSynced, errors, reconciled, unmatchedAccountIds };
+  return { synced: totalSynced, errors, reconciled, unmatchedAccountIds, refreshErrors };
 }

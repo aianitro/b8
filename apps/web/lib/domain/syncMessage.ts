@@ -51,3 +51,24 @@ export function partialFailureNote(failedFeeds: number): string | null {
     ? '1 feed could not be reached, so this count may be short.'
     : `${failedFeeds} feeds could not be reached, so this count may be short.`;
 }
+
+/**
+ * That a force-refresh was REFUSED, as against finding nothing.
+ *
+ * Distinct from `partialFailureNote`, which reports feeds whose SYNC failed. A refused refresh is
+ * not a failed sync: the sync that follows it still runs and still reports what the feed already
+ * had. The run is not short — it is OLD, and that is a different thing to tell someone, because the
+ * number on screen is correct for data that may be days stale.
+ *
+ * This is the signal that was missing entirely during a four-day institution outage. Every force
+ * sync returned a clean "no new transactions", which was true and told the owner nothing: Plaid was
+ * refusing to re-pull from the bank, and the app recorded the refusal nowhere a person would look.
+ *
+ * Null when nothing was refused — including on a plain sync, which asks for no refresh at all.
+ */
+export function refusedRefreshNote(refreshErrors: number): string | null {
+  if (refreshErrors <= 0) return null;
+  return refreshErrors === 1
+    ? 'Your bank refused to refresh, so this may not include the last few days.'
+    : `${refreshErrors} banks refused to refresh, so this may not include the last few days.`;
+}

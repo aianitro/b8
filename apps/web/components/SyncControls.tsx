@@ -39,6 +39,7 @@ export default function SyncControls() {
           added: 0,
           unmatched: 0,
           failedFeeds: 0,
+          refusedRefreshes: 0,
           // The API sanitises its own messages — `Sync failed` for anything unanticipated, since
           // a Plaid axios error carries the live client secret. Whatever arrives here is already
           // safe to show; this does not widen it.
@@ -56,6 +57,7 @@ export default function SyncControls() {
         // errors in the payload. Reading `synced` alone would report that as clean — the same bug
         // one level in as the discarded response above.
         failedFeeds: body.data?.errors?.length ?? 0,
+        refusedRefreshes: body.data?.refreshErrors ?? 0,
       });
       // Still refreshed: balances and last-synced times on this page come from the server render.
       // The toast reports what landed somewhere else; the refresh updates what is on screen.
@@ -68,6 +70,7 @@ export default function SyncControls() {
         added: 0,
         unmatched: 0,
         failedFeeds: 0,
+        refusedRefreshes: 0,
         message: err instanceof Error ? err.message : 'Could not reach the server.',
       });
     } finally {

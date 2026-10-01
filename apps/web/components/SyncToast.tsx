@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect } from 'react';
 import { AlertTriangle, CheckCircle2, X } from 'lucide-react';
-import { partialFailureNote, syncHeadline, unmatchedAccountsNote } from '@/lib/domain/syncMessage';
+import { partialFailureNote, refusedRefreshNote, syncHeadline, unmatchedAccountsNote } from '@/lib/domain/syncMessage';
 
 /**
  * What a sync did, said once, in the corner.
@@ -38,6 +38,11 @@ export interface SyncOutcome {
    * the API only refuses outright when every feed failed, so a partly-broken run arrives as a 200.
    */
   failedFeeds: number;
+  /**
+   * Force-refresh calls the bank refused. NOT the same as `failedFeeds`: that means the count is
+   * SHORT, this means the count is correct but possibly OLD. The reader needs to tell those apart.
+   */
+  refusedRefreshes: number;
   /** On error, the message the API returned — already sanitised server-side. */
   message?: string;
 }
@@ -51,6 +56,7 @@ export default function SyncToast({ outcome, onDismiss }: {
   const isError = outcome.kind === 'error';
   const unmatchedNote = unmatchedAccountsNote(outcome.unmatched);
   const partialNote = partialFailureNote(outcome.failedFeeds);
+  const refusedNote = refusedRefreshNote(outcome.refusedRefreshes);
 
   useEffect(() => {
     if (isError) return;
@@ -101,6 +107,10 @@ export default function SyncToast({ outcome, onDismiss }: {
                 the headline itself: everything else here adds to the result, this one subtracts
                 confidence from it. */}
             {partialNote && <p className="text-amber-700 mt-1.5 text-xs">{partialNote}</p>}
+            {/* After the partial-failure note, because a feed that failed outright is the louder
+                problem. Both can be true at once — one bank down and another refusing to refresh —
+                and they say different things, so neither replaces the other. */}
+            {refusedNote && <p className="text-amber-700 mt-1.5 text-xs">{refusedNote}</p>}
             {unmatchedNote && <p className="text-amber-700 mt-1.5 text-xs">{unmatchedNote}</p>}
           </>
         )}

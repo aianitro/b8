@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { partialFailureNote, syncHeadline, unmatchedAccountsNote } from './syncMessage';
+import { partialFailureNote, refusedRefreshNote, syncHeadline, unmatchedAccountsNote } from './syncMessage';
 
 describe('syncHeadline', () => {
   it('names the zero case as a result rather than saying nothing', () => {
@@ -51,5 +51,32 @@ describe('partialFailureNote', () => {
   // as complete is the outcome this exists to prevent.
   it('tells the reader the count is incomplete', () => {
     expect(partialFailureNote(2)).toContain('may be short');
+  });
+});
+
+describe('a refused force-refresh', () => {
+  it('says nothing when none were refused', () => {
+    expect(refusedRefreshNote(0)).toBeNull();
+    // A plain sync asks for no refresh, so 0 there means "none requested" — same silence either way.
+    expect(refusedRefreshNote(-1)).toBeNull();
+  });
+
+  it('reports one refusal in the singular', () => {
+    expect(refusedRefreshNote(1)).toBe('Your bank refused to refresh, so this may not include the last few days.');
+  });
+
+  it('counts more than one', () => {
+    expect(refusedRefreshNote(3)).toContain('3 banks refused');
+  });
+
+  /**
+   * The distinction this whole item exists for. A failed sync means the COUNT IS SHORT; a refused
+   * refresh means the count is correct but OLD. Wording them the same way would collapse the two
+   * situations a reader has to tell apart.
+   */
+  it('says something different from a partial failure', () => {
+    expect(refusedRefreshNote(1)).not.toBe(partialFailureNote(1));
+    expect(refusedRefreshNote(1)).toContain('last few days');
+    expect(partialFailureNote(1)).toContain('short');
   });
 });

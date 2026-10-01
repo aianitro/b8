@@ -303,7 +303,12 @@ CREATE TABLE IF NOT EXISTS sync_log (
   phase      TEXT NOT NULL CHECK (phase IN ('plain', 'force')),
   synced     INT NOT NULL,
   unmatched  INT NOT NULL DEFAULT 0,
-  errors     INT NOT NULL DEFAULT 0
+  errors     INT NOT NULL DEFAULT 0,
+  -- Force-refresh calls Plaid REFUSED this run, which `errors` never saw: that call is caught and
+  -- logged so a refusal cannot fail the whole sync, which is right, but it left "asked and was
+  -- refused" and "asked and there was nothing new" both recording synced 0, errors 0. Measured
+  -- during a four-day Chase outage: every refresh returned API_ERROR and the app reported clean runs.
+  refresh_errors INT NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_sync_log_ran_at ON sync_log(ran_at);
