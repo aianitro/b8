@@ -3,14 +3,14 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  LayoutDashboard, PieChart, Landmark, ArrowLeftRight, Zap,
-  Tag, Building2, Home, Wallet, Sparkles, Upload, Menu, X, FlaskConical,
-} from 'lucide-react';
+import { ArrowLeftRight, Building2, FlaskConical, Home, Landmark, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Upload, Wallet, X, Zap } from 'lucide-react';
 
 const NAV = [
   { href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard },
   { href: '/net-worth',    label: 'Net Worth',     icon: Wallet },
+  // Below Net Worth deliberately, not beside the dashboard: both are whole-year, whole-position
+  // reads that reward being looked at on purpose, where the dashboard answers a glance.
+  { href: '/profit-loss',  label: 'Profit & Loss', icon: TrendingUp },
   { href: '/budget',       label: 'Budget',        icon: PieChart },
   { href: '/balances',     label: 'Balances',      icon: Landmark },
   { href: '/transactions', label: 'Transactions',  icon: ArrowLeftRight },

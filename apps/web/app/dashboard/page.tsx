@@ -2,7 +2,6 @@ export const dynamic = 'force-dynamic';
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import ProfitLossChart from '@/components/charts/ProfitLossChart';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
@@ -257,36 +256,15 @@ export default async function DashboardPage() {
   // `now` is the same Date the page's own clock read produced, so the payload's as-of point and the
   // page's are one calendar, not two that disagree around midnight.
   const {
-    stats, monthlySpending: monthly,
+    // `monthlySpending` left the destructuring with the P&L chart on 2026-10-01: it fed that series
+    // and nothing else here. It is still on the payload, and `/profit-loss` reads it.
+    stats,
     recentArrivals, recentArrivalsTotal, uncategorized: unfiled, watchlist, yearEnd,
     offCycleElsewhere, monthCategories,
     feedFindings, driftFindings, jobHealth, walletFindings,
   } = dashboardFromWire(await loadOverview(now));
   // Started before the overview and collected here, so the two reads overlap rather than queue.
   const categoryOptions = await categoryOptionsPromise;
-
-  // `pl` and `plProjected` overlap on the last settled month. Without that shared point the dashed
-  // line would start a month adrift of where the solid one ended, leaving a visible gap exactly at
-  // the boundary the chart exists to show.
-  const lastSettled = asOf.month - 1;
-  const plSeries = MONTHS.map((month, i) => ({
-    month,
-    // Bars stop where the data does. A future month drawn at $0 reads as a month that cost
-    // nothing, which is a claim; absent reads as not yet, which is the truth.
-    // Money OUT is the negated one: it hangs below the axis, money in rises above it. The value
-    // carries the sign the chart needs and the tooltip puts it back, because "money out −$26,000"
-    // is nonsense on the way to a reader.
-    //
-    // Settled and forecast are separate series so they can be drawn differently, and the boundary
-    // is the same one the line uses — `lastSettled`. The current month is FORECAST on both: it is
-    // eleven days old, and a solid bar for it would claim a finished month.
-    spent:    i <= lastSettled ? -(monthly[i]?.operational ?? 0) : null,
-    received: i <= lastSettled ?  (monthly[i]?.received ?? 0)    : null,
-    spentProjected:    i >= asOf.month ? -yearEnd.monthly[i].expense : null,
-    receivedProjected: i >= asOf.month ?  yearEnd.monthly[i].income  : null,
-    pl: i <= lastSettled ? yearEnd.monthly[i].cumulative : null,
-    plProjected: i >= lastSettled ? yearEnd.monthly[i].cumulative : null,
-  }));
 
   // EVERY operational spending category with an allocation this month, not the scored subset —
   // the bubbles are a map, not a judgement, and a map that omits groceries, fuel and utilities is
@@ -446,26 +424,26 @@ export default async function DashboardPage() {
           own clock: the tiles and the link out of them should name one month. */}
       <WhereTheMonthSits categories={monthShape} month={asOf.month} />
 
-      {/* Charts */}
-      <div className="space-y-6">
-        <ProfitLossChart data={plSeries} />
-        {/* TODAY AND THIS WEEK WERE HERE, and were removed on 2026-09-24 at the owner's request.
-            They were a day's spend against the same weekday's average, and a week's against the
-            same point last week.
+      {/* Charts. THE PROFIT & LOSS CHART MOVED to `/profit-loss` on 2026-10-01 at the owner's
+          request. It is a twelve-month read, half of it forecast, which is a sit-down question —
+          and this page answers a glance. Same argument that moved "the year by category" to its
+          own page: a page doing both does the glance worse. */}
+      {/* TODAY AND THIS WEEK WERE HERE, and were removed on 2026-09-24 at the owner's request.
+          They were a day's spend against the same weekday's average, and a week's against the
+          same point last week.
 
-            The figures are still read and still served — `today` and `week` remain in the
-            /overview payload, which the phone consumes and the API answers with. Nothing about
-            them was wrong; the page simply stopped showing them, and the reader that produces
-            them is untouched so the decision is reversible with a component rather than a query.
-
-            What the page keeps at this horizon: the P/L chart above ends on the current month,
-            and the category track below answers per category rather than per horizon. */}
-        {/* "The year by category" MOVED TO /sandbox on 2026-09-24 at the owner's request. It is a
-            good widget and a slow read — twenty tracks, each wanting a comparison against a pace
-            mark — which is a different job from the one this page does. The dashboard answers "is
-            anything wrong today" in a glance, and a page that also answers "how is the year going,
-            category by category" does the first one worse. */}
-      </div>
+          The figures are still read and still served — `today` and `week` remain in the
+          /overview payload, which the phone consumes and the API answers with. Nothing about
+          them was wrong; the page simply stopped showing them, and the reader that produces
+          them is untouched so the decision is reversible with a component rather than a query. */}
+      {/* "The year by category" MOVED TO /sandbox on 2026-09-24 at the owner's request. It is a
+          good widget and a slow read — twenty tracks, each wanting a comparison against a pace
+          mark — which is a different job from the one this page does. The dashboard answers "is
+          anything wrong today" in a glance, and a page that also answers "how is the year going,
+          category by category" does the first one worse. */}
+      {/* The wrapper these three sat in is gone with the last of them. An empty `space-y-6` div
+          renders nothing — `space-y` only applies BETWEEN children — so it cost no layout, but it
+          was markup describing a section that no longer exists. */}
 
       {/* Turning the daily ping on, at the very foot of the page — settings rather than reading,
           reachable without being in the way. The phone put its own ping setup in the same place
