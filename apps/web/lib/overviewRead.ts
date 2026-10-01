@@ -462,6 +462,10 @@ function wireFeedFinding(f: FeedFinding): OverviewData['feedHealth'][number] {
     // Whole hours, and `null` when there has never been a successful update — not `0`, which would
     // read as "fresh". A count of hours, not money.
     hoursStale: f.hoursStale,
+    // The cause beside the symptom. `null` means UNREAD, not healthy, and crosses as null for that
+    // reason rather than being defaulted to 'HEALTHY' at the boundary.
+    institutionStatus: f.institutionStatus,
+    institutionStatusAt: f.institutionStatusAt === null ? null : f.institutionStatusAt.toISOString(),
   };
 }
 

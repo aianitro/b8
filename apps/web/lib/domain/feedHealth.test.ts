@@ -5,7 +5,11 @@ const NOW = new Date('2026-09-11T18:00:00Z');
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
 const obs = (over: Partial<FeedObservation> = {}): FeedObservation => ({
   institution: 'Chase', accountCount: 1,
-  lastSuccessfulUpdate: hoursAgo(1), lastFailedUpdate: null, ...over,
+  lastSuccessfulUpdate: hoursAgo(1), lastFailedUpdate: null,
+  // Defaults to UNREAD rather than healthy, matching what an item looks like before its first sync
+  // under this feature — so a test that says nothing about the institution is testing that case.
+  institutionStatus: null, institutionStatusAt: null,
+  ...over,
 });
 
 describe('feedState', () => {
@@ -76,5 +80,40 @@ describe('feedFindings', () => {
   it('carries the account count so the report can say what is affected', () => {
     const [f] = feedFindings([obs({ accountCount: 10, lastFailedUpdate: NOW })], NOW);
     expect(f.accountCount).toBe(10);
+  });
+});
+
+describe('the institution status carried beside the symptom', () => {
+  it('passes Plaid\'s status through to the finding', () => {
+    const [f] = feedFindings([obs({
+      lastSuccessfulUpdate: hoursAgo(98),
+      institutionStatus: 'DEGRADED',
+      institutionStatusAt: new Date('2026-09-10T09:45:18Z'),
+    })], NOW);
+    expect(f.institutionStatus).toBe('DEGRADED');
+    expect(f.institutionStatusAt).toEqual(new Date('2026-09-10T09:45:18Z'));
+  });
+
+  it('reports a HEALTHY institution behind a stale feed rather than hiding it', () => {
+    // Not a contradiction to suppress — it is the most useful thing the field can say, because it
+    // means the problem is this connection rather than the bank, and re-authenticating is worth a try.
+    const [f] = feedFindings([obs({ lastSuccessfulUpdate: hoursAgo(98), institutionStatus: 'HEALTHY' })], NOW);
+    expect(f).toBeDefined();
+    expect(f.institutionStatus).toBe('HEALTHY');
+  });
+
+  it('leaves an unread status null rather than assuming health', () => {
+    const [f] = feedFindings([obs({ lastSuccessfulUpdate: hoursAgo(98) })], NOW);
+    expect(f.institutionStatus).toBeNull();
+  });
+
+  it('does not let the status change WHETHER a feed is reported', () => {
+    // This module decides if a feed is worth reporting; it does not decide what Plaid's status
+    // means. A rule here that suppressed a finding on a healthy institution would hide the case
+    // most worth acting on.
+    const healthyFeed = { lastSuccessfulUpdate: hoursAgo(1), lastFailedUpdate: null };
+    for (const status of ['HEALTHY', 'DEGRADED', 'DOWN', null] as const) {
+      expect(feedFindings([obs({ ...healthyFeed, institutionStatus: status })], NOW)).toHaveLength(0);
+    }
   });
 });

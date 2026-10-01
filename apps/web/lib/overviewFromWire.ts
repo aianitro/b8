@@ -56,7 +56,14 @@ export function outlookCategoryFromWire(c: OverviewData['monthOutlook']['offCycl
 }
 
 export function feedFindingFromWire(f: OverviewData['feedHealth'][number]): FeedFinding {
-  return { ...f, lastSuccessfulUpdate: f.lastSuccessfulUpdate === null ? null : new Date(f.lastSuccessfulUpdate) };
+  return {
+    ...f,
+    lastSuccessfulUpdate: f.lastSuccessfulUpdate === null ? null : new Date(f.lastSuccessfulUpdate),
+    // Converted like its sibling above, and for the same reason: the wire carries timestamps as
+    // strings and the components take Dates. `institutionStatus` needs no conversion — it is an
+    // enum on both sides — so it rides the spread.
+    institutionStatusAt: f.institutionStatusAt === null ? null : new Date(f.institutionStatusAt),
+  };
 }
 
 export function driftFindingFromWire(d: OverviewData['driftFindings'][number]): DriftFinding {

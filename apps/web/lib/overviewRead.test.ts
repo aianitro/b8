@@ -224,6 +224,11 @@ function fabricatedSources(): OverviewSources {
         // A LIVE `Date`, exactly as `lib/feedHealthRead.ts` hands it over. See F4.
         lastSuccessfulUpdate: new Date('2026-09-09T04:15:00.000Z'),
         hoursStale: 76,
+        // One finding carries a cause and the other does not, so the wire conversion is exercised
+        // on a live status AND on the unread case — the one a consumer is most likely to mistake
+        // for health.
+        institutionStatus: 'DEGRADED',
+        institutionStatusAt: new Date('2026-09-10T09:45:18.000Z'),
       },
       {
         institution: 'Fabricated Bank B',
@@ -231,6 +236,8 @@ function fabricatedSources(): OverviewSources {
         state: 'failing',
         lastSuccessfulUpdate: null,
         hoursStale: null,
+        institutionStatus: null,
+        institutionStatusAt: null,
       },
     ],
     // One of each reason, so the wire conversion is exercised on a null day count as well as a

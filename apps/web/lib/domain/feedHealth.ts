@@ -19,7 +19,20 @@ export interface FeedObservation {
   accountCount: number;
   lastSuccessfulUpdate: Date | null;
   lastFailedUpdate: Date | null;
+  /**
+   * What Plaid says about the institution, or null if nobody has asked yet.
+   *
+   * NULL IS NOT HEALTHY — it is "unread", which is true of every item until its next sync and
+   * permanently true of an institution Plaid publishes no status for. Collapsing the two would turn
+   * silence into reassurance.
+   */
+  institutionStatus: InstitutionStatus | null;
+  /** Plaid's own `last_status_change`, not when this app read it. */
+  institutionStatusAt: Date | null;
 }
+
+/** Plaid's three levels, unchanged: the majority of requests succeed, some do, none do. */
+export type InstitutionStatus = 'HEALTHY' | 'DEGRADED' | 'DOWN';
 
 export type FeedState =
   /** The most recent refresh Plaid attempted failed. The strongest signal, and the earliest. */
@@ -37,6 +50,15 @@ export interface FeedFinding {
   lastSuccessfulUpdate: Date | null;
   /** Whole hours since the last successful update; null when there has never been one. */
   hoursStale: number | null;
+  /**
+   * The CAUSE, carried beside the symptom.
+   *
+   * Reported whatever it says, including `HEALTHY`. A healthy institution behind a stale feed is
+   * not a contradiction to hide — it is the most useful thing this field can say, because it means
+   * the problem is this connection rather than the bank, and re-authenticating is worth trying.
+   */
+  institutionStatus: InstitutionStatus | null;
+  institutionStatusAt: Date | null;
 }
 
 /**
@@ -83,6 +105,11 @@ export function feedFindings(observations: FeedObservation[], now: Date): FeedFi
       hoursStale: obs.lastSuccessfulUpdate === null
         ? null
         : Math.floor((now.getTime() - obs.lastSuccessfulUpdate.getTime()) / HOUR_MS),
+      // Carried through untouched. This module decides whether a feed is worth reporting; it does
+      // not decide what Plaid's status means, and a rule here that suppressed a finding because the
+      // institution looks healthy would hide exactly the case worth acting on.
+      institutionStatus: obs.institutionStatus,
+      institutionStatusAt: obs.institutionStatusAt,
     });
   }
   const rank = { failing: 0, stale: 1 } as const;

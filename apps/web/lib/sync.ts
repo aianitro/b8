@@ -1,3 +1,4 @@
+import { CountryCode } from 'plaid';
 import { plaidClient } from './plaid';
 import { reconcileAccountIds } from './plaidReconcile';
 import { recordPlaidBalances } from './plaidBalances';
@@ -192,12 +193,51 @@ async function syncItem(
   // the thing that breaks health.
   let itemOk: string | null = null;
   let itemFailed: string | null = null;
+  let institutionId: string | null = null;
+  let instStatus: string | null = null;
+  let instStatusAt: string | null = null;
   try {
     const { data } = await plaidClient().itemGet({ access_token: accessToken });
     itemOk = data.status?.transactions?.last_successful_update ?? null;
     itemFailed = data.status?.transactions?.last_failed_update ?? null;
+    // Free: this response already carries it and the field was being discarded. It is the key
+    // `/institutions/get_by_id` needs, and without it the status below cannot be asked for at all.
+    institutionId = data.item?.institution_id ?? null;
   } catch (err) {
     log.warn('item status unavailable', { error: err instanceof Error ? err.message : String(err) });
+  }
+
+  // ─── WHY the feed is dead, which the freshness columns above can never say ───────────────────
+  //
+  // `feedHealth` already reports that data is N hours old. It cannot say whether the bank needs
+  // re-authenticating, Plaid is having a bad day, or there were simply no transactions — three
+  // situations wanting three different reactions, only one of them any work. Plaid publishes the
+  // answer; during a four-day Chase outage it read DEGRADED with a 22.7% Plaid-side error rate, and
+  // nothing here asked.
+  //
+  // Wrapped and swallowed for the same reason as the call above: a diagnostic reading must never be
+  // the thing that breaks a sync whose transactions are already committed. Unlike the refresh
+  // refusal counted earlier, this one genuinely does not belong in the run's outcome — not knowing
+  // the cause of a problem is not itself a problem with the run.
+  if (institutionId) {
+    try {
+      const { data } = await plaidClient().institutionsGetById({
+        institution_id: institutionId,
+        country_codes: [CountryCode.Us],
+        options: { include_status: true },
+      });
+      // `transactions_updates`, not `item_logins`. The latter measures whether LOGINS succeed, which
+      // is the right signal when re-authentication is the problem; a dead transaction feed is about
+      // the product this app actually consumes, and an institution can log in perfectly while
+      // refusing to hand over transactions. Falls back when Plaid publishes no transactions figure.
+      const product = data.institution.status?.transactions_updates ?? data.institution.status?.item_logins ?? null;
+      instStatus = product?.status ?? null;
+      // Plaid's own last_status_change: "degraded since Thursday" is the useful sentence, where
+      // "we noticed at 6am" is about us.
+      instStatusAt = product?.last_status_change ?? null;
+    } catch (err) {
+      log.warn('institution status unavailable', { error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   // One statement, so an item's cursor and its freshness can never disagree about which sync they
@@ -209,9 +249,15 @@ async function syncItem(
         SET cursor = $1,
             last_synced_at = NOW(),
             item_last_successful_update = COALESCE($3::timestamptz, item_last_successful_update),
-            item_last_failed_update     = COALESCE($4::timestamptz, item_last_failed_update)
+            item_last_failed_update     = COALESCE($4::timestamptz, item_last_failed_update),
+            institution_id              = COALESCE($5, institution_id),
+            -- COALESCE like the two above: a run that could not reach Plaid keeps the last known
+            -- reading rather than blanking it, which would read as "never asked" and quietly turn a
+            -- known-degraded institution into one with nothing to say about it.
+            item_institution_status     = COALESCE($6, item_institution_status),
+            item_institution_status_at  = COALESCE($7::timestamptz, item_institution_status_at)
       WHERE id = ANY($2)`,
-    [currentCursor, accountIds, itemOk, itemFailed]
+    [currentCursor, accountIds, itemOk, itemFailed, institutionId, instStatus, instStatusAt]
   );
 
   if (unmatchedAccountIds.size > 0) {

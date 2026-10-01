@@ -645,6 +645,20 @@ export const FeedFindingSchema = z.object({
   state: z.enum(['failing', 'stale']),
   lastSuccessfulUpdate: timestamptz.nullable(),
   hoursStale: z.int().nullable(),
+  /**
+   * What Plaid says about the institution itself, or null if it has never been read.
+   *
+   * This is the CAUSE beside the symptom. Staleness alone leaves the owner guessing between "my
+   * bank needs re-authenticating", "Plaid is having a bad day" and "there were simply no
+   * transactions" — three situations wanting three different reactions, only one of them any work.
+   *
+   * NULL IS NOT HEALTHY. It means nobody has asked yet, which is true of every account until the
+   * next sync and permanently true of an institution Plaid has no status for. A consumer that
+   * renders null as "all good" would turn "we don't know" into a reassurance.
+   */
+  institutionStatus: z.enum(['HEALTHY', 'DEGRADED', 'DOWN']).nullable(),
+  /** Plaid's own last_status_change — "degraded since Thursday", not when this app noticed. */
+  institutionStatusAt: timestamptz.nullable(),
 });
 
 /**

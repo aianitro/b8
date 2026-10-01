@@ -27,6 +27,20 @@ CREATE TABLE IF NOT EXISTS accounts (
   -- `type = 'other'` only happens to fit today. "Can you hold it and count it" is a fact about the
   -- account, like valuation_mode and is_liability, not something its transactions reveal.
   countable           BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Plaid's institution id, free from the `/item/get` call sync already makes for the two freshness
+  -- columns below, and the key `/institutions/get_by_id` needs.
+  institution_id      TEXT,
+  -- WHY a feed is dead, not just that it is. feedHealth already reports staleness; this is what
+  -- turns "your data is 98 hours old" into "...because Plaid has had this bank degraded since
+  -- Thursday" — which is the difference between waiting and re-authenticating. Read from
+  -- `transactions_updates` (the product this app consumes), falling back to `item_logins`.
+  -- Item-level facts stored per account, exactly like item_last_*_update beside them.
+  item_institution_status    TEXT
+    CONSTRAINT accounts_institution_status_known
+      CHECK (item_institution_status IS NULL OR item_institution_status IN ('HEALTHY', 'DEGRADED', 'DOWN')),
+  -- Plaid's own last_status_change, not when this app read it: "degraded since Thursday" is useful,
+  -- "we noticed at 6am" is about us.
+  item_institution_status_at TIMESTAMPTZ,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
