@@ -14,10 +14,15 @@ const NAV = [
   { href: '/budget',       label: 'Budget',        icon: PieChart },
   { href: '/balances',     label: 'Balances',      icon: Landmark },
   { href: '/transactions', label: 'Transactions',  icon: ArrowLeftRight },
+  { href: '/properties',   label: 'Properties',    icon: Home },
+];
+
+// WHAT FEEDS AND SHAPES THE LEDGER, not places you go to read it — so these sit under their own
+// heading instead of among the pages above.
+const CONFIGURATION = [
+  { href: '/accounts',     label: 'Accounts',      icon: Building2 },
   { href: '/rules',        label: 'Rules',         icon: Zap },
   { href: '/categories',   label: 'Categories',    icon: Tag },
-  { href: '/accounts',     label: 'Accounts',      icon: Building2 },
-  { href: '/properties',   label: 'Properties',    icon: Home },
   { href: '/import',       label: 'Import CSV',    icon: Upload },
 ];
 
@@ -59,6 +64,11 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
     <>
       <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
         {NAV.map((item) => <NavItem key={item.href} {...item} pathname={pathname} onNavigate={onNavigate} />)}
+        <div className="border-t border-white/20 mt-3 mb-3" />
+        <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-cyan-100/70 mb-2">
+          Configuration
+        </p>
+        {CONFIGURATION.map((item) => <NavItem key={item.href} {...item} pathname={pathname} onNavigate={onNavigate} />)}
       </nav>
       <div className="px-3 pb-6">
         <div className="border-t border-white/20 mb-3" />
