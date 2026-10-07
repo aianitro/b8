@@ -30,3 +30,7 @@
 ## Cycle 1 — orchestrator G2 + browser re-check (2026-10-07, commit 6166ed7)
 G2 re-run in the worktree: #1 exit 0; #2 exit 0; #3 `60 passed`; #4 `15 passed`; #5 `1112 passed`; #6 exit 0 (879ad00..HEAD); #7 exit 1; #8 `1` / `1`.
 Browser (Chrome, 390px same-origin iframes, compiled pages reloaded, frames at ~1 s, ~2 s, ~5 s): the dead-host row shows only its `D` tile in every frame on both pages — **F1 fixed**; the loading logo shows its tile first and the logo replaces it once loaded (`opacity` animating 0→1); after settling the dead image is present at `opacity 0`, `naturalWidth 0` — invisible; `scrollWidth 388 = innerWidth 388` on both pages. H9 removed by construction (no `naturalWidth === 0` path; WebKit still not available — the remaining risk is only "a logo that never loads shows its tile", which fails safe).
+
+**G3 (cycle 1):** PASS — REVIEW-2 ACCEPT_WITH_NITS, 10 hypotheses, 0 BLOCK; H9 gone by construction; only the carried-over #8 exit-status note. One benign case noted, not raised: a viewBox-only SVG loaded before hydration in Gecko stays hidden behind its tile (Plaid logos are PNG).
+
+**G4:** PASS 2026-10-07 on main after merging the branch over P6-40c's commit 0fe837f — `npm test` 72 files / 1112 passed; tsc exit 0; lint exit 0 (nested worktree excluded); `npm run build` compiled. Browser evidence: see the two orchestrator sections above.
