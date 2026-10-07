@@ -68,10 +68,10 @@ Five rules. A violation of any one is a P0 process defect, not a style disagreem
 | Role | Tools | Writes | Reads | Runs commands | Model |
 |---|---|---|---|---|---|
 | **orchestrator** | main session | `plan/`, task state | all | **yes — owns all gates** | Opus |
-| **spec-writer** | Read, Grep, Glob | *(returns spec; orchestrator persists)* | all | no | Sonnet |
-| **contract-guardian** | Read, Edit, Write | contract surface (§2) **only** | all | no | Opus |
-| **implementer** | Read, Write, Edit, Bash | `lib/**`, `app/**`, `components/**`, `scripts/**`, tests | all | yes | Opus |
-| **adversarial-reviewer** | Read, Grep, Glob | nothing | all | **no** | Opus |
+| **spec-writer** | Read, Grep, Glob, Skill | *(returns spec; orchestrator persists)* | all | no | Sonnet |
+| **contract-guardian** | Read, Edit, Write, Skill | contract surface (§2) **only** | all | no | Opus |
+| **implementer** | Read, Write, Edit, Bash, Skill | `lib/**`, `app/**`, `components/**`, `scripts/**`, tests | all | yes | Opus |
+| **adversarial-reviewer** | Read, Grep, Glob, Skill | nothing | all | **no** | Opus |
 
 Three deliberate asymmetries:
 
@@ -630,6 +630,7 @@ is enough of one — but it argues for aiming the ceremony, not for applying it 
 | A8 | **Risk-tier the pipeline.** A task that touches no contract surface, no migration, no outbound surface and no money arithmetic runs G0 → G2 → G4, with G3 advisory rather than blocking. The orchestrator records the tier and the four-part reason in `GATES.md` before dispatch, so the choice is auditable rather than a mood. G1 already skips on the same principle; this extends it | §6 lifecycle · §7 | The first measurement: 8 of 10 tasks passed every gate first time. Uniform ceremony on non-uniform risk is the cost with no defect behind it |
 | A9 | **Acceptance-command budget.** A command that asserts only that a file exists is not an acceptance command and is refused at G0 — `tsc`, the suite and the build already prove existence, and a stub satisfies it. Every command must name the broken implementation it would catch, and the orchestrator rejects any it cannot name one for | §7.1 checklist · SPEC template | P1-11's 44 commands, 8 of them `test -f`. The vacuity rule existed and was applied to fixtures but never to the command list itself |
 | A10 | **The proxy question, asked of every command at G0:** *what does this measure, and is that the rule or a stand-in for it?* Where a structural property can be checked by parsing or by the type system, a text search is refused | §7.1 checklist | Six instances across P1-10 and P1-11, listed above. Every one passed G0 as written and failed later, at G1, G2 or G3, costing a full cycle each time |
+| A11 | **Token discipline (owner's instruction, 2026-10-07).** Every pipeline role invokes the `caveman` skill (user-level, from JuliusBrussee/caveman, only that one skill installed) for its report back to the orchestrator; anything persisted — specs, contracts, evidence, code, commits — stays full prose. The implementer and the orchestrator prefix *exploratory* shell commands with `rtk` (rtk-ai/rtk, Homebrew, no global hook); acceptance commands, mutation probes and every gate's evidence run plain. `Skill` added to each role's tools; it grants instructions, not paths | §4 roster · `.claude/agents/*.md` | Not an escape: a cost measure. Recorded with its limits — `rtk test`'s compact view was measured dropping a failing test's name, which is why gate evidence never passes through rtk; caveman's own rule keeps negations, numbers, paths and errors verbatim |
 
 **A8 is the one to watch, and it cuts against this document's instincts.** Every previous amendment
 added a check; this one removes one, and the failure mode is obvious — a task tiered down that

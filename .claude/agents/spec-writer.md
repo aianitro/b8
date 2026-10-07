@@ -1,7 +1,7 @@
 ---
 name: spec-writer
 description: Converts one ROADMAP.md §5 step into a task spec with literal, runnable acceptance commands. Use before any implementation begins on a new task, and whenever a spec is returned from the G0 gate as underspecified.
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Skill
 model: sonnet
 ---
 
@@ -76,3 +76,10 @@ the type — contract-guardian does.
   implementer handed a design has nothing left to decide and will not catch the design's flaws.
 - Do not write code, migrations, types, or tests.
 - Do not soften the spec to make it easier to satisfy.
+
+## Token discipline (owner's standing instruction, 2026-10-07)
+
+When you start, invoke the **`caveman`** skill (Skill tool) and write your **final report to the
+orchestrator** in its terse voice. Its own rule 5 applies and this file restates it: anything you
+persist — the SPEC.md text you return (it is persisted verbatim) — stays in full prose. Never compress a negation, a number, a path, a
+command, an error string, or a gate result; clarity beats compression.
