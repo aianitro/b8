@@ -260,9 +260,42 @@ CREATE TABLE IF NOT EXISTS transactions (
   mapped_category       TEXT,
   rule_applied          BOOLEAN NOT NULL DEFAULT FALSE,
   transfer_group_id     INT REFERENCES transfer_groups(id) ON DELETE SET NULL,
+  -- Attributes this one transaction to a property, overriding the account it sits on. INHERITING:
+  -- resolved as COALESCE(t.property_id, a.property_id), so an explicit tag wins and the account's
+  -- accounts.property_id supplies the default. NULL means "inherit from the account", NOT
+  -- "unattributed" -- a reader that treats NULL as unattributed silently drops every row of a
+  -- linked account. Exists for a property's money that moved through an account not its own (e.g.
+  -- before its dedicated account was opened), where linking that whole account would drag every
+  -- unrelated transaction onto the property's books. Added by migration 1786646344365.
+  property_id           INT REFERENCES properties(id) ON UPDATE CASCADE ON DELETE SET NULL,
   hidden                BOOLEAN NOT NULL DEFAULT FALSE,  -- excluded from budget/dashboard calcs; still visible (grayed out) on /transactions
   watched_at            TIMESTAMPTZ,                     -- NOT NULL *is* the "keep an eye on this" flag; the timestamp is what lets an entry age
   note                  TEXT,                            -- the owner's own comment, e.g. "returning to Zara". INDEPENDENT of watched_at since 2026-09-22: writing a note does not flag a row, and unflagging does not discard the note
+  -- Plaid's enrichment (P6-40b). All eleven nullable with no default and no CHECK, and no index.
+  -- NULL has two meanings and plaid_raw tells them apart: with plaid_raw set, a NULL column means
+  -- Plaid did not say (omitted, null, or a blank string -- never stored as '' or 0); with plaid_raw
+  -- NULL, nothing was captured (a row older than the migration and not re-synced since, or a
+  -- manual/CSV/cash row), so the enrichment is UNKNOWN. No CHECKs because these are Plaid's
+  -- vocabularies and Plaid extends them; a closed list would fail a whole item's sync over one new
+  -- value. Coordinates, street address and store number are too sparse to earn columns (see
+  -- plan/tasks/P6-40b-plaid-enrichment/COVERAGE.md) and are kept in plaid_raw instead.
+  plaid_category_detailed   TEXT,                        -- personal_finance_category.detailed. A NEW name on purpose: plaid_category above stays the PRIMARY category, because stored rows and every category_rules.plaid_category key depend on that meaning (BUILD.md §9.2). Does not drive categorisation
+  plaid_category_confidence TEXT,                        -- personal_finance_category.confidence_level, verbatim
+  authorized_date           DATE,                        -- the day the card was authorised (date above is posted). DATE, not text or timestamptz: Plaid sends a zone-less calendar date
+  payment_channel           TEXT,                        -- verbatim ('in store' stays 'in store'), unconstrained. NOT an exclusion signal: 'other' hides nothing
+  merchant_entity_id        TEXT,
+  logo_url                  TEXT,
+  website                   TEXT,
+  location_city             TEXT,
+  location_region           TEXT,
+  location_country          TEXT,
+  -- The single Plaid Transaction object as received: every key, null-valued ones included, nothing
+  -- renamed, flattened or added. Kept so a field wanted later needs no second backfill. EXACTLY ONE
+  -- redaction: counterparties[*].account_numbers is removed, the only part carrying a third party's
+  -- bank account number (BUILD.md §10.3). account_owner and payment_meta are kept on purpose. JSONB
+  -- so it is queryable in place. A record only: its `amount` is never read as money (the amount
+  -- column is authoritative), and no route or contract type may select or return it.
+  plaid_raw                 JSONB,
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   -- No constraint tying the note to the flag. There WAS one, and it made writing a comment the same
   -- act as putting a row on the watchlist -- which, once watched rows started being excused from the
@@ -273,6 +306,9 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_transactions_mapped_category ON transactions(mapped_category);
 CREATE INDEX IF NOT EXISTS idx_transactions_transfer_group ON transactions(transfer_group_id);
+-- Partial: almost every transaction inherits its property from its account and is never looked up
+-- this way, so only the explicitly tagged rows are indexed.
+CREATE INDEX IF NOT EXISTS idx_transactions_property_id ON transactions(property_id) WHERE property_id IS NOT NULL;
 -- Partial: watched rows are the rare ones and the only ones this predicate ever selects.
 CREATE INDEX IF NOT EXISTS idx_transactions_watched ON transactions(watched_at) WHERE watched_at IS NOT NULL;
 

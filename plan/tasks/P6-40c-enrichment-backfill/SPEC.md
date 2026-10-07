@@ -1,6 +1,6 @@
 # P6-40c-enrichment-backfill — Backfill Plaid enrichment onto stored transactions
 **Roadmap item:** ROADMAP.md §5 step 40c — one-off, re-runnable backfill; fetches each item's history without touching the sync cursor, UPDATEs only existing rows, dry-run first, CSV backup before the real run
-**Status:** DRAFT (to be reconciled with the frozen P6-40a and P6-40b specs at G0 by the orchestrator; see "Reconciliation points")
+**Status:** FROZEN@G0 (2026-10-07; orchestrator reconciliation and amendments in the G0 record at the end and in GATES.md)
 **Author:** spec-writer
 
 ## Goal
@@ -157,3 +157,12 @@ Operational record, produced by the orchestrator after merge on the owner's serv
 - Whether `vitest` verbose output prints each test title exactly once per run in this repo's reporters when `disableConsoleIntercept` is true (prior specs P1-12 #22-#32 rely on it; I did not run it).
 - Whether the root `package.json` forwarder pattern (`npm run X -w @b8/web`) is wanted for this script; acceptance #3 assumes yes.
 - Whether the mode-0600 CSV in `apps/backups/` is replicated off-box by the owner's backup routine (backup.ts comments mention a laptop/Drive replication of the backups directory); plaintext real rows there would be a new exposure. Flagged for the orchestrator/owner, with no encryption added here (non-goal).
+
+---
+
+## G0 record (orchestrator, 2026-10-07) — reconciliation and amendments; these OVERRIDE the text above where they differ
+1. **40b's shared mapping** (merged before this task): `apps/web/lib/plaidEnrichment.ts` exports `plaidEnrichment(txn) → PlaidEnrichment` and `enrichmentParams(e)` (the ordered values for the eleven columns), and `redactedPlaidTransaction(txn)`. BF-02's expectation is "equals `plaidEnrichment(fixture)`" written to the eleven columns `plaid_category_detailed, plaid_category_confidence, authorized_date, payment_channel, merchant_entity_id, logo_url, website, location_city, location_region, location_country, plaid_raw`. The backfill writes only those eleven (D2).
+2. **Done marker (D3):** the raw column is `plaid_raw`. 40b's contract makes it non-NULL on every row a sync writes and NULL on every pre-existing row, so `plaid_raw IS NULL` is the target predicate as specified.
+3. **Tombstone store (BF-01/BF-04):** table `transaction_tombstones(plaid_transaction_id TEXT PRIMARY KEY, deleted_at TIMESTAMPTZ)` from P6-40a. BF-04 seeds a tombstone row for a fixture id that has no transaction row and asserts it is not inserted.
+4. **Backup location — AMENDED (rule 5, acceptance #7, BF-11).** `apps/backups/` is NOT acceptable: `ops/laptop/pull-backups.sh` rsyncs that whole directory to the owner's laptop, so a plaintext CSV of real rows there would be copied off the server unencrypted. The default backup directory is `$HOME/b8-backfill-backups` (overridable by an explicit `--backup-dir <path>` flag), created with mode `0700`, the CSV `0600`. **Rule:** the resolved backup directory must not be inside the git work tree and must not be inside `apps/backups` (or any `backups` directory the pull script reads); the script refuses (non-zero exit, before any DB read) if it is. Acceptance #7 is replaced by: `⟨I⟩ \| grep -c 'BF-17'` → `1`, where **BF-17** asserts (a) the default directory resolves to `$HOME/b8-backfill-backups`, (b) `--backup-dir` pointing inside the repo or inside `apps/backups` is refused before any DB or network access, (c) a created directory is `0700`. BF-11/BF-12 use a temp directory passed via `--backup-dir`.
+5. **Toolchain (verified):** T1 scratch DB `b8_p640c_throwaway` created and migrated by the orchestrator before dispatch; T2 `migrations/` holds 26 files after 40a+40b; T3 `git version 2.50.1`; T4 `ok`; scripts in `apps/web/scripts/` already import `../lib/db` under `tsx --env-file=.env.local` (`daily-job.ts`, `tokens.ts`), so the pattern works. Acceptance #2 baseline = the unit count after 40b merges (1033 at G2).

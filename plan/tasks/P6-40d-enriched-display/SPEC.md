@@ -1,6 +1,6 @@
 # P6-40d-enriched-display — Show merchant logo, authorized date and location on rows
 **Roadmap item:** ROADMAP.md §5 "Phase 6 — Data fidelity" step 40d — "show it": merchant logo on statement and transaction rows (falling back to the current row when absent); authorized date and location in a transaction's detail. UI only.
-**Status:** DRAFT
+**Status:** FROZEN@G0 (2026-10-07)
 **Author:** spec-writer
 
 ## Goal
@@ -29,7 +29,7 @@ Each of these is a defect if it appears in the diff.
 - Do not change the "Show more" paging in `AccountStatementList` or the swipe-to-delete gesture.
 
 ## Contracts touched
-None. The implementer reads the nullable columns added by P6-40b (meanings: logo URL, authorized date, location city, location region). Provisional names used below are `logo_url`, `authorized_date`, `location_city`, `location_region`. The orchestrator reconciles them with 40b's frozen SPEC at G0.
+None. The implementer reads the nullable columns added by P6-40b (meanings: logo URL, authorized date, location city, location region). Provisional names used below are `logo_url`, `authorized_date`, `location_city`, `location_region`. **Reconciled at G0: these are exactly P6-40b's frozen column names** (`migrations/1791360000000_plaid-enrichment.sql`); the raw column the non-goals forbid selecting is `plaid_raw`.
 
 **Prerequisite:** P6-40b has landed. Its columns must exist before the SELECTs can be changed. The acceptance commands do not need a database.
 

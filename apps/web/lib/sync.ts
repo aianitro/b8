@@ -6,6 +6,7 @@ import db from './db';
 import { createLogger } from './logger';
 import { matchReissuedTransactions } from './domain/txnMatch';
 import { ruleFor, type CategoryRule } from './domain/categoryRules';
+import { enrichmentParams, plaidEnrichment } from './plaidEnrichment';
 // Reused rather than re-written: node-postgres hands back a DATE column as a JS Date at local
 // midnight, and toISOString() would shift it a day earlier at any UTC+ offset. That trap is
 // already solved (and tested) there; duplicating the logic here is how the two drift apart.
@@ -160,10 +161,25 @@ async function syncItem(
       // reading that a delete landing mid-sync (or between two pages) has already made stale, and
       // the row would come back. Asked here, the question is answered at the moment it matters.
       // A skipped id is not counted: `rowCount` is 0 when the guard proposed nothing.
+      //
+      // THE ENRICHMENT (P6-40b) IS PLAID'S LATEST STATEMENT, OVERWRITTEN WHOLE. Each of the eleven
+      // columns is set from EXCLUDED with no COALESCE against the stored value: when Plaid stops
+      // sending a logo or a city, the row stops claiming one. Keeping the old value would make a
+      // row a blend of statements Plaid made at different times, true of none of them. The owner's
+      // own fields (mapped_category here, and hidden, watched_at, note, transfer_group_id,
+      // property_id everywhere) are still never named in the DO UPDATE. This is also the statement
+      // that fills in a row the re-identification above just renumbered: the UPDATE there moves the
+      // id only, and the conflict here refreshes everything Plaid-sourced, enrichment included —
+      // so there is one write path for Plaid's fields, not a second one that could skip the
+      // tombstone guard or forget a column. The values come from `plaidEnrichment`, which both
+      // loops share, and `$12::date` takes Plaid's zone-less string with no Date in between.
       const written = await db.query(
         `INSERT INTO transactions
-           (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied)
-         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+           (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied,
+            plaid_category_detailed, plaid_category_confidence, authorized_date, payment_channel,
+            merchant_entity_id, logo_url, website, location_city, location_region, location_country, plaid_raw)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20::jsonb
           WHERE NOT EXISTS (SELECT 1 FROM transaction_tombstones tt WHERE tt.plaid_transaction_id = $1)
          ON CONFLICT (plaid_transaction_id) DO UPDATE
            SET account_id = EXCLUDED.account_id,
@@ -171,9 +187,21 @@ async function syncItem(
                amount = EXCLUDED.amount,
                name = EXCLUDED.name,
                merchant_name = EXCLUDED.merchant_name,
-               plaid_category = EXCLUDED.plaid_category`,
+               plaid_category = EXCLUDED.plaid_category,
+               plaid_category_detailed   = EXCLUDED.plaid_category_detailed,
+               plaid_category_confidence = EXCLUDED.plaid_category_confidence,
+               authorized_date           = EXCLUDED.authorized_date,
+               payment_channel           = EXCLUDED.payment_channel,
+               merchant_entity_id        = EXCLUDED.merchant_entity_id,
+               logo_url                  = EXCLUDED.logo_url,
+               website                   = EXCLUDED.website,
+               location_city             = EXCLUDED.location_city,
+               location_region           = EXCLUDED.location_region,
+               location_country          = EXCLUDED.location_country,
+               plaid_raw                 = EXCLUDED.plaid_raw`,
         [txn.transaction_id, txn.account_id, txn.date, txn.amount,
-         txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied]
+         txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied,
+         ...enrichmentParams(plaidEnrichment(txn))]
       );
       // A re-identified row is not new to the ledger, only newly-numbered — counting it as
       // added would report a re-auth as hundreds of fresh transactions.
@@ -199,10 +227,15 @@ async function syncItem(
       // Plaid keeps revising a transaction it has no idea the owner deleted. With no row proposed,
       // the guard also leaves alone a row that still bears a tombstoned id — it is not refreshed,
       // re-categorised, or resurrected, whichever of those this upsert would otherwise have done.
+      // The enrichment columns are overwritten exactly as in the `added` loop, for the same reason;
+      // a `modified` event that drops a field is the case that reason exists for.
       const written = await db.query(
         `INSERT INTO transactions
-           (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied)
-         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+           (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied,
+            plaid_category_detailed, plaid_category_confidence, authorized_date, payment_channel,
+            merchant_entity_id, logo_url, website, location_city, location_region, location_country, plaid_raw)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20::jsonb
           WHERE NOT EXISTS (SELECT 1 FROM transaction_tombstones tt WHERE tt.plaid_transaction_id = $1)
          ON CONFLICT (plaid_transaction_id) DO UPDATE
            SET account_id = EXCLUDED.account_id,
@@ -212,9 +245,21 @@ async function syncItem(
                merchant_name = EXCLUDED.merchant_name,
                plaid_category = EXCLUDED.plaid_category,
                mapped_category = CASE WHEN transactions.mapped_category IS NULL OR transactions.rule_applied = TRUE THEN EXCLUDED.mapped_category ELSE transactions.mapped_category END,
-               rule_applied    = CASE WHEN transactions.mapped_category IS NULL OR transactions.rule_applied = TRUE THEN EXCLUDED.rule_applied    ELSE transactions.rule_applied    END`,
+               rule_applied    = CASE WHEN transactions.mapped_category IS NULL OR transactions.rule_applied = TRUE THEN EXCLUDED.rule_applied    ELSE transactions.rule_applied    END,
+               plaid_category_detailed   = EXCLUDED.plaid_category_detailed,
+               plaid_category_confidence = EXCLUDED.plaid_category_confidence,
+               authorized_date           = EXCLUDED.authorized_date,
+               payment_channel           = EXCLUDED.payment_channel,
+               merchant_entity_id        = EXCLUDED.merchant_entity_id,
+               logo_url                  = EXCLUDED.logo_url,
+               website                   = EXCLUDED.website,
+               location_city             = EXCLUDED.location_city,
+               location_region           = EXCLUDED.location_region,
+               location_country          = EXCLUDED.location_country,
+               plaid_raw                 = EXCLUDED.plaid_raw`,
         [txn.transaction_id, txn.account_id, txn.date, txn.amount,
-         txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied]
+         txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied,
+         ...enrichmentParams(plaidEnrichment(txn))]
       );
       if (written.rowCount === 0) skippedTombstoned++;
     }

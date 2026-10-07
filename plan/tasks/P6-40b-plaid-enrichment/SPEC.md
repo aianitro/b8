@@ -1,6 +1,6 @@
 # P6-40b-plaid-enrichment — Keep Plaid's enrichment: first-class columns plus the retained transaction object
 **Roadmap item:** ROADMAP.md §5 Phase 6 step 40b — store the enrichment
-**Status:** DRAFT
+**Status:** FROZEN@G0 (2026-10-07; orchestrator amendments listed in GATES.md: T4 check, #10 made structural, BASE/N fixed, raw-object decision recorded)
 **Author:** spec-writer
 
 ## Goal
@@ -85,7 +85,7 @@ Required properties, for the guardian:
 | T1 | A local Postgres reachable at `localhost:5432` whose role can `createdb`/`dropdb` | **yes** | `docker compose up db`, or Homebrew Postgres per README | `psql postgresql://localhost:5432/postgres -Atc 'select 1'` → `1` | |
 | T2 | `psql`, `createdb`, `dropdb` on PATH | **yes** | Postgres client tools | `command -v psql createdb dropdb \| wc -l` → `3` | |
 | T3 | `node-pg-migrate` runnable via `npx` from the repo root, `migrations/` populated | **yes** | root devDependency | `npx node-pg-migrate --version` → exit 0 | |
-| T4 | P6-40a merged: its migration exists and its tombstone mechanism is in `lib/sync.ts` | **yes** | prior task | `git log --oneline -n 20 \| grep -ci tombstone` → ≥ 1; the 40a migration is the latest file in `migrations/` before this task's | |
+| T4 | P6-40a merged: its migration exists and its tombstone mechanism is in `lib/sync.ts` | **yes** | prior task (commit a236a34) | `ls migrations \| tail -1` → `1791352847213_transaction-tombstones.sql` before this task's migration is added (G0 amendment: the original `git log --oneline \| grep -ci tombstone` measured a commit subject, not the merge) | verified at G0 |
 | T5 | `$BASE` = the commit this task branched from (post-40a), exported by the orchestrator for diff-scope checks | **yes** | orchestrator | `git rev-parse --verify "$BASE"` → exit 0 | |
 | T6 | `apps/web/vitest.integration.config.mts` and `lib/testDbGuard.setup.ts` exist; the integration `include` glob already covers `app/api/v1/**/*.test.ts` (no config edit is needed or permitted) | **yes** | exists | `grep -c "app/api/v1" apps/web/vitest.integration.config.mts` → ≥ 1 | |
 | T7 | The scratch DB `b8_p640b_scratch` does not exist before the run and is never `b8_finance` | **yes** | acceptance #3 creates it | `psql postgresql://localhost:5432/postgres -Atc "select count(*) from pg_database where datname='b8_p640b_scratch'"` → `0` before #3 | |
@@ -115,7 +115,7 @@ Required properties, for the guardian:
 | 7 | Same as #6 but `TZ=Pacific/Auckland` | Same result. A positive-offset zone exposes a `toISOString()` date shift. |
 | 8 | `DATABASE_URL="postgresql://nobody@127.0.0.1:1/b8_finance" npx vitest run --config apps/web/vitest.integration.config.mts apps/web/app/api/v1/sync/enrichment.test.ts 2>&1 \| grep -c b8_finance` run from `apps/web` (`cd apps/web && …`) | ≥ 1, and the command's exit is non-zero. The new test file inherits the real-DB refusal and never reaches a connection. |
 | 9 | `node -e 'const s=require("fs").readFileSync("apps/web/lib/sync.ts","utf8");const cols=["plaid_category_detailed","plaid_category_confidence","authorized_date","payment_channel","merchant_entity_id","logo_url","website","location_city","location_region","location_country","plaid_raw"];const blocks=s.split("INSERT INTO transactions").slice(1).map(b=>b.slice(0,b.search(/`,/)));if(blocks.length<1)process.exit(2);for(const b of blocks){for(const c of cols){if(!new RegExp(c+"\\s*=\\s*EXCLUDED\\."+c).test(b))process.exit(3)}if(/COALESCE\s*\(\s*EXCLUDED/i.test(b))process.exit(4)}console.log("OK "+blocks.length)'` | `OK <k>` with k ≥ 1, exit 0. This is the A7 static pin: every upsert statement in `lib/sync.ts` overwrites all eleven columns from the incoming row, and none keeps the old value when Plaid omits one. It supplements #6, which is behavioural. |
-| 10 | `node -e 'const s=require("fs").readFileSync("db/schema.sql","utf8");const m={authorized_date:"DATE",plaid_raw:"JSONB",plaid_category_detailed:"TEXT",plaid_category_confidence:"TEXT",payment_channel:"TEXT",merchant_entity_id:"TEXT",logo_url:"TEXT",website:"TEXT",location_city:"TEXT",location_region:"TEXT",location_country:"TEXT"};for(const [c,t] of Object.entries(m)){if(!new RegExp("\\b"+c+"\\s+"+t+"\\b","i").test(s))process.exit(1)}console.log("OK")'` | `OK`. `db/schema.sql` states each column with the migration's type. (Text proxy, acknowledged: `schema.sql` is not loadable without pgvector, so structure cannot be checked more directly.) |
+| 10 | `S2=postgresql://localhost:5432/b8_p640b_schema; dropdb --if-exists b8_p640b_schema && createdb b8_p640b_schema && psql -v ON_ERROR_STOP=1 -q "$S2" -f db/schema.sql >/dev/null && Q="select column_name\|\|':'\|\|data_type\|\|':'\|\|is_nullable\|\|':'\|\|coalesce(column_default,'-') from information_schema.columns where table_name='transactions' order by column_name collate \"C\""; diff <(psql postgresql://localhost:5432/b8_p640b_scratch -Atc "$Q") <(psql "$S2" -Atc "$Q") && echo PARITY` | `PARITY` — every `transactions` column (name, type, nullability, default) is identical between the migrated scratch DB and a DB built from `db/schema.sql`. G0 amendment (A10): the original regex over `db/schema.sql` was a text proxy, justified by a claim that `schema.sql` is not loadable; the orchestrator loaded it into an empty DB (exit 0), so the structural check is available. |
 | 11 | `grep -rl plaid_raw apps packages --include='*.ts' --include='*.tsx' --include='*.mjs' \| sort \| grep -vE '^apps/web/(lib/.*([Ss]ync\|[Pp]laid).*\.ts\|app/api/v1/sync/enrichment\.test\.ts)$'` | Empty output. No route, component, contract, or generic reader mentions `plaid_raw`. Only a sync- or plaid-named file under `apps/web/lib` and the new test may. |
 | 12 | `grep -rlE "plaid_category_detailed\|plaid_category_confidence\|merchant_entity_id\|location_city\|logo_url" apps/web/app apps/web/components packages 2>/dev/null \| grep -v 'enrichment.test.ts'` | Empty output. Nothing outside sync and the test consumes the columns (non-goals: no UI, no payload). |
 | 13 | `git diff --name-only "$BASE" \| grep -vE '^(migrations/[0-9]+_.*\.sql\|db/schema\.sql\|apps/web/lib/\|apps/web/app/api/v1/sync/enrichment\.test\.ts\|plan/)'` | Empty output. Nothing outside the allowed surface changed: migration, schema reference, `lib/`, the new test, plan files. |
@@ -239,3 +239,34 @@ Plaid fixtures contain every `Transaction` key, populated with fabricated values
 - **The SDK object in practice.** `Transaction` in `node_modules/plaid/dist/api.d.ts` is typed, but real responses may carry keys the SDK type lacks. "As received" means the parsed JSON body's object, so extra keys are kept. A fixture can't prove that, only the stated rule.
 - **`apps/web/tsconfig.json` coverage.** I did not confirm `tsc --noEmit` includes test files, so #1 may not type-check the new test.
 - **Baseline N** (T8) is not known until after 40a merges. The spec deliberately states `≥ N` rather than a frozen number (§15 A6).
+
+---
+
+## G0 record (orchestrator, 2026-10-07)
+- **BASE** = `a236a34` (P6-40a merged). **N** (T8) = `1024` unit tests passed.
+- **Raw-object redaction decision (the spec asked for owner confirmation):** recorded by the orchestrator under the owner's "deliver in auto mode" instruction. Keep `account_owner` and `payment_meta` in `plaid_raw`; remove only `counterparties[*].account_numbers`. Reason: the kept fields are personal text of the same class `name` and `merchant_name` already hold, they stay in the owner's local database, no route selects `plaid_raw` (#11), and the third-party account numbers are the one field that identifies someone else's bank account. Surfaced to the owner in the session summary.
+
+## G3 amendment (orchestrator, 2026-10-07, after REVIEW-1 B1 was confirmed by command)
+**Rule, overriding "as received" in one respect:** every string value the enrichment writes — each
+of the ten text columns and every string anywhere inside `plaid_raw` (keys and values, recursively,
+including inside arrays) — has each U+0000 and each unpaired UTF-16 surrogate replaced by U+FFFD
+before it is bound. Nothing else is altered: no other character, no key added or removed beyond the
+existing `account_numbers` redaction, no number or boolean touched. Reason: Postgres refuses both in
+`jsonb` (`unsupported Unicode escape sequence` / `invalid input syntax for type json`) and refuses
+U+0000 in `text`; one such transaction would otherwise fail the statement, abort `syncItem` before its
+cursor update, and stall that institution's sync permanently — the spec's own "one odd transaction
+must not blank the batch" failure mode.
+**New required evidence (added to acceptance #6/#7's scenario floor — now ≥ 18 passing):**
+- **S18:** a page carrying a posted transaction whose `payment_meta.reference_number`,
+  `counterparties[0].name`, `location.city` and `merchant_name`-adjacent new text fields contain
+  U+0000 and a lone high surrogate, followed by an ordinary transaction. Sync completes with no
+  error, the cursor advances to the page's `next_cursor`, both rows are stored, and the affected
+  values contain U+FFFD where the bad code units were and are otherwise identical.
+- A unit test of the sanitiser: U+0000 → U+FFFD; lone high and lone low surrogates → U+FFFD; a
+  valid surrogate pair (an emoji) is preserved unchanged; non-string values pass through untouched;
+  the input object is not mutated.
+**N1:** replace `as Required<Transaction>` with a check the compiler enforces (`satisfies`, or an
+explicitly typed const), and keep the header comment true.
+**Out of scope, recorded as hold H6:** the pre-existing base columns `name` / `merchant_name`
+(written by sync since before 40b) have the same U+0000 exposure in `text`; changing what sync writes
+to them is not this task's to decide.
