@@ -43,7 +43,11 @@ export interface TxnMatchResult {
   insert: IncomingTxn[];
 }
 
-const key = (t: { accountId: string; date: string; amount: number; name: string | null }) =>
+// Exported, unchanged, for `scripts/rekey-plaid-ids.ts` (P6-40e). That script must decide ambiguity
+// BEFORE pairing — this matcher claims greedily, which is right mid-sync and wrong for a one-off
+// repair — so it groups rows by this key first. Importing it rather than restating it is what keeps
+// "the same transaction" one definition: a copy would drift the first time this line changes.
+export const key = (t: { accountId: string; date: string; amount: number; name: string | null }) =>
   `${t.accountId}|${t.date}|${t.amount.toFixed(2)}|${(t.name ?? '').trim().toLowerCase()}`;
 
 /**

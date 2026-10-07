@@ -74,6 +74,7 @@ the item that justified it.
 | P6-40b-plaid-enrichment | 40b | **MERGED** 2026-10-07 — eleven nullable enrichment columns on `transactions` (detailed category + confidence, authorized date, payment channel, merchant entity id, logo, website, city/region/country) and `plaid_raw` (the Plaid object minus third-party account numbers), written by both sync upserts through one shared mapping without touching owner-set fields or 40a's tombstone guard. **REVIEW-1 BLOCKed it on a real defect**: a U+0000 or lone surrogate in any newly stored field would have made Postgres refuse the row and stalled that item's sync forever (cursor saved only after the page); confirmed by command, fixed by sanitising to U+FFFD, caught by S18. 1 cycle | 40a (both edit `lib/sync.ts`; serialized) | `migrations/**`, `db/schema.sql` — new nullable `transactions` columns (expected additive) |
 | P6-40c-enrichment-backfill | 40c | **MERGED** 2026-10-07 — `npm run backfill:enrichment` (dry-run default, `--apply`), update-only of the eleven 40b columns where `plaid_raw IS NULL`, cursor never read or written, verified CSV backup outside the repo before any UPDATE. REVIEW-1 found three nits (one confirmed by command: the root forwarder swallowed `--apply`), fixed as an explicit cycle because the script runs once on real data. Real run: see EVIDENCE.md | 40a, 40b | none expected |
 | P6-40d-enriched-display | 40d | **MERGED** 2026-10-07 — merchant logo tile on account-statement and Transactions rows (https-only via `safeLogoUrl`, `no-referrer`, never painted until loaded), authorized date and city/region as a detail line when they add something. Orchestrator's browser check found the broken-image icon flashing on a dead logo at 390px; cycle 1 made the image invisible until load, which also removed an engine-dependent heuristic the reviewer could not settle without WebKit. 1 cycle | 40b | none expected — UI only; A8 tier-down candidate |
+| P6-40e-plaid-rekey | 40e | **MERGED** 2026-10-07 — `npm run rekey:plaid-ids` re-keys stored rows to Plaid's current ids for unambiguous one-to-one matches only (sync's own matcher), id column only, verified backup first. Root cause adjudicated: **H-a** (Plaid changed ids on the same item; sync stayed incremental), H-f unrefuted for the laptop-era window. Fixed a live sync defect found on the way (**H-d**: an item's cursor depended on account row order; any NULL now syncs the item from no cursor). H-g reported for a follow-up | 40a, 40b, 40c (merged) | none expected |
 
 Status: `QUEUED` → `SPEC` → `G0` → `G1` → `IMPL` → `G2` → `REVIEW` → `G3` → `G4` → `MERGED`,
 or `ESCALATED` when the cycle counter hits 3.
@@ -89,7 +90,7 @@ or `ESCALATED` when the cycle counter hits 3.
 
 ## Holds — things blocking a dispatch, recorded rather than carried in someone's head
 
-**H7 — OPEN 2026-10-07: about 524 Plaid-sourced rows carry transaction ids Plaid has since reissued.**
+**H7 — IN PROGRESS as P6-40e (2026-10-07): about 524 Plaid-sourced rows carry transaction ids Plaid has since reissued.**
 Found by P6-40c's real-run classification (counts only, EVIDENCE.md): Plaid's current history holds
 the same account+date+amount under a different id. Those rows are not enriched by the backfill and
 no longer receive Plaid's `modified` corrections. Candidate task: a one-off re-keying pass reusing

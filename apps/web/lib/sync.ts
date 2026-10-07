@@ -451,10 +451,21 @@ async function runSyncInner({
   }
 
   // Group by access token — one Plaid item = one API call.
+  //
+  // ONE NULL CURSOR MAKES THE WHOLE ITEM SYNC FROM THE START (P6-40e, RC-03). The cursor is stored
+  // per account but used per item, and the query above has no ORDER BY, so taking the first row's
+  // cursor meant the table's physical order chose between them. An item whose accounts disagree is
+  // one where some account has never been synced — added to an existing item, say, which inserts it
+  // with no cursor beside siblings that have one — and if a sibling's cursor won, that account's
+  // history was never requested and never would be, since the sync then writes the sibling's cursor
+  // onto it too. Starting from no cursor re-delivers what is already stored as well, which the
+  // upserts below absorb in place; missing an account's history cannot be repaired by any later sync.
   const byToken = new Map<string, { ids: string[]; cursor: string | null }>();
   for (const a of accounts.rows) {
     if (!byToken.has(a.access_token)) byToken.set(a.access_token, { ids: [], cursor: a.cursor });
-    byToken.get(a.access_token)!.ids.push(a.id);
+    const group = byToken.get(a.access_token)!;
+    group.ids.push(a.id);
+    if (a.cursor === null) group.cursor = null;
   }
 
   // If a specific account is requested, only sync the item that contains it.

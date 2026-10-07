@@ -12,6 +12,7 @@
     "job:daily": "tsx --env-file=.env.local scripts/daily-job.ts",
     "tokens": "tsx --env-file=.env.local scripts/tokens.ts",
     "backfill:enrichment": "tsx --env-file=.env.local scripts/backfill-enrichment.ts",
+    "rekey:plaid-ids": "tsx --env-file=.env.local scripts/rekey-plaid-ids.ts",
     "seed:demo": "node scripts/seed-demo.mjs",
     "ping:test": "tsx --env-file=.env.local scripts/ping-test.ts",
     "ping:web": "tsx --env-file=.env.local scripts/ping-web-test.ts"
