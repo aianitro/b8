@@ -10,6 +10,18 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: "development"
+    # Two majors this repo cannot take yet, so proposing them only produces red PRs:
+    # - TypeScript 7 (the Go compiler) ships no classic JS compiler API, which typescript-eslint,
+    #   `next build`'s type check and lib/enrichedDisplayWiring.test.ts all need. Revisit when
+    #   typescript-eslint supports 7.
+    # - @types/node must match the Node that runs the app (24 on the home server and in CI);
+    #   newer types would let code type-check against APIs that then fail at runtime. Raise this
+    #   together with the server's Node version.
+    ignore:
+      - dependency-name: "typescript"
+        versions: [">=7"]
+      - dependency-name: "@types/node"
+        versions: [">=25"]
 
   # Catches the exact class of drift manually caught and fixed this session — a pinned
   # action version silently falling behind what GitHub actually runs.
