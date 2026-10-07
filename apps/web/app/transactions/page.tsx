@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { Suspense } from 'react';
 import Link from 'next/link';
+import { Upload } from 'lucide-react';
 import db from '@/lib/db';
 import type { Transaction } from '@b8/contracts/types';
 import { loadCategoryOptions } from '@/lib/categoryOptionsRead';
@@ -393,47 +394,58 @@ export default async function TransactionsPage({
         </div>
       )}
 
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">
-          {isDrilldown ? drillLabel
-            : isTransferGroup ? 'Linked transfer'
-            : isMerchant ? merchantValue
-            : isDateRange ? dateRangeLabel
-            : 'Transactions'}
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          {total.toLocaleString()} transaction{total !== 1 ? 's' : ''}
-          {/* Nothing follows an empty result. A day with no rows was reporting a dash between two
-              zeroes, which is three pieces of punctuation saying what "0 transactions" already
-              said — and it is the state this page is in most mornings, since Today opens it before
-              the feed has anything to show. */}
-          {total > 0 && <span className="text-slate-300 mx-1.5">·</span>}
-          {total > 0 && (() => {
-            // A drilldown is answering for a budget cell, so it totals the rows that cell counted.
-            // Everywhere else this is the plain ledger view and totals every row on screen.
-            //
-            // EXCEPT ON A DATE-RANGE ARRIVAL, where the two sides are reported separately. The
-            // reader got here by tapping a SPENDING figure, and a net can invert it outright: a
-            // week holding one credit-card payment nets positive and would headline as money in.
-            // Both figures below are true of the rows on screen and neither pretends to be the
-            // other.
-            if (isDateRange) {
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-slate-900">
+            {isDrilldown ? drillLabel
+              : isTransferGroup ? 'Linked transfer'
+              : isMerchant ? merchantValue
+              : isDateRange ? dateRangeLabel
+              : 'Transactions'}
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            {total.toLocaleString()} transaction{total !== 1 ? 's' : ''}
+            {/* Nothing follows an empty result. A day with no rows was reporting a dash between two
+                zeroes, which is three pieces of punctuation saying what "0 transactions" already
+                said — and it is the state this page is in most mornings, since Today opens it before
+                the feed has anything to show. */}
+            {total > 0 && <span className="text-slate-300 mx-1.5">·</span>}
+            {total > 0 && (() => {
+              // A drilldown is answering for a budget cell, so it totals the rows that cell counted.
+              // Everywhere else this is the plain ledger view and totals every row on screen.
+              //
+              // EXCEPT ON A DATE-RANGE ARRIVAL, where the two sides are reported separately. The
+              // reader got here by tapping a SPENDING figure, and a net can invert it outright: a
+              // week holding one credit-card payment nets positive and would headline as money in.
+              // Both figures below are true of the rows on screen and neither pretends to be the
+              // other.
+              if (isDateRange) {
+                return (
+                  <>
+                    <span className="font-mono font-medium text-slate-700">−{fmt(sumOut)}</span>
+                    <span className="text-slate-300 mx-1.5">·</span>
+                    <span className="font-mono font-medium text-emerald-600">+{fmt(sumIn)}</span>
+                  </>
+                );
+              }
+              const shown = isDrilldown ? sumBudgeted : sum;
               return (
-                <>
-                  <span className="font-mono font-medium text-slate-700">−{fmt(sumOut)}</span>
-                  <span className="text-slate-300 mx-1.5">·</span>
-                  <span className="font-mono font-medium text-emerald-600">+{fmt(sumIn)}</span>
-                </>
+                <span className={`font-mono font-medium ${shown < 0 ? 'text-emerald-600' : 'text-slate-700'}`}>
+                  {shown < 0 ? '+' : shown > 0 ? '−' : ''}{fmt(shown)}
+                </span>
               );
-            }
-            const shown = isDrilldown ? sumBudgeted : sum;
-            return (
-              <span className={`font-mono font-medium ${shown < 0 ? 'text-emerald-600' : 'text-slate-700'}`}>
-                {shown < 0 ? '+' : shown > 0 ? '−' : ''}{fmt(shown)}
-              </span>
-            );
-          })()}
-        </p>
+            })()}
+          </p>
+        </div>
+        {/* HERE RATHER THAN IN THE SIDEBAR. An import is something done to this ledger, so the way
+            in sits beside the rows it adds to instead of taking a line in the nav for every page. */}
+        <Link
+          href="/import"
+          className="shrink-0 inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+        >
+          <Upload size={16} className="shrink-0" />
+          Import CSV
+        </Link>
       </div>
 
       {isDrilldown && drillBudget && (

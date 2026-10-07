@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ArrowLeftRight, Building2, FlaskConical, Home, Landmark, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Upload, Wallet, X, Zap } from 'lucide-react';
+import { ArrowLeftRight, Building2, FlaskConical, Home, Landmark, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Wallet, X, Zap } from 'lucide-react';
 
 const NAV = [
   { href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard },
@@ -17,13 +17,12 @@ const NAV = [
   { href: '/properties',   label: 'Properties',    icon: Home },
 ];
 
-// WHAT FEEDS AND SHAPES THE LEDGER, not places you go to read it — so these sit under their own
+// WHAT SHAPES THE LEDGER, not places you go to read it — so these sit under their own
 // heading instead of among the pages above.
 const CONFIGURATION = [
   { href: '/accounts',     label: 'Accounts',      icon: Building2 },
   { href: '/rules',        label: 'Rules',         icon: Zap },
   { href: '/categories',   label: 'Categories',    icon: Tag },
-  { href: '/import',       label: 'Import CSV',    icon: Upload },
 ];
 
 function NavItem({ href, label, icon: Icon, pathname, onNavigate }: {
