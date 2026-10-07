@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { daysSinceCount } from '@/lib/domain/cashCount';
+import { localIsoDate } from '@/lib/localDate';
 
 export interface WalletRef {
   accountId: string;
@@ -81,8 +82,8 @@ export default function CashManagementCard({ wallet, lastCountedAt, otherWallets
         fromAccountId: wallet.accountId,
         toAccountId: moveTo,
         amount: value,
-        // Today, because a move is recorded as it happens; a wrong date is fixed in the ledger.
-        date: new Date().toISOString().slice(0, 10),
+        // Today, because a move is recorded as it happens — on THIS device's calendar, not UTC's.
+        date: localIsoDate(),
       }),
     }).catch(() => null);
     const body = await res?.json().catch(() => null);

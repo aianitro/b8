@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, Trash2 } from 'lucide-react';
+import { localIsoDate } from '@/lib/localDate';
 
 export interface ValuationRow {
   id: number;
@@ -18,7 +19,7 @@ const fmt = (n: number) =>
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localIsoDate();
 
 export default function PropertyValuationHistory({ propertyId, rows }: Props) {
   const router = useRouter();

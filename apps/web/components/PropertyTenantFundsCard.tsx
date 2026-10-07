@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Plus, X } from 'lucide-react';
 import type { TenantHeldFunds } from '@/lib/domain/property';
 import type { TenantFundKind } from '@b8/contracts/types';
+import { localIsoDate } from '@/lib/localDate';
 
 interface Props {
   propertyId: number;
@@ -18,7 +19,7 @@ interface Props {
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => localIsoDate();
 
 // A dash, never a zero. `value === null` means no reading has ever been entered — the amount is
 // unknown — while a recorded 0 is a real statement (a waived deposit; last month's rent applied
