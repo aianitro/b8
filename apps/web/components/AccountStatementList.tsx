@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import CategorySelect from '@/components/CategorySelect';
+import MerchantMark from '@/components/MerchantMark';
 import SwipeDeleteRow from '@/components/SwipeDeleteRow';
+import { detailLine, enrichmentDetail } from '@/lib/enrichedDisplay';
 import type { BudgetCategory } from '@b8/contracts/types';
 
 export interface StatementRow {
@@ -15,6 +17,12 @@ export interface StatementRow {
   mapped_category: string | null;
   /** Running balance after this row; null where a running balance means nothing (valuation mode). */
   balance: number | null;
+  /** Plaid's logo for the merchant, as stored. Untrusted: only `safeLogoUrl`'s output reaches an `img`. */
+  logo_url: string | null;
+  /** `YYYY-MM-DD` (selected `::text`), the day the card was authorised; `date` above is posted. */
+  authorized_date: string | null;
+  location_city: string | null;
+  location_region: string | null;
 }
 
 export interface StatementMonth {
@@ -90,30 +98,45 @@ export default function AccountStatementList({ months, categories }: {
             {m.rows.map((t) => {
               const isIncome = t.amount < 0;
               const title = t.merchant_name ?? t.name;
+              const detail = detailLine(enrichmentDetail(t), shortDate);
               return (
                 // ONE GRID, TWO SHAPES. On a phone the picker drops under the payee beside the
                 // date; from `sm` up it takes a column of its own, so a row is one line tall
                 // instead of two and the year reads as a list rather than a stack of cards.
                 // Deleting is a swipe left on a phone and the trailing trash column above `sm`.
+                //
+                // THE MARK HAS A TRACK OF ITS OWN, exactly its width (1.75rem = 28px), rather than
+                // sitting inside the title cell. A fixed track is what makes a logo, a placeholder
+                // and a dead-URL fallback land on the same x with the title starting at the same x
+                // after it; and on a phone it spans both lines, so the date and picker under the
+                // payee start where the payee does instead of back under the logo. Every cell is
+                // placed explicitly — the trash button SwipeDeleteRow appends is the only one left
+                // to flow, into the last free cell of the first line, as before.
                 <SwipeDeleteRow
                   key={t.id}
                   transactionId={t.id}
                   description={`${title ?? 'Transaction'} · ${shortDate(t.date)}`}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_12rem_9rem_2rem] items-center gap-x-4 gap-y-1 px-4 sm:px-5 py-3 hover:bg-slate-50 transition-colors"
+                  className="grid grid-cols-[1.75rem_minmax(0,1fr)_auto] sm:grid-cols-[1.75rem_minmax(0,1fr)_12rem_9rem_2rem] items-center gap-x-3 sm:gap-x-4 gap-y-1 px-4 sm:px-5 py-3 hover:bg-slate-50 transition-colors"
                 >
-                  <div className="col-start-1 row-start-1 min-w-0">
+                  <div className="col-start-1 row-start-1 row-span-2 sm:row-span-1">
+                    <MerchantMark logoUrl={t.logo_url} title={title} />
+                  </div>
+                  <div className="col-start-2 row-start-1 min-w-0">
                     <p className="font-medium text-sm text-slate-800 truncate">
                       {title ?? <span className="text-slate-300">—</span>}
                     </p>
                     <p className="hidden sm:block text-xs text-slate-400 mt-0.5">{shortDate(t.date)}</p>
+                    {/* Plain text, no hover — a phone has none. Not rendered at all when there is
+                        nothing to say, so such a row is exactly as tall as before. */}
+                    {detail !== null && <p className="text-xs text-slate-400 mt-0.5 truncate">{detail}</p>}
                   </div>
-                  <div className="col-start-1 row-start-2 sm:col-start-2 sm:row-start-1 flex items-center gap-2 min-w-0">
+                  <div className="col-start-2 row-start-2 sm:col-start-3 sm:row-start-1 flex items-center gap-2 min-w-0">
                     <span className="sm:hidden text-xs text-slate-400 whitespace-nowrap">{shortDate(t.date)}</span>
                     <div className="min-w-0 w-full max-w-[200px] sm:max-w-none">
                       <CategorySelect transactionId={t.id} current={t.mapped_category} categories={categories} description={t.name ?? t.merchant_name} />
                     </div>
                   </div>
-                  <div className="col-start-2 row-start-1 row-span-2 sm:col-start-3 sm:row-span-1 text-right">
+                  <div className="col-start-3 row-start-1 row-span-2 sm:col-start-4 sm:row-span-1 text-right">
                     <p className={`font-mono font-semibold text-sm whitespace-nowrap ${isIncome ? 'text-emerald-600' : 'text-slate-800'}`}>
                       {isIncome ? '+' : '−'}{fmt(Math.abs(t.amount))}
                     </p>
