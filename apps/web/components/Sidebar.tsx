@@ -61,29 +61,27 @@ function NavItem({ href, label, icon: Icon, pathname, onNavigate }: {
 /** The nav itself, identical in the sidebar and in the drawer — one list, rendered twice. */
 function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   return (
-    <>
-      <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
-        {NAV.map((item) => <NavItem key={item.href} {...item} pathname={pathname} onNavigate={onNavigate} />)}
-        <div className="border-t border-white/20 mt-3 mb-3" />
-        <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-cyan-100/70 mb-2">
-          Configuration
-        </p>
-        {CONFIGURATION.map((item) => <NavItem key={item.href} {...item} pathname={pathname} onNavigate={onNavigate} />)}
-      </nav>
-      <div className="px-3 pb-6">
-        <div className="border-t border-white/20 mb-3" />
-        <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-cyan-100/70 mb-2">
-          Intelligence
-        </p>
-        <NavItem href="/insights" label="Insights" icon={Sparkles} pathname={pathname} onNavigate={onNavigate} />
-        {/* BELOW THE LINE WITH INSIGHTS, not up in the ledger's own list. The pages above are the
-            app: an account, a budget, the transactions. This is a holding bay for a widget whose
-            home is undecided, and putting it beside Balances would say it is a place you go for an
-            answer. A route nothing links to is a route nobody visits, though — which is the only
-            reason it is in the nav at all rather than being a URL to remember. */}
-        <NavItem href="/sandbox" label="Sandbox" icon={FlaskConical} pathname={pathname} onNavigate={onNavigate} />
-      </div>
-    </>
+    // ONE SCROLLING LIST, INTELLIGENCE INCLUDED. That group used to sit in a footer pinned below the
+    // scroll area; it now follows Configuration, so every group reads in one top-to-bottom order.
+    <nav className="flex-1 px-3 pb-6 space-y-0.5 overflow-y-auto">
+      {NAV.map((item) => <NavItem key={item.href} {...item} pathname={pathname} onNavigate={onNavigate} />)}
+      <div className="border-t border-white/20 mt-3 mb-3" />
+      <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-cyan-100/70 mb-2">
+        Configuration
+      </p>
+      {CONFIGURATION.map((item) => <NavItem key={item.href} {...item} pathname={pathname} onNavigate={onNavigate} />)}
+      <div className="border-t border-white/20 mt-3 mb-3" />
+      <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-cyan-100/70 mb-2">
+        Intelligence
+      </p>
+      <NavItem href="/insights" label="Insights" icon={Sparkles} pathname={pathname} onNavigate={onNavigate} />
+      {/* BELOW THE LINE WITH INSIGHTS, not up in the ledger's own list. The pages above are the
+          app: an account, a budget, the transactions. This is a holding bay for a widget whose
+          home is undecided, and putting it beside Balances would say it is a place you go for an
+          answer. A route nothing links to is a route nobody visits, though — which is the only
+          reason it is in the nav at all rather than being a URL to remember. */}
+      <NavItem href="/sandbox" label="Sandbox" icon={FlaskConical} pathname={pathname} onNavigate={onNavigate} />
+    </nav>
   );
 }
 
