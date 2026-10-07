@@ -45,7 +45,11 @@ export default defineConfig({
     // than the pure one for the same reason the route tests do: the boundary's job is a session
     // lookup against Postgres, and a proxy fixture that stubbed the database would be asserting
     // that the stub refuses.
-    include: ['app/api/v1/**/*.test.ts', 'proxy.test.ts'],
+    //
+    // `scripts/backfill-enrichment.test.ts` (P6-40c) by its exact path, not `scripts/**`: it runs the
+    // backfill against Postgres, so it belongs here and not in the pure set, and naming the one file
+    // keeps a future pure test placed in `scripts/` from being swept into a DB-requiring run.
+    include: ['app/api/v1/**/*.test.ts', 'proxy.test.ts', 'scripts/backfill-enrichment.test.ts'],
     // Two setup files, in this order and for two unrelated reasons. The guard is the control
     // described above and must stay first — it refuses before any pool exists. The second installs
     // the one global Next's own Node bootstrap installs before it serves anything; see
