@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Pencil } from 'lucide-react';
-import { ACCOUNT_TYPES, accountTypeLabel } from '@/lib/accountTypes';
+import { ACCOUNT_TYPES, CASH_TYPE, accountTypeLabel } from '@/lib/accountTypes';
 
 type Landscape = 'operational' | 'capital';
 
@@ -65,7 +65,9 @@ export default function AccountHeader({ id, name, type, subtype, bank, mask, lan
     // rewrite type and subtype on every save — and erase a synced subtype nobody touched.
     const body: Record<string, unknown> = {};
     if (trimmed !== name) body.name = trimmed;
-    if (form.bank.trim() !== (bank ?? '')) body.bank = form.bank.trim() || null;
+    // Cash has no bank: the field is hidden for it, and switching to cash clears one left over.
+    const nextBank = form.type === CASH_TYPE ? '' : form.bank.trim();
+    if (nextBank !== (bank ?? '')) body.bank = nextBank || null;
     if (form.landscape !== landscape) body.landscape = form.landscape;
     if (form.type !== typeKey(type, subtype)) {
       const chosen = ACCOUNT_TYPES.find((t) => typeKey(t.type, t.subtype) === form.type);
@@ -97,7 +99,7 @@ export default function AccountHeader({ id, name, type, subtype, bank, mask, lan
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-sm text-slate-500">
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${LANDSCAPE_BADGE[landscape]}`}>{landscape}</span>
             <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600">{accountTypeLabel(type, subtype)}</span>
-            {bank && <span>{bank}</span>}
+            {bank && type !== CASH_TYPE && <span>{bank}</span>}
             {mask && <span className="text-slate-400 tabular-nums">•••• {mask}</span>}
             {note && <span className="text-slate-400">{note}</span>}
           </div>
@@ -120,10 +122,12 @@ export default function AccountHeader({ id, name, type, subtype, bank, mask, lan
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Name</span>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={`${FIELD} mt-1`} autoComplete="off" />
             </label>
-            <label className="block">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Bank</span>
-              <input value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} placeholder="Bank name" className={`${FIELD} mt-1`} autoComplete="off" />
-            </label>
+            {form.type !== CASH_TYPE && (
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Bank</span>
+                <input value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} placeholder="Bank name" className={`${FIELD} mt-1`} autoComplete="off" />
+              </label>
+            )}
             <label className="block">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Type</span>
               <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className={`${FIELD} mt-1`}>

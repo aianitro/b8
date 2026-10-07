@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, X, Landmark } from 'lucide-react';
-import { ACCOUNT_TYPES } from '@/lib/accountTypes';
+import { ACCOUNT_TYPES, CASH_TYPE } from '@/lib/accountTypes';
 
 type BalanceChoice = 'ledger' | 'asset' | 'liability';
 
@@ -48,7 +48,7 @@ export default function AddAccountForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name, bank: bank || undefined, type: chosen.type, subtype: chosen.subtype, landscape,
+          name, bank: chosen.type === CASH_TYPE ? undefined : bank || undefined, type: chosen.type, subtype: chosen.subtype, landscape,
           valuation_mode: balanceChoice === 'ledger' ? 'ledger' : 'valuation',
           is_liability: balanceChoice === 'liability',
           initial_value: parsedValue,
@@ -92,7 +92,7 @@ export default function AddAccountForm() {
       </div>
 
       <form onSubmit={submit} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className={`grid gap-3 ${typeKey === CASH_TYPE ? 'grid-cols-1' : 'grid-cols-2'}`}>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Account name *</label>
             <input
@@ -103,15 +103,17 @@ export default function AddAccountForm() {
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
             />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Bank</label>
-            <input
-              value={bank}
-              onChange={(e) => setBank(e.target.value)}
-              placeholder="e.g. Chase"
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-            />
-          </div>
+          {typeKey !== CASH_TYPE && (
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Bank</label>
+              <input
+                value={bank}
+                onChange={(e) => setBank(e.target.value)}
+                placeholder="e.g. Chase"
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+              />
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -119,7 +121,12 @@ export default function AddAccountForm() {
             <label className="block text-xs font-medium text-slate-500 mb-1">Account type *</label>
             <select
               value={typeKey}
-              onChange={(e) => setTypeKey(e.target.value)}
+              onChange={(e) => {
+                setTypeKey(e.target.value);
+                // Cash is the thing "This is cash I count" exists for, so choosing it ticks the
+                // box. Only on the way in — the box stays the owner's to untick.
+                if (e.target.value === CASH_TYPE) setCountable(true);
+              }}
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
             >
               {ACCOUNT_TYPES.map((t) => (

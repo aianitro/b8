@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import db from '@/lib/db';
+import { CASH_TYPE } from '@/lib/accountTypes';
 import type { ApiResponse, Landscape, ValuationMode } from '@b8/contracts/types';
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -48,7 +49,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         { status: 400 }
       );
     }
-    await db.query('UPDATE accounts SET type = $1, subtype = $2 WHERE id = $3', [type, body.subtype ?? null, id]);
+    // Cash has no bank, so becoming cash drops one. The bank branch above has already run, so a
+    // bank sent in the same request as `type: 'cash'` is cleared too — the type wins.
+    await db.query(
+      'UPDATE accounts SET type = $1, subtype = $2, bank = CASE WHEN $1 = $4 THEN NULL ELSE bank END WHERE id = $3',
+      [type, body.subtype ?? null, id, CASH_TYPE]
+    );
   }
 
   // Kept as two independent fields rather than one combined enum, even though the UI presents

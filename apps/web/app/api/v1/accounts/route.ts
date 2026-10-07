@@ -4,6 +4,7 @@ import db from '@/lib/db';
 import { roundCents } from '@/lib/budgetMath';
 import type { ApiResponse, Landscape, ValuationMode } from '@b8/contracts/types';
 import { createLogger } from '@/lib/logger';
+import { CASH_TYPE } from '@/lib/accountTypes';
 
 const log = createLogger('accounts');
 
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest) {
     await db.query(
       `INSERT INTO accounts (id, name, type, subtype, landscape, bank, access_token, valuation_mode, is_liability, countable)
        VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9)`,
-      [id, name.trim(), type, subtype ?? null, landscape, bank?.trim() || null, valuationMode, isLiability, isCountable]
+      [id, name.trim(), type, subtype ?? null, landscape, type === CASH_TYPE ? null : bank?.trim() || null, valuationMode, isLiability, isCountable]
     );
 
     // A value is optional even in valuation mode: better to create the account now and
