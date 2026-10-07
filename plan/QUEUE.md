@@ -90,6 +90,17 @@ or `ESCALATED` when the cycle counter hits 3.
 
 ## Holds — things blocking a dispatch, recorded rather than carried in someone's head
 
+**H8 — OPEN 2026-10-07: the scope-guard hook protects a path that no longer exists.**
+`.claude/hooks/scope-guard.mjs` guards `shared/contracts/` (CONTRACT_PREFIXES), but the contracts
+moved to `packages/contracts/` in P1-10a. So BUILD.md I2's single-writer rule is enforced for
+`migrations/` and `db/schema.sql` but not for the contract package. Hook changes need a
+true-positive and a false-positive test (BUILD.md A3).
+
+**H9 — OPEN 2026-10-07: `packages/contracts` does not type-check on its own under TypeScript 6.**
+TS 6 no longer auto-includes `@types/*`, so `tsc -p packages/contracts` fails on its Node-using test
+file (`node:fs`, `node:url`, `import.meta.url`). CI's root `npx tsc --noEmit` passes. Fix is one line
+(`"types": ["node"]`) in `packages/contracts/tsconfig.json` — guardian-owned, so through G1.
+
 **H7 — IN PROGRESS as P6-40e (2026-10-07): about 524 Plaid-sourced rows carry transaction ids Plaid has since reissued.**
 Found by P6-40c's real-run classification (counts only, EVIDENCE.md): Plaid's current history holds
 the same account+date+amount under a different id. Those rows are not enriched by the backfill and
