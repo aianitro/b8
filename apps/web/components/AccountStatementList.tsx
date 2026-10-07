@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import CategorySelect from '@/components/CategorySelect';
 import SwipeDeleteRow from '@/components/SwipeDeleteRow';
 import type { BudgetCategory } from '@b8/contracts/types';
@@ -40,13 +43,38 @@ function shortDate(iso: string): string {
  * row — what and when on the left, how much and what it left on the right — is the shape every
  * banking app settles on, and it needs no second layout for the desktop.
  */
+/** Rows shown before "Show more", and how many each press adds. */
+const PAGE = 10;
+
+/**
+ * The newest PAGE rows across months: whole months while they fit, then the newest part of the
+ * month the limit falls in. Months left with no rows are dropped rather than shown as a bare header.
+ */
+function firstRows(months: StatementMonth[], limit: number): StatementMonth[] {
+  const out: StatementMonth[] = [];
+  let left = limit;
+  for (const m of months) {
+    if (left <= 0) break;
+    out.push(m.rows.length <= left ? m : { ...m, rows: m.rows.slice(0, left) });
+    left -= m.rows.length;
+  }
+  return out;
+}
+
 export default function AccountStatementList({ months, categories }: {
   months: StatementMonth[];
   categories: Pick<BudgetCategory, 'name' | 'landscape' | 'exclude_from_budget'>[];
 }) {
+  // The latest PAGE rows first: the statement opens to "what happened lately", and a year of rows
+  // under the chart pushed everything else on a phone screen several screens down.
+  const [limit, setLimit] = useState(PAGE);
+  const total = months.reduce((n, m) => n + m.rows.length, 0);
+  const hidden = Math.max(0, total - limit);
+  const shown = hidden > 0 ? firstRows(months, limit) : months;
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-      {months.map((m) => (
+      {shown.map((m) => (
         <section key={m.key} className="border-t border-slate-100 first:border-t-0">
           <div className="flex items-baseline justify-between px-4 sm:px-5 py-2 bg-slate-50 border-b border-slate-100">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -99,6 +127,26 @@ export default function AccountStatementList({ months, categories }: {
           </ul>
         </section>
       ))}
+      {(hidden > 0 || limit > PAGE) && (
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-4 py-3 border-t border-slate-100 text-sm">
+          {hidden > 0 ? (
+            <>
+              <button type="button" onClick={() => setLimit(limit + PAGE)} className="font-medium text-blue-600 hover:text-blue-700 py-1">
+                Show {Math.min(PAGE, hidden)} more
+              </button>
+              {hidden > PAGE && (
+                <button type="button" onClick={() => setLimit(total)} className="text-slate-500 hover:text-slate-700 py-1">
+                  Show all {total.toLocaleString()}
+                </button>
+              )}
+            </>
+          ) : (
+            <button type="button" onClick={() => setLimit(PAGE)} className="text-slate-500 hover:text-slate-700 py-1">
+              Show fewer
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
