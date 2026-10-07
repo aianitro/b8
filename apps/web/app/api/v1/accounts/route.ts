@@ -36,7 +36,9 @@ export async function POST(req: NextRequest) {
     // from transactions — the row would land in the ledger and change nothing on screen. Forced
     // false rather than rejected, because the combination is meaningless rather than an error worth
     // stopping a form for.
-    const isCountable = valuationMode === 'ledger' && countable === true;
+    // Cash is counted by definition — counting is how a wallet's balance is kept — so the type
+    // carries the flag with it rather than relying on the form to tick the box.
+    const isCountable = valuationMode === 'ledger' && (countable === true || type === CASH_TYPE);
 
     // initial_value only matters in valuation mode — a ledger account's balance comes from
     // beginning_balance + transactions, not a stored value, so a number here would be silently

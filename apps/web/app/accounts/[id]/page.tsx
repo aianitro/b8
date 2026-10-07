@@ -3,6 +3,8 @@ export const dynamic = 'force-dynamic';
 import db from '@/lib/db';
 import AccountBalanceEdit from '@/components/AccountBalanceEdit';
 import AccountHeader from '@/components/AccountHeader';
+import CashManagementCard from '@/components/CashManagementCard';
+import { walletStatuses } from '@/lib/cashCountStore';
 import AccountStatementList, { type StatementMonth } from '@/components/AccountStatementList';
 import AccountBalanceChart from '@/components/charts/AccountBalanceChart';
 import { ledgerSeries, valuationSeries } from '@/lib/domain/balanceSeries';
@@ -16,7 +18,7 @@ const SERIES_DAYS = 365;
 
 type AccountRow = {
   name: string; landscape: string; bank: string | null; mask: string | null;
-  type: string; subtype: string | null;
+  type: string; subtype: string | null; countable: boolean;
   valuation_mode: 'ledger' | 'valuation'; is_liability: boolean;
 };
 
@@ -36,7 +38,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
 
   const [accountRes, balanceRes, txRes, valuationRes, categoriesRes] = await Promise.all([
     db.query<AccountRow>(
-      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability FROM accounts WHERE id = $1',
+      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability, countable FROM accounts WHERE id = $1',
       [id]
     ),
     db.query<{ beginning_balance: string }>(
@@ -67,6 +69,24 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
   }
 
   const isValuation = account.valuation_mode === 'valuation';
+
+  // Only a wallet pays for these two reads. Every other wallet is a place cash can be moved to,
+  // and the categories are what a shortfall can be filed as: operational spending — not income,
+  // not the transfer bucket, since cash that went missing was spent rather than moved.
+  const cash = account.countable
+    ? await Promise.all([
+        walletStatuses(),
+        db.query<{ name: string }>(
+          `SELECT name FROM budget_categories
+            WHERE landscape = 'operational' AND NOT is_income AND NOT exclude_from_budget
+            ORDER BY name`
+        ).then((r) => r.rows.map((c) => c.name)),
+      ]).then(([wallets, spendCategories]) => ({
+        lastCountedAt: wallets.find((w) => w.accountId === id)?.lastCountedAt ?? null,
+        otherWallets: wallets.filter((w) => w.accountId !== id).map((w) => ({ accountId: w.accountId, name: w.name })),
+        spendCategories,
+      }))
+    : null;
   const landscape = account.landscape === 'capital' ? 'capital' : 'operational';
   const beginningBalance = Number(balanceRes.rows[0]?.beginning_balance ?? 0);
   const flows = txRes.rows.map((t) => ({ ...t, amount: Number(t.amount) }));
@@ -117,6 +137,15 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
       {/* ONE CARD, NOT THREE. Three side by side leave a 390px phone about 90px per figure, and a
           five-figure amount in a monospace face does not fit in that — it truncates, which on a
           money page is worse than wrapping. Below `sm` the three stack as rows; above, columns. */}
+      {cash && (
+        <CashManagementCard
+          wallet={{ accountId: id, name: account.name }}
+          lastCountedAt={cash.lastCountedAt}
+          otherWallets={cash.otherWallets}
+          categories={cash.spendCategories}
+        />
+      )}
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm divide-y divide-slate-100 sm:grid sm:grid-cols-3 sm:divide-y-0 sm:divide-x">
         {[
           { label: 'Money in',  text: moneyIn > 0 ? `+${fmt(moneyIn)}` : '—',   color: 'text-emerald-600' },

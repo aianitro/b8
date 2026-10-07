@@ -50,9 +50,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       );
     }
     // Cash has no bank, so becoming cash drops one. The bank branch above has already run, so a
-    // bank sent in the same request as `type: 'cash'` is cleared too — the type wins.
+    // bank sent in the same request as `type: 'cash'` is cleared too — the type wins. And cash is
+    // counted, so a ledger account becoming cash becomes countable: that is what puts the Count
+    // and Move controls on its page.
     await db.query(
-      'UPDATE accounts SET type = $1, subtype = $2, bank = CASE WHEN $1 = $4 THEN NULL ELSE bank END WHERE id = $3',
+      `UPDATE accounts
+          SET type = $1, subtype = $2,
+              bank = CASE WHEN $1 = $4 THEN NULL ELSE bank END,
+              countable = CASE WHEN $1 = $4 AND valuation_mode = 'ledger' THEN TRUE ELSE countable END
+        WHERE id = $3`,
       [type, body.subtype ?? null, id, CASH_TYPE]
     );
   }

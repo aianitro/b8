@@ -16,7 +16,8 @@ const fmt = (n: number) =>
  * The feed card deliberately offers no button — a degraded institution is Plaid's to fix and usually
  * clears itself, so a button there would imply the fix is re-linking. Cash is the opposite: nothing
  * will ever clear this on its own, there is exactly one cure, and it is a person opening their wallet
- * and typing what they find. So the card names the action and links to where it happens.
+ * and typing what they find. So the card names the action and links to where it happens — the
+ * wallet's own page, which is where counting lives.
  */
 export default function CashStalenessCard({ findings }: { findings: WalletFinding[] }) {
   // Silence when every wallet is current. A strip reporting good health daily is noise competing
@@ -54,7 +55,7 @@ export default function CashStalenessCard({ findings }: { findings: WalletFindin
           </p>
         </div>
         <Link
-          href="/accounts"
+          href={`/accounts/${worst.accountId}`}
           className="shrink-0 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-amber-100 text-amber-900 hover:bg-amber-200 transition-colors"
         >
           Count
