@@ -1,9 +1,8 @@
 export const dynamic = 'force-dynamic';
 
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
 import db from '@/lib/db';
 import AccountBalanceEdit from '@/components/AccountBalanceEdit';
+import AccountHeader from '@/components/AccountHeader';
 import AccountStatementList, { type StatementMonth } from '@/components/AccountStatementList';
 import AccountBalanceChart from '@/components/charts/AccountBalanceChart';
 import { ledgerSeries, valuationSeries } from '@/lib/domain/balanceSeries';
@@ -17,17 +16,13 @@ const SERIES_DAYS = 365;
 
 type AccountRow = {
   name: string; landscape: string; bank: string | null; mask: string | null;
+  type: string; subtype: string | null;
   valuation_mode: 'ledger' | 'valuation'; is_liability: boolean;
 };
 
 type TxRow = {
   id: number; date: string; amount: string;
   name: string | null; merchant_name: string | null; mapped_category: string | null;
-};
-
-const LANDSCAPE_BADGE: Record<string, string> = {
-  operational: 'bg-blue-50 text-blue-700',
-  capital:     'bg-violet-50 text-violet-700',
 };
 
 export default async function AccountPage({ params }: { params: Promise<{ id: string }> }) {
@@ -41,7 +36,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
 
   const [accountRes, balanceRes, txRes, valuationRes, categoriesRes] = await Promise.all([
     db.query<AccountRow>(
-      'SELECT name, landscape, bank, mask, valuation_mode, is_liability FROM accounts WHERE id = $1',
+      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability FROM accounts WHERE id = $1',
       [id]
     ),
     db.query<{ beginning_balance: string }>(
@@ -102,18 +97,16 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6 sm:space-y-8">
-      <header>
-        <Link href="/accounts" className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-600 transition-colors mb-3">
-          <ArrowLeft size={14} /> Accounts
-        </Link>
-        <h1 className="text-2xl font-bold text-slate-900 break-words">{account.name}</h1>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1.5 text-sm text-slate-500">
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${LANDSCAPE_BADGE[landscape]}`}>{landscape}</span>
-          {account.bank && <span>{account.bank}</span>}
-          {account.mask && <span className="text-slate-400 tabular-nums">•••• {account.mask}</span>}
-          {isValuation && <span className="text-slate-400">{account.is_liability ? 'liability · ' : ''}valued, not ledgered</span>}
-        </div>
-      </header>
+      <AccountHeader
+        id={id}
+        name={account.name}
+        type={account.type}
+        subtype={account.subtype}
+        bank={account.bank}
+        mask={account.mask}
+        landscape={landscape}
+        note={isValuation ? `${account.is_liability ? 'liability · ' : ''}valued, not ledgered` : undefined}
+      />
 
       <AccountBalanceChart
         points={points}

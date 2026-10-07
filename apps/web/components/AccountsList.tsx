@@ -1,17 +1,14 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { GripVertical, FileText } from 'lucide-react';
-import AccountNameEdit from './AccountNameEdit';
-import AccountTypeEdit from './AccountTypeEdit';
-import AccountBankEdit from './AccountBankEdit';
+import { GripVertical } from 'lucide-react';
 import AccountTrackingToggle from './AccountTrackingToggle';
-import AccountLandscapeToggle from './AccountLandscapeToggle';
 import AccountValuationModeToggle from './AccountValuationModeToggle';
 import AccountValuationEdit from './AccountValuationEdit';
 import AccountDeleteButton from './AccountDeleteButton';
 import RelativeTime from './RelativeTime';
 import type { Account } from '@b8/contracts/types';
+import { accountTypeLabel } from '@/lib/accountTypes';
 
 type Section = 'operational' | 'capital';
 
@@ -35,7 +32,7 @@ type Section = 'operational' | 'capital';
  * cells on eight lines.
  */
 const ROW_GRID = 'grid grid-cols-[4px_minmax(0,1fr)_auto] gap-x-3 gap-y-2 items-center '
-  + 'sm:grid-cols-[14px_4px_minmax(0,1fr)_112px_44px_150px_116px_24px] sm:gap-3';
+  + 'sm:grid-cols-[14px_4px_minmax(0,1fr)_112px_44px_150px_24px] sm:gap-3';
 
 interface Props {
   operational: Account[];
@@ -144,8 +141,9 @@ function Group({
     <div className="mb-8">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">{title}</h2>
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        {/* Column headers: with five controls per row, the compact ones (an eye, two short
-            selects) only read unambiguously once the column is named. */}
+        {/* Column headers: the compact controls (an eye, a short select) only read
+            unambiguously once the column is named. No Landscape column — the group heading
+            above already says it, for every row at once. */}
         <div className={`${ROW_GRID} hidden sm:grid px-6 py-2 bg-slate-50/60 border-b border-slate-100`}>
           <span />
           <span />
@@ -153,7 +151,6 @@ function Group({
           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 text-right">Value</span>
           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 text-center">Track</span>
           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Balance from</span>
-          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Landscape</span>
           <span />
         </div>
         {items.map((a, i) => {
@@ -186,8 +183,18 @@ function Group({
                     cell is the only place for them to go. Above `sm:` the column is 362px and
                     this never wraps. */}
                 <div className="flex flex-wrap items-center gap-2 mb-0.5 min-w-0">
-                  <AccountNameEdit accountId={a.id} current={a.name} />
-                  <AccountTypeEdit accountId={a.id} type={a.type} subtype={a.subtype} />
+                  {/* READ-ONLY HERE. Name, type, bank and landscape are edited on the account's
+                      own page — the hover pencils they had in this list never showed on a phone. */}
+                  <a
+                    href={`/accounts/${a.id}`}
+                    draggable={false}
+                    className="font-medium text-slate-800 text-sm truncate hover:text-blue-600 transition-colors"
+                  >
+                    {a.name}
+                  </a>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium shrink-0">
+                    {accountTypeLabel(a.type, a.subtype)}
+                  </span>
                   {a.is_manual && (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium shrink-0">
                       manual
@@ -195,10 +202,10 @@ function Group({
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 min-w-0 text-xs text-slate-400">
-                  <AccountBankEdit accountId={a.id} current={a.bank} />
+                  {a.bank && <span className="shrink-0 font-medium text-slate-500">{a.bank}</span>}
                   {(txnCounts[a.id] ?? 0) > 0 && (
                     <>
-                      <span className="shrink-0">·</span>
+                      {a.bank && <span className="shrink-0">·</span>}
                       {/* draggable={false} so grabbing a link doesn't hijack the row's own drag */}
                       <a
                         href={`/transactions?account=${a.id}`}
@@ -207,20 +214,11 @@ function Group({
                       >
                         {(txnCounts[a.id] ?? 0).toLocaleString()} txns
                       </a>
-                      <span className="shrink-0">·</span>
-                      <a
-                        href={`/accounts/${a.id}`}
-                        draggable={false}
-                        className="shrink-0 inline-flex items-center gap-0.5 hover:text-slate-600 transition-colors"
-                      >
-                        <FileText size={11} />
-                        statement
-                      </a>
                     </>
                   )}
                   {!a.is_manual && (
                     <>
-                      <span className="shrink-0">·</span>
+                      {(a.bank || (txnCounts[a.id] ?? 0) > 0) && <span className="shrink-0">·</span>}
                       <span className="shrink-0"><RelativeTime iso={a.last_synced_at} /></span>
                     </>
                   )}
@@ -241,7 +239,7 @@ function Group({
                 )}
               </div>
 
-              {/* Each wrapped so it can be PLACED on the phone grid — these four are components
+              {/* Each wrapped so it can be PLACED on the phone grid — these three are components
                   and carry no className of their own. On a desktop the wrapper is the grid item
                   the component used to be, in the same track, which changes nothing there. */}
               <div className="col-start-3 row-start-2 justify-self-end sm:col-auto sm:row-auto sm:justify-self-auto">
@@ -249,9 +247,6 @@ function Group({
               </div>
               <div className="col-start-2 row-start-2 min-w-0 sm:col-auto sm:row-auto">
                 <AccountValuationModeToggle accountId={a.id} mode={a.valuation_mode} isLiability={a.is_liability} />
-              </div>
-              <div className="col-start-2 row-start-3 min-w-0 sm:col-auto sm:row-auto">
-                <AccountLandscapeToggle accountId={a.id} current={a.landscape} />
               </div>
               <div className="col-start-3 row-start-3 justify-self-end sm:col-auto sm:row-auto sm:justify-self-auto">
                 <AccountDeleteButton accountId={a.id} accountName={a.name} />
