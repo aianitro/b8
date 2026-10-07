@@ -1,4 +1,5 @@
 import CategorySelect from '@/components/CategorySelect';
+import SwipeDeleteRow from '@/components/SwipeDeleteRow';
 import type { BudgetCategory } from '@b8/contracts/types';
 
 export interface StatementRow {
@@ -65,7 +66,13 @@ export default function AccountStatementList({ months, categories }: {
                 // ONE GRID, TWO SHAPES. On a phone the picker drops under the payee beside the
                 // date; from `sm` up it takes a column of its own, so a row is one line tall
                 // instead of two and the year reads as a list rather than a stack of cards.
-                <li key={t.id} className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_12rem_9rem] items-center gap-x-4 gap-y-1 px-4 sm:px-5 py-3 hover:bg-slate-50/50 transition-colors">
+                // Deleting is a swipe left on a phone and the trailing trash column above `sm`.
+                <SwipeDeleteRow
+                  key={t.id}
+                  transactionId={t.id}
+                  description={`${title ?? 'Transaction'} · ${shortDate(t.date)}`}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_12rem_9rem_2rem] items-center gap-x-4 gap-y-1 px-4 sm:px-5 py-3 hover:bg-slate-50 transition-colors"
+                >
                   <div className="col-start-1 row-start-1 min-w-0">
                     <p className="font-medium text-sm text-slate-800 truncate">
                       {title ?? <span className="text-slate-300">—</span>}
@@ -86,7 +93,7 @@ export default function AccountStatementList({ months, categories }: {
                       <p className="font-mono text-xs text-slate-400 mt-0.5 whitespace-nowrap">{fmt(t.balance)}</p>
                     )}
                   </div>
-                </li>
+                </SwipeDeleteRow>
               );
             })}
           </ul>
