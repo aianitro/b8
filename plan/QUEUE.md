@@ -89,6 +89,13 @@ or `ESCALATED` when the cycle counter hits 3.
 
 ## Holds — things blocking a dispatch, recorded rather than carried in someone's head
 
+**H7 — OPEN 2026-10-07: about 524 Plaid-sourced rows carry transaction ids Plaid has since reissued.**
+Found by P6-40c's real-run classification (counts only, EVIDENCE.md): Plaid's current history holds
+the same account+date+amount under a different id. Those rows are not enriched by the backfill and
+no longer receive Plaid's `modified` corrections. Candidate task: a one-off re-keying pass reusing
+`matchReissuedTransactions` over the full history (dry-run, CSV backup, update-only), after which the
+backfill can be re-run to enrich them.
+
 **H6 — OPEN 2026-10-07: a U+0000 in a Plaid `name` or `merchant_name` would fail the sync upsert**
 (Postgres `text` refuses NUL) and stall that item, as P6-40b's REVIEW-1 B1 showed for the new
 columns. Pre-existing since sync was written; P6-40b sanitises only what it adds. Decide whether

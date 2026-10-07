@@ -407,3 +407,20 @@ ls: /Users/andreianpilogov/b8-backfill-backups: No such file or directory
 | **N2 removed entirely** | run exit 1: `Tests  18 passed (19)`, `Errors  1 error`, `Error: [vitest-pool]: Worker forks emitted error. … Worker exited unexpectedly` after about 35 s | **BF-19** never completed. The walk looped until the worker died; that is the loop the fix removes. This probe is red as a run failure, not as an assertion. |
 
 The crashed N2-off run skipped the file's `afterAll`. It left fabricated fixture rows in the scratch DB, plus one orphaned fixture `transfer_groups` row and one fixture `properties` row. The next normal run's cleanup removed the fixture rows. I deleted the two orphans by hand in `b8_p640c_throwaway` only. The scratch DB was then at 0 transactions, 0 accounts, 0 tombstones, 0 transfer groups, 0 properties and 0 budget categories, and it was still 0/0/0 (transactions/accounts/tombstones) after the final ⟨I⟩ run.
+
+---
+
+## Real run on the home server (orchestrator, 2026-10-07, after deploy a5f14b2) — counts only
+
+**Before:** transactions 1777; `plaid_raw IS NULL` 1777 (of which Plaid-sourced, i.e. not `manual_`/`csv_`, 1262); Plaid items 5; cursor fingerprint (sha256 prefix over all accounts' id:cursor) `7d59cdf77eff8a79`.
+
+**Dry run** (`npm run backfill:enrichment -w @b8/web`): exit 0, no backup dir created.
+`totals: plaid_returned=957 pending_skipped=10 unknown_account=0 not_local=541 matched=406 would_update=406 already_enriched=0 local_not_returned=1315 items_failed=0`
+
+**Apply** (`… -- --apply`): exit 0. `updated=406`, `items_failed=0`. Backup: 406 data rows, `~/b8-backfill-backups/enrichment-backfill-20261007T172258.750Z.csv`, file `-rw-------`, dir `drwx------`, outside the repo and outside `apps/backups`.
+
+**After:** transactions 1777 (unchanged); `plaid_raw IS NULL` 1371 (−406 exactly); cursor fingerprint `7d59cdf77eff8a79` (unchanged). Read-only comparison of every backed-up row against the table over the 16 non-enrichment columns: `csv_rows 406, missing_rows 0, rows_differing_in_non_enrichment_columns 0, rows_still_unenriched 0`.
+
+**Idempotency:** a second `--apply` → `would_update=0 already_enriched=406 updated=0`, "backup: none written, nothing to update"; still one CSV in the directory. Server checkout clean.
+
+**The 541 `not_local` (read-only classification by account+date+amount, counts only):** tombstoned 0; a local row with the same account, date and amount exists for 531 — 524 under a *different Plaid id*, 7 as CSV-imported rows; no local counterpart 10, all dated in the current month (expected to arrive with the next daily sync). The 524 are rows stored under ids Plaid has since reissued (a re-link); they cannot be enriched by id and will not receive Plaid's `modified` corrections either — recorded as QUEUE hold H7.
