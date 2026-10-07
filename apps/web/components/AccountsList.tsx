@@ -30,6 +30,10 @@ type Section = 'operational' | 'capital';
  * control that reads right. Each cell is placed explicitly, because implicit flow would put eight
  * cells on eight lines.
  */
+// Whole dollars, matching the valuation figures that share this column.
+const fmtBalance = (n: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+
 const ROW_GRID = 'grid grid-cols-[4px_minmax(0,1fr)_auto] gap-x-3 gap-y-2 items-center '
   + 'sm:grid-cols-[14px_4px_minmax(0,1fr)_112px_44px_24px] sm:gap-3';
 
@@ -39,9 +43,11 @@ interface Props {
   txnCounts: Record<string, number>;
   /** Latest valuation per account id; absent means never valued. */
   valuations: Record<string, number>;
+  /** Ledger balance per account id, as net worth computes it; absent for an untracked account. */
+  ledgerBalances: Record<string, number>;
 }
 
-export default function AccountsList({ operational, capital, txnCounts, valuations }: Props) {
+export default function AccountsList({ operational, capital, txnCounts, valuations, ledgerBalances }: Props) {
   const [operationalOrder, setOperationalOrder] = useState<Account[]>(operational);
   const [capitalOrder, setCapitalOrder] = useState<Account[]>(capital);
   const [dragOver, setDragOver] = useState<string | null>(null); // account id
@@ -109,11 +115,11 @@ export default function AccountsList({ operational, capital, txnCounts, valuatio
   return (
     <>
       <Group
-        title="Operational" items={operationalOrder} section="operational" dragOver={dragOver} txnCounts={txnCounts} valuations={valuations}
+        title="Operational" items={operationalOrder} section="operational" dragOver={dragOver} txnCounts={txnCounts} valuations={valuations} ledgerBalances={ledgerBalances}
         onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onDragEnd={onDragEnd}
       />
       <Group
-        title="Capital" items={capitalOrder} section="capital" dragOver={dragOver} txnCounts={txnCounts} valuations={valuations}
+        title="Capital" items={capitalOrder} section="capital" dragOver={dragOver} txnCounts={txnCounts} valuations={valuations} ledgerBalances={ledgerBalances}
         onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onDragEnd={onDragEnd}
       />
     </>
@@ -121,7 +127,7 @@ export default function AccountsList({ operational, capital, txnCounts, valuatio
 }
 
 function Group({
-  title, items, section, dragOver, txnCounts, valuations, onDragStart, onDragOver, onDrop, onDragEnd,
+  title, items, section, dragOver, txnCounts, valuations, ledgerBalances, onDragStart, onDragOver, onDrop, onDragEnd,
 }: {
   title: string;
   items: Account[];
@@ -129,6 +135,7 @@ function Group({
   dragOver: string | null;
   txnCounts: Record<string, number>;
   valuations: Record<string, number>;
+  ledgerBalances: Record<string, number>;
   onDragStart: (section: Section, id: string) => void;
   onDragOver: (e: React.DragEvent, id: string) => void;
   onDrop: (section: Section, targetId: string) => void;
@@ -147,7 +154,7 @@ function Group({
           <span />
           <span />
           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Account</span>
-          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 text-right">Value</span>
+          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 text-right">Balance</span>
           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 text-center">Track</span>
           <span />
         </div>
@@ -223,8 +230,9 @@ function Group({
                 </div>
               </div>
 
-              {/* Fixed-width cell rather than a conditional element, so the numbers line up
-                  down the column even though only valuation-mode accounts have one. */}
+              {/* Every account's current balance: the latest valuation for a valued account (still
+                  editable here), the ledger balance for the rest. An untracked ledger account has
+                  no balance — its transactions are not counted — so it keeps the dash. */}
               <div className="text-right col-start-3 row-start-1 self-start sm:col-auto sm:row-auto sm:self-auto">
                 {a.valuation_mode === 'valuation' ? (
                   <AccountValuationEdit
@@ -232,8 +240,15 @@ function Group({
                     current={valuations[a.id] ?? null}
                     isLiability={a.is_liability}
                   />
+                ) : a.id in ledgerBalances ? (
+                  // Owed only once it rounds to a dollar: a few cents below zero would read "−$0".
+                  // `pr-[15px]` is the hover pencil's room (11px icon + 4px gap) in the valuation
+                  // cell above, so the two kinds of figure share one right edge down the column.
+                  <span className={`pr-[15px] text-xs font-mono font-medium ${ledgerBalances[a.id] <= -0.5 ? 'text-red-500' : 'text-slate-600'}`}>
+                    {ledgerBalances[a.id] <= -0.5 ? '−' : ''}{fmtBalance(Math.abs(ledgerBalances[a.id]))}
+                  </span>
                 ) : (
-                  <span className="text-xs text-slate-300">—</span>
+                  <span className="text-xs text-slate-300" title="Not tracked, so no balance">—</span>
                 )}
               </div>
 

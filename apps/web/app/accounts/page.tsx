@@ -4,6 +4,7 @@
 export const dynamic = 'force-dynamic';
 
 import db from '@/lib/db';
+import { computeCurrentNetWorth } from '@/lib/netWorth';
 import PlaidLinkButton from '@/components/PlaidLinkButton';
 import AddAccountForm from '@/components/AddAccountForm';
 import AccountsList from '@/components/AccountsList';
@@ -41,8 +42,10 @@ async function getTxnCounts(): Promise<Map<string, number>> {
 }
 
 export default async function AccountsPage() {
-  const [accounts, txnCounts, latestValuations] = await Promise.all([
-    getAccounts(), getTxnCounts(), getLatestValuations(),
+  // Ledger balances come from the net worth computation rather than a sum spelled out here, so a
+  // balance on this page is the same figure the dashboard and net worth add up.
+  const [accounts, txnCounts, latestValuations, { ledgerBalances }] = await Promise.all([
+    getAccounts(), getTxnCounts(), getLatestValuations(), computeCurrentNetWorth(),
   ]);
   const operational = accounts.filter((a) => a.landscape === 'operational');
   const capital     = accounts.filter((a) => a.landscape === 'capital');
@@ -89,6 +92,7 @@ export default async function AccountsPage() {
           capital={capital}
           txnCounts={txnCountsObj}
           valuations={Object.fromEntries(latestValuations)}
+          ledgerBalances={Object.fromEntries(ledgerBalances)}
         />
       )}
 
