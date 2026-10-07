@@ -276,6 +276,36 @@ CREATE INDEX IF NOT EXISTS idx_transactions_transfer_group ON transactions(trans
 -- Partial: watched rows are the rare ones and the only ones this predicate ever selects.
 CREATE INDEX IF NOT EXISTS idx_transactions_watched ON transactions(watched_at) WHERE watched_at IS NOT NULL;
 
+-- Plaid transaction ids the OWNER deleted. Sync must never write one of these ids to `transactions`
+-- again, whether it arrives as `added` or `modified`, and must not let one claim a stored row during
+-- re-identification. Deleting a row is not enough by itself: Plaid does not know about the delete,
+-- and the next `modified` for that id would upsert the row back.
+--
+-- Keyed on plaid_transaction_id alone because that is the only thing sync has for an incoming
+-- transaction, and it is TEXT NOT NULL UNIQUE on every transactions row, including the synthetic
+-- `manual_`/`csv_` ids. Those tombstones are inert: sync never receives such ids, and the CSV
+-- importer and manual create deliberately do not read this table.
+--
+-- NO FOREIGN KEY TO transactions, ON PURPOSE. A tombstone exists to outlive the row it names: an FK
+-- would either refuse the delete or cascade the tombstone away with it, and it would let
+-- `TRUNCATE transactions ... CASCADE` clear this table too.
+--
+-- Only the owner's delete writes a row here. Plaid's own `removed` events delete the transaction and
+-- write NO tombstone, because that is Plaid's view changing, not the owner's decision.
+--
+-- KNOWN GAP: after a bank re-auth Plaid issues NEW ids for the same real transactions, so a deleted
+-- transaction can come back under its new id. Covering that would need account/date/amount/name
+-- matching, which is a different shape with its own false positives. Documented, not fixed.
+--
+-- Permanent: nothing removes or expires a tombstone.
+CREATE TABLE IF NOT EXISTS transaction_tombstones (
+  -- An empty key matches nothing sync receives. The CHECK makes a delete that read its key from the
+  -- wrong place fail and roll back, instead of leaving a tombstone that protects nothing.
+  plaid_transaction_id TEXT PRIMARY KEY
+    CONSTRAINT transaction_tombstones_key_not_empty CHECK (plaid_transaction_id <> ''),
+  deleted_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()  -- FIRST tombstoning; a repeat delete of the same id leaves it unchanged
+);
+
 -- Counting a wallet. Cash is the one account kind with a feed on only ONE side: the withdrawal is on
 -- the bank feed, the coffee is on no feed at all, so the only way the ledger learns what a wallet
 -- holds is the owner counting it.

@@ -1,0 +1,25 @@
+# GATES — P6-40a-deletion-tombstones
+<!-- Append-only audit trail. The process analogue of this app's own append-only observation
+     tables: the record of what happened is worth more than a summary of it. -->
+
+| Gate | Result | When | Evidence |
+|---|---|---|---|
+| G0 spec | PASS (1 orchestrator amendment) | 2026-10-07 | Toolchain verified by command: T1 `select 1`→1; T2 throwaway DBs created (`b8_p40a_throwaway`, `b8_p40a_schema`); T3 exported bogus `DATABASE_URL` → `npm run migrate:up` exit 1 ECONNREFUSED (node-pg-migrate bin calls `dotenv.config` without `override`, `dotenv-expand` not installed — read before running so a wrong answer could not migrate the real DB); T4 guard refuses `b8_finance` (exit 1, named); T5 baseline 69 files / 1024 tests; T6 tsc exit 0. `db/schema.sql` loads into an empty DB (exit 0) so #5 is runnable. Vitest JSON shape (`testResults[].assertionResults[].title/status`, `numFailedTests`) confirmed on a real run. **Amendment:** the integration suite already fails 2 tests at baseline on a freshly migrated DB (`proxy.test.ts` pre-auth endpoint 307≠401; `overview/route.test.ts` payload key list 15≠12) — stale tests, not in CI, unrelated to Phase 6 (QUEUE hold H4). #6/#7 now permit exactly those two titles and fail on any other failure. Vacuity: amended #6 run on the unmodified tree → `FAIL unexpected=[] S1..S11=(0)`, exit 1 — fails for the missing scenarios, not the known ones. Mutation list in the spec names the broken implementation each scenario catches. |
+| G1 contract | PASS | 2026-10-07 | New `migrations/1791352847213_transaction-tombstones.sql` + `db/schema.sql`; class additive (CONTRACT.md). Acceptance #4 on fresh `b8_p40a_throwaway`: `transaction_tombstones` / `gone` / `transactions` / `transaction_tombstones`. #5: columns `deleted_at timestamp with time zone NO`, `plaid_transaction_id text NO` identical from migration and from `db/schema.sql`; constraints `c CHECK ((plaid_transaction_id <> ''::text))`, `p PRIMARY KEY (plaid_transaction_id)` identical; sole key `1`; FKs `0`. tsc exit 0. Newest migration (nothing later in `migrations/`). Guardian's added non-empty CHECK verified safe against real data: server `select count(*) … where plaid_transaction_id = ''` → 0 (count only). Lease opened before dispatch, closed after this entry. |
+| G2 build | PASS | 2026-10-07 | Orchestrator re-ran every command on freshly recreated `b8_p40a_throwaway` / `b8_p40a_schema`. #1 tsc exit 0. #2 lint `0 errors` (1 pre-existing warning, untouched file). #3 `Test Files 69 passed (69)` / `Tests 1024 passed (1024)`. #4 `transaction_tombstones` / `gone` / `transactions` / `transaction_tombstones`. #5 both diffs empty, `1`, `0`. #6 `OK 68 tests, S1-S11 each present once and passed` exit 0. #7 run twice: both `OK 68 tests…` exit 0. Afterwards: `0 tombstones left, 0 user triggers`. Surface: route.ts, lib/sync.ts, two new route tests, plan files; the migration/schema are G1's. Implementer's mutation log (8 probes, each failing the named scenarios) in EVIDENCE.md. |
+| G3 adversarial | PASS | 2026-10-07 | REVIEW-1: ACCEPT_WITH_NITS; 18 hypotheses (16 refuted, 1 confirmed-NIT, 1 inconclusive→command); 0 BLOCK; nits N1/N2 recorded in NITS.md as follow-up `P6-40a1-tombstone-races`, not absorbed. |
+| G4 integration | PASS | 2026-10-07 | `npm test` 69 files / 1024 tests passed; tsc exit 0; lint exit 0; `npm run build` succeeded; migrate up/down/up clean (G2 #4). INCONCLUSIVE → command: two psql sessions on `b8_p40a_throwaway`, route-shaped transaction held open with `pg_sleep(3)`, the exact `modified` upsert issued inside the window → `rows=1 tombstones=1` — **N2 CONFIRMED** as a millisecond-scale race (NIT, follow-up). Truthfulness: no net-worth / budget surface touched; their unit tests green. Diff money-scan: only SQL `$n` placeholders. |
+
+**Cycle count:** 0 / 3
+
+**Tier (A8):** full pipeline — touches the contract surface (new table, migration) and the sync write path.
+<!-- G2/G3-BLOCK/G4 failures increment. A reviewer-fault (empty falsification log) does NOT. -->
+
+## Adjudications
+<!-- Disputes settled by a discriminating command, never by argument (BUILD.md §5.1).
+     A disposition may not be recorded as "verified" unless the causal claim behind it was
+     itself run as a command. Otherwise it is recorded as a hypothesis. -->
+| Claim in dispute | Discriminating command | Output | Decision |
+|---|---|---|---|
+| Spec #6 (as amended at G0) can report a verdict | implementer ran it verbatim; orchestrator confirmed by reading | `set -e` aborts on vitest's exit 1 (the two KNOWN failures) before the checker runs — no OK/FAIL line | **Orchestrator's own G0 amendment was defective.** Added `\|\| true` after the vitest subshell; the checker still fails closed (no JSON file → parse error → non-zero). Implementer not charged a cycle. |
+| Spec #5's constraint query is runnable as frozen | ran it verbatim | `ERROR: operator is not unique: "char" \|\| unknown` | Spec defect, not a contract defect. Amended to `contype::text\|\|…` (one token); re-run → parity OK. Recorded here because the spec was already frozen. |

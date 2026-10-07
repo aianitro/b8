@@ -49,6 +49,9 @@ async function syncItem(
 ): Promise<{ added: number; unmatchedAccountIds: string[] }> {
   let currentCursor = cursor ?? undefined;
   let added = 0;
+  // Counted only for the log line below. Not part of the return: a skipped deletion is not a sync
+  // outcome the caller acts on, and `added` already excludes these.
+  let skippedTombstoned = 0;
   let hasMore = true;
   const unmatchedAccountIds = new Set<string>();
 
@@ -69,7 +72,35 @@ async function syncItem(
     // each incoming row against a stored one that Plaid no longer refers to by id and update
     // that row's id in place instead: the transaction keeps its row, and with it whatever
     // category, hidden flag and transfer group it had.
-    const eligible = newTxns.filter((t) => knownIds.has(t.account_id) && !t.pending);
+    //
+    // A TOMBSTONED INCOMING ID TAKES NO PART IN THIS, IN EITHER ROLE. As a claimant it would rename
+    // a live stored row to an id the owner deleted — the row survives, but now under an id the
+    // upsert below refuses to touch, so it can never be updated again — and its claim would also
+    // use up a stored row that a legitimate page-mate with the same account, date, amount and name
+    // should have claimed, turning that page-mate into a duplicate. So it is removed from the
+    // incoming list before matching, not merely blocked at the UPDATE: a refused UPDATE would still
+    // have spent the claim. And a stored row still bearing that id (re-created by a CSV re-import,
+    // say) is kept out of the candidate pool, exactly as the matcher already does for any id Plaid
+    // is still sending: Plaid still knows it, so it is not a row Plaid has stopped referring to.
+    //
+    // WHY A READ IS ACCEPTABLE HERE, when the writes below insist on checking inside the statement.
+    // This read is per page, not once per sync, and the only race it can lose is the owner deleting
+    // a row while this page is processed. A tombstone can only newly appear for an id that is stored
+    // — there is no row to delete otherwise — and an incoming id the matcher can see stored (same
+    // accounts, inside this page's date range) is never a claimant: it is handed to the ordinary
+    // upsert path, whose write-time check below catches it. What remains is an id stored OUTSIDE
+    // that range (Plaid moved its date) deleted in the milliseconds between this read and the
+    // UPDATE below — a window this narrow is accepted rather than locked against.
+    const pageCandidates = newTxns.filter((t) => knownIds.has(t.account_id) && !t.pending);
+    const tombstoned = new Set<string>();
+    if (pageCandidates.length > 0) {
+      const { rows } = await db.query<{ plaid_transaction_id: string }>(
+        'SELECT plaid_transaction_id FROM transaction_tombstones WHERE plaid_transaction_id = ANY($1)',
+        [pageCandidates.map((t) => t.transaction_id)]
+      );
+      for (const r of rows) tombstoned.add(r.plaid_transaction_id);
+    }
+    const eligible = pageCandidates.filter((t) => !tombstoned.has(t.transaction_id));
     const reidentified = new Set<string>();
     if (eligible.length > 0) {
       const dates = eligible.map((t) => t.date);
@@ -87,7 +118,7 @@ async function syncItem(
           plaidTransactionId: t.transaction_id, accountId: t.account_id,
           date: t.date, amount: t.amount, name: t.name ?? null,
         })),
-        existingRows.rows.map((r) => ({
+        existingRows.rows.filter((r) => !tombstoned.has(r.plaid_transaction_id)).map((r) => ({
           id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id,
           date: toDateOnly(r.date), amount: Number(r.amount), name: r.name,
         }))
@@ -121,10 +152,19 @@ async function syncItem(
       // Re-identified rows now carry this id, so the upsert below finds them by conflict and
       // refreshes their Plaid-sourced fields — deliberately without touching mapped_category,
       // which the DO UPDATE clause already leaves alone.
-      await db.query(
+      //
+      // THE TOMBSTONE CHECK IS INSIDE THE WRITE, and that placement is the rule rather than a
+      // style. `INSERT ... SELECT ... WHERE NOT EXISTS` proposes no row at all for an id the owner
+      // deleted, so there is nothing to insert and nothing to conflict with — the DO UPDATE never
+      // fires either. A SELECT of tombstones up front, then a plain upsert, would be deciding on a
+      // reading that a delete landing mid-sync (or between two pages) has already made stale, and
+      // the row would come back. Asked here, the question is answered at the moment it matters.
+      // A skipped id is not counted: `rowCount` is 0 when the guard proposed nothing.
+      const written = await db.query(
         `INSERT INTO transactions
            (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+          WHERE NOT EXISTS (SELECT 1 FROM transaction_tombstones tt WHERE tt.plaid_transaction_id = $1)
          ON CONFLICT (plaid_transaction_id) DO UPDATE
            SET account_id = EXCLUDED.account_id,
                date = EXCLUDED.date,
@@ -137,7 +177,8 @@ async function syncItem(
       );
       // A re-identified row is not new to the ledger, only newly-numbered — counting it as
       // added would report a re-auth as hundreds of fresh transactions.
-      if (!reidentified.has(txn.transaction_id)) added++;
+      if (written.rowCount === 0) skippedTombstoned++;
+      else if (!reidentified.has(txn.transaction_id)) added++;
     }
 
     for (const txn of modified) {
@@ -153,10 +194,16 @@ async function syncItem(
       const plaidCategory = txn.personal_finance_category?.primary ?? null;
       const { mapped, ruleApplied } = applyRule(
         { plaidCategory, merchantName: txn.merchant_name ?? null }, rules);
-      await db.query(
+      // The same in-statement tombstone guard as the `added` loop, and this is the loop that
+      // needs it most: `modified` is how a deleted row actually comes back in practice, because
+      // Plaid keeps revising a transaction it has no idea the owner deleted. With no row proposed,
+      // the guard also leaves alone a row that still bears a tombstoned id — it is not refreshed,
+      // re-categorised, or resurrected, whichever of those this upsert would otherwise have done.
+      const written = await db.query(
         `INSERT INTO transactions
            (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+          WHERE NOT EXISTS (SELECT 1 FROM transaction_tombstones tt WHERE tt.plaid_transaction_id = $1)
          ON CONFLICT (plaid_transaction_id) DO UPDATE
            SET account_id = EXCLUDED.account_id,
                date = EXCLUDED.date,
@@ -169,8 +216,14 @@ async function syncItem(
         [txn.transaction_id, txn.account_id, txn.date, txn.amount,
          txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied]
       );
+      if (written.rowCount === 0) skippedTombstoned++;
     }
 
+    // NO TOMBSTONE HERE, deliberately, and this DELETE is not to be routed through the route's
+    // delete. Plaid removing a transaction (usually a pending one replaced by its posted form) is
+    // Plaid's view changing, not the owner deciding; if the same id came back later it would be
+    // Plaid changing its mind again, which is not something to override. Only the owner's delete
+    // writes a tombstone. For an id that is already tombstoned this matches no row and is a no-op.
     for (const txn of removed) {
       await db.query('DELETE FROM transactions WHERE plaid_transaction_id = $1', [txn.transaction_id]);
     }
@@ -259,6 +312,12 @@ async function syncItem(
       WHERE id = ANY($2)`,
     [currentCursor, accountIds, itemOk, itemFailed, institutionId, instStatus, instStatusAt]
   );
+
+  // A count, never the ids: a steady trickle here is Plaid revising transactions the owner
+  // deleted, which is expected and needs no action — but a sudden jump is worth being able to see.
+  if (skippedTombstoned > 0) {
+    log.info('skipped transactions the owner deleted', { count: skippedTombstoned });
+  }
 
   if (unmatchedAccountIds.size > 0) {
     log.warn('transactions for unrecognized account_ids (not saved)', { accountIds: [...unmatchedAccountIds] });

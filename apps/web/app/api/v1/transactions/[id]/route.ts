@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import { parseWatchInput } from '@/lib/watchlist';
 import type { ApiResponse } from '@b8/contracts/types';
+import { createLogger } from '@/lib/logger';
+
+const log = createLogger('transactions');
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -67,8 +70,70 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   return Response.json({ success: true, data: null } satisfies ApiResponse<null>);
 }
 
+/**
+ * Deletes a transaction and tombstones its Plaid id, so the next sync cannot bring it back.
+ *
+ * ─── WHY A TOMBSTONE AT ALL ───────────────────────────────────────────────────────────────────
+ *
+ * Plaid has no idea the owner deleted anything. Its next `modified` for this id would reach the
+ * sync upsert and insert the row again, and a reset cursor would do the same through `added`. The
+ * fact "the owner deleted this" cannot live on the row, because the row is what is being removed;
+ * `transaction_tombstones` is where it lives instead, and `lib/sync.ts` refuses every id in it.
+ *
+ * ─── WHY ONE TRANSACTION, AND WHY THE KEY COMES FROM `RETURNING` ──────────────────────────────
+ *
+ * Half of this pair is worse than neither. A delete without its tombstone is the bug this exists
+ * to fix, only quieter: the row vanishes, the owner sees it gone, and a sync days later restores
+ * it. A tombstone without the delete protects a row that is still there. So both statements share
+ * one BEGIN/COMMIT, and a failed tombstone write rolls the delete back with it and answers 5xx —
+ * the owner sees the delete fail and can retry, rather than seeing it succeed and later undo itself.
+ *
+ * The key is read from the deleted row's own `RETURNING`, in the same statement that removes it,
+ * not looked up beforehand or afterwards. Afterwards the row is gone and the lookup returns
+ * nothing; beforehand is a second read that can disagree with what was actually deleted. When no
+ * row matched, `RETURNING` is empty and nothing is tombstoned — the response stays the same
+ * success it always was, and an id that named no row leaves no tombstone protecting nothing.
+ *
+ * `ON CONFLICT DO NOTHING`, not `DO UPDATE SET deleted_at = NOW()`. A repeat delete of the same
+ * id (in practice a `csv_` row re-created by re-importing its file) must succeed, and the contract
+ * defines `deleted_at` as the FIRST time this id was deleted — the owner's decision, not the
+ * latest repeat of it.
+ *
+ * Not conditioned on `hidden`, the id's prefix, or anything else about the row. A `manual_` or
+ * `csv_` tombstone is inert (sync never receives those ids), and a prefix test that decided which
+ * ids "look like Plaid's" is a test that one day misreads a real Plaid id. Transfer partners are
+ * deliberately left alone: deleting one leg is a statement about that leg only.
+ */
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await db.query('DELETE FROM transactions WHERE id = $1', [id]);
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const deleted = await client.query<{ plaid_transaction_id: string }>(
+      'DELETE FROM transactions WHERE id = $1 RETURNING plaid_transaction_id',
+      [id]
+    );
+    for (const { plaid_transaction_id } of deleted.rows) {
+      await client.query(
+        `INSERT INTO transaction_tombstones (plaid_transaction_id) VALUES ($1)
+         ON CONFLICT (plaid_transaction_id) DO NOTHING`,
+        [plaid_transaction_id]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    // Message only. The error text is Postgres's, and it stays server-side; the client gets the
+    // generic envelope, the same split `/api/v1/sync` makes for the same reason.
+    log.error('delete failed', { error: err instanceof Error ? err.message : String(err) });
+    return Response.json(
+      { success: false, error: { code: 'SERVER_ERROR', message: 'Delete failed' } } satisfies ApiResponse<never>,
+      { status: 500 }
+    );
+  } finally {
+    client.release();
+  }
+
   return Response.json({ success: true, data: null } satisfies ApiResponse<null>);
 }
