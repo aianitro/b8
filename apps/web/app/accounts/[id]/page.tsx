@@ -125,7 +125,8 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
         bank={account.bank}
         mask={account.mask}
         landscape={landscape}
-        note={isValuation ? `${account.is_liability ? 'liability · ' : ''}valued, not ledgered` : undefined}
+        valuationMode={account.valuation_mode}
+        isLiability={account.is_liability}
       />
 
       <AccountBalanceChart

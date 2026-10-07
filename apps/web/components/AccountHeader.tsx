@@ -8,6 +8,20 @@ import { ACCOUNT_TYPES, CASH_TYPE, accountTypeLabel } from '@/lib/accountTypes';
 
 type Landscape = 'operational' | 'capital';
 
+// valuation_mode + is_liability shown as one three-way choice, because that is the real decision:
+// is_liability means nothing to a ledger account (its running balance carries its own sign), so
+// "ledger + liability" is kept unreachable here. The API still takes the two fields separately.
+type BalanceSource = 'ledger' | 'asset' | 'liability';
+
+const SOURCE_LABEL: Record<BalanceSource, string> = {
+  ledger: 'Ledger',
+  asset: 'Valuation · asset',
+  liability: 'Valuation · liability',
+};
+
+const toSource = (mode: 'ledger' | 'valuation', isLiability: boolean): BalanceSource =>
+  mode === 'ledger' ? 'ledger' : isLiability ? 'liability' : 'asset';
+
 interface Props {
   id: string;
   name: string;
@@ -16,8 +30,8 @@ interface Props {
   bank: string | null;
   mask: string | null;
   landscape: Landscape;
-  /** Shown after the badges, e.g. "valued, not ledgered". */
-  note?: string;
+  valuationMode: 'ledger' | 'valuation';
+  isLiability: boolean;
 }
 
 const LANDSCAPE_BADGE: Record<Landscape, string> = {
@@ -39,19 +53,20 @@ const typeKey = (type: string, subtype: string | null) => subtype ?? type;
  * row there, revealed by a pencil that appears on hover — which a phone never does, so on the PWA
  * they were invisible controls. They are settings of one account, and this is that account's page.
  */
-export default function AccountHeader({ id, name, type, subtype, bank, mask, landscape, note }: Props) {
+export default function AccountHeader({ id, name, type, subtype, bank, mask, landscape, valuationMode, isLiability }: Props) {
+  const source = toSource(valuationMode, isLiability);
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ name, bank: bank ?? '', type: typeKey(type, subtype), landscape });
+  const [form, setForm] = useState({ name, bank: bank ?? '', type: typeKey(type, subtype), landscape, source });
 
   // A Plaid-synced subtype ("ira", "money market") is not one of the canonical choices. It is
   // offered as itself, so opening the form and saving something else does not quietly rewrite it.
   const typeKnown = ACCOUNT_TYPES.some((t) => typeKey(t.type, t.subtype) === typeKey(type, subtype));
 
   function open() {
-    setForm({ name, bank: bank ?? '', type: typeKey(type, subtype), landscape });
+    setForm({ name, bank: bank ?? '', type: typeKey(type, subtype), landscape, source });
     setError(null);
     setEditing(true);
   }
@@ -72,6 +87,12 @@ export default function AccountHeader({ id, name, type, subtype, bank, mask, lan
     if (form.type !== typeKey(type, subtype)) {
       const chosen = ACCOUNT_TYPES.find((t) => typeKey(t.type, t.subtype) === form.type);
       if (chosen) { body.type = chosen.type; body.subtype = chosen.subtype; }
+    }
+    // Cash is always Ledger: it is counted, and a count corrects the ledger.
+    const nextSource = form.type === CASH_TYPE ? 'ledger' : form.source;
+    if (nextSource !== source) {
+      body.valuation_mode = nextSource === 'ledger' ? 'ledger' : 'valuation';
+      body.is_liability = nextSource === 'liability';
     }
     if (Object.keys(body).length === 0) { setEditing(false); return; }
 
@@ -101,7 +122,15 @@ export default function AccountHeader({ id, name, type, subtype, bank, mask, lan
             <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-600">{accountTypeLabel(type, subtype)}</span>
             {bank && type !== CASH_TYPE && <span>{bank}</span>}
             {mask && <span className="text-slate-400 tabular-nums">•••• {mask}</span>}
-            {note && <span className="text-slate-400">{note}</span>}
+            {/* Neutral for Ledger, which most accounts are; tinted once it is not, so the few
+                valued accounts stand out. Liability is amber, not red — red in this app means
+                something needs attention, and a mortgage subtracting is working as intended. */}
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+              source === 'ledger' ? 'bg-slate-100 text-slate-600'
+                : source === 'liability' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'
+            }`}>
+              {SOURCE_LABEL[source]}
+            </span>
           </div>
         </div>
         {!editing && (
@@ -142,6 +171,16 @@ export default function AccountHeader({ id, name, type, subtype, bank, mask, lan
                 <option value="capital">Capital</option>
               </select>
             </label>
+            {form.type !== CASH_TYPE && (
+              <label className="block sm:col-span-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Balance comes from</span>
+                <select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value as BalanceSource })} className={`${FIELD} mt-1`}>
+                  <option value="ledger">Ledger — summed from transactions</option>
+                  <option value="asset">Valuation — a value you enter (asset)</option>
+                  <option value="liability">Valuation — a value you enter (liability)</option>
+                </select>
+              </label>
+            )}
           </div>
           {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
           <div className="flex justify-end gap-2 mt-5">

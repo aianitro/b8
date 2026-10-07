@@ -74,7 +74,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         { status: 400 }
       );
     }
-    await db.query('UPDATE accounts SET valuation_mode = $1 WHERE id = $2', [valuation_mode, id]);
+    // Only a ledger balance can be counted — a count writes a correcting transaction, which a
+    // valuation balance ignores — so leaving ledger stops counting, and a cash account coming back
+    // to ledger starts it again. The type branch above has already run, so this sees the new type.
+    await db.query(
+      `UPDATE accounts
+          SET valuation_mode = $1,
+              countable = CASE WHEN $1 = 'valuation' THEN FALSE WHEN type = $3 THEN TRUE ELSE countable END
+        WHERE id = $2`,
+      [valuation_mode, id, CASH_TYPE]
+    );
   }
 
   if ('is_liability' in body) {

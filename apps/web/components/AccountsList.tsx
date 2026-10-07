@@ -3,7 +3,6 @@
 import { useRef, useState } from 'react';
 import { GripVertical } from 'lucide-react';
 import AccountTrackingToggle from './AccountTrackingToggle';
-import AccountValuationModeToggle from './AccountValuationModeToggle';
 import AccountValuationEdit from './AccountValuationEdit';
 import AccountDeleteButton from './AccountDeleteButton';
 import RelativeTime from './RelativeTime';
@@ -32,7 +31,7 @@ type Section = 'operational' | 'capital';
  * cells on eight lines.
  */
 const ROW_GRID = 'grid grid-cols-[4px_minmax(0,1fr)_auto] gap-x-3 gap-y-2 items-center '
-  + 'sm:grid-cols-[14px_4px_minmax(0,1fr)_112px_44px_150px_24px] sm:gap-3';
+  + 'sm:grid-cols-[14px_4px_minmax(0,1fr)_112px_44px_24px] sm:gap-3';
 
 interface Props {
   operational: Account[];
@@ -143,14 +142,13 @@ function Group({
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {/* Column headers: the compact controls (an eye, a short select) only read
             unambiguously once the column is named. No Landscape column — the group heading
-            above already says it, for every row at once. */}
+            above already says it — and no Balance from: that is set on the account's own page. */}
         <div className={`${ROW_GRID} hidden sm:grid px-6 py-2 bg-slate-50/60 border-b border-slate-100`}>
           <span />
           <span />
           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Account</span>
           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 text-right">Value</span>
           <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400 text-center">Track</span>
-          <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Balance from</span>
           <span />
         </div>
         {items.map((a, i) => {
@@ -170,7 +168,7 @@ function Group({
               <GripVertical size={14} className="hidden sm:block text-slate-300" />
               {/* The stripe runs the height of the card on a phone rather than sitting beside one
                   line of it — it is the only thing saying which book this account is in. */}
-              <div className={`w-1 self-stretch min-h-8 rounded-full col-start-1 row-span-3 sm:col-auto sm:row-auto sm:row-span-1 sm:h-8 sm:self-auto ${accent}`} />
+              <div className={`w-1 self-stretch min-h-8 rounded-full col-start-1 row-span-2 sm:col-auto sm:row-auto sm:row-span-1 sm:h-8 sm:self-auto ${accent}`} />
 
               {/* min-w-0 lets this cell shrink, but every child must then truncate or clip on
                   its own — without that the text overflowed its box and painted over the
@@ -239,16 +237,13 @@ function Group({
                 )}
               </div>
 
-              {/* Each wrapped so it can be PLACED on the phone grid — these three are components
+              {/* Each wrapped so it can be PLACED on the phone grid — these two are components
                   and carry no className of their own. On a desktop the wrapper is the grid item
                   the component used to be, in the same track, which changes nothing there. */}
               <div className="col-start-3 row-start-2 justify-self-end sm:col-auto sm:row-auto sm:justify-self-auto">
                 <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
               </div>
-              <div className="col-start-2 row-start-2 min-w-0 sm:col-auto sm:row-auto">
-                <AccountValuationModeToggle accountId={a.id} mode={a.valuation_mode} isLiability={a.is_liability} />
-              </div>
-              <div className="col-start-3 row-start-3 justify-self-end sm:col-auto sm:row-auto sm:justify-self-auto">
+              <div className="col-start-2 row-start-2 justify-self-end sm:col-auto sm:row-auto sm:justify-self-auto">
                 <AccountDeleteButton accountId={a.id} accountName={a.name} />
               </div>
             </div>
