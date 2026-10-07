@@ -17,13 +17,12 @@ export default function AddAccountForm() {
   const [landscape, setLandscape] = useState<'operational' | 'capital'>('operational');
   const [balanceChoice, setBalanceChoice] = useState<BalanceChoice>('ledger');
   const [initialValue, setInitialValue] = useState('');
-  const [countable, setCountable] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
     setName(''); setBank(''); setTypeKey('checking'); setLandscape('operational');
-    setBalanceChoice('ledger'); setInitialValue(''); setCountable(false); setError(null);
+    setBalanceChoice('ledger'); setInitialValue(''); setError(null);
   }
 
   function close() { setOpen(false); reset(); }
@@ -55,7 +54,6 @@ export default function AddAccountForm() {
           // Sent as the checkbox stands, and the route forces it false on a valuation account. The
           // checkbox is already hidden in that case, so this is the same rule applied twice on
           // purpose: a hidden control is a UI convention, not a guarantee about the request body.
-          countable,
         }),
       });
       const data = await res.json();
@@ -123,9 +121,9 @@ export default function AddAccountForm() {
               value={typeKey}
               onChange={(e) => {
                 setTypeKey(e.target.value);
-                // Cash is the thing "This is cash I count" exists for, so choosing it ticks the
-                // box. Only on the way in — the box stays the owner's to untick.
-                if (e.target.value === CASH_TYPE) setCountable(true);
+                // Cash is counted, and only a ledger balance can be counted — a count writes a
+                // correcting transaction, which a valuation balance would ignore.
+                if (e.target.value === CASH_TYPE) setBalanceChoice('ledger');
               }}
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
             >
@@ -149,39 +147,21 @@ export default function AddAccountForm() {
 
         {/* Defaults to Ledger — right for the common case (checking/savings/cards), where a
             balance is summed from transactions rather than typed in. Only a brokerage,
-            retirement, or loan account needs the other two. */}
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Balance comes from</label>
-          <select
-            value={balanceChoice}
-            onChange={(e) => setBalanceChoice(e.target.value as BalanceChoice)}
-            className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
-          >
-            <option value="ledger">Ledger — summed from transactions</option>
-            <option value="asset">Valuation — a value you enter (asset)</option>
-            <option value="liability">Valuation — a value you enter (liability)</option>
-          </select>
-        </div>
-
-        {/* ONLY FOR A LEDGER ACCOUNT. A valuation account's balance is its latest valuation, so
-            counting one would write a correcting transaction against a figure nothing derives from
-            transactions — it would land in the ledger and change nothing on screen. */}
-        {balanceChoice === 'ledger' && (
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={countable}
-              onChange={(e) => setCountable(e.target.checked)}
-              className="mt-0.5 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-900/20"
-            />
-            <span className="text-xs text-slate-600">
-              This is cash I count
-              <span className="block text-slate-400">
-                Wallets and gift cards — money with no feed behind it. Adds it to Cash on hand, where
-                you enter what is actually there.
-              </span>
-            </span>
-          </label>
+            retirement, or loan account needs the other two. Hidden for Cash, which is always
+            Ledger: it is counted, and a count corrects the ledger. */}
+        {typeKey !== CASH_TYPE && (
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Balance comes from</label>
+            <select
+              value={balanceChoice}
+              onChange={(e) => setBalanceChoice(e.target.value as BalanceChoice)}
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+            >
+              <option value="ledger">Ledger — summed from transactions</option>
+              <option value="asset">Valuation — a value you enter (asset)</option>
+              <option value="liability">Valuation — a value you enter (liability)</option>
+            </select>
+          </div>
         )}
 
         {balanceChoice !== 'ledger' && (
