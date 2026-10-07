@@ -69,12 +69,13 @@ function isCallTo(node: ts.Node | undefined, fn: string): node is ts.CallExpress
 }
 
 /**
- * Whether an `img`'s `src` is the sanitiser's output: a direct `safeLogoUrl(...)` call, or an
- * identifier that is declared in this file and EVERY declaration of which is initialised from
- * one — so a second, shadowing `const src = t.logo_url` in a mobile-only branch fails.
+ * Whether an `img`'s `src` (or another URL attribute) is the sanitiser's output: a direct
+ * `safeLogoUrl(...)` call, or an identifier that is declared in this file and EVERY declaration of
+ * which is initialised from one — so a second, shadowing `const src = t.logo_url` in a mobile-only
+ * branch fails.
  */
-function srcIsSanitised(sf: ts.SourceFile, el: JsxOpening): boolean {
-  const expr = attrExpr(attr(el, 'src'));
+function srcIsSanitised(sf: ts.SourceFile, el: JsxOpening, name = 'src'): boolean {
+  const expr = attrExpr(attr(el, name));
   if (!expr) return false;
   if (isCallTo(expr, 'safeLogoUrl')) return true;
   if (!ts.isIdentifier(expr)) return false;
@@ -91,11 +92,114 @@ function srcIsSanitised(sf: ts.SourceFile, el: JsxOpening): boolean {
   return !isParam && decls.length > 0 && decls.every((d) => isCallTo(d.initializer, 'safeLogoUrl'));
 }
 
-/** Every `img` / `Image` element whose src is not the sanitiser's output. */
+/**
+ * Every `img` / `Image` element that could fetch something other than the sanitiser's output:
+ * a `src` not from `safeLogoUrl`; a `srcSet`/`srcset` present and not from it either (a second
+ * URL the browser may prefer over `src`); a spread attribute (which can carry any `src` or
+ * `srcSet` past this check unseen); or a `style` that mentions a logo field or a URL (a
+ * `background-image: url(...)` fetches just as `src` does).
+ */
 function unsanitisedImages(sf: ts.SourceFile): string[] {
   return [...jsxElements(sf, 'img'), ...jsxElements(sf, 'Image')]
-    .filter((el) => !srcIsSanitised(sf, el))
+    .filter((el) => {
+      if (!srcIsSanitised(sf, el)) return true;
+      for (const name of ['srcSet', 'srcset']) {
+        if (attr(el, name) !== undefined && !srcIsSanitised(sf, el, name)) return true;
+      }
+      if (el.attributes.properties.some(ts.isJsxSpreadAttribute)) return true;
+      const style = attr(el, 'style');
+      let styleMentionsLogo = false;
+      if (style?.initializer) {
+        walk(style.initializer, (m) => {
+          if ((ts.isIdentifier(m) || ts.isStringLiteralLike(m) || ts.isTemplateLiteralToken(m)) && /logo|url|src/i.test(m.text)) {
+            styleMentionsLogo = true;
+          }
+        });
+      }
+      return styleMentionsLogo;
+    })
     .map((el) => el.getText(sf).slice(0, 80));
+}
+
+/** Every `x.add(...)` call outside an `onError` attribute — a failure recorded on a guess. */
+function addsOutsideOnError(sf: ts.SourceFile): string[] {
+  const out: string[] = [];
+  walk(sf, (n) => {
+    if (!ts.isCallExpression(n) || !ts.isPropertyAccessExpression(n.expression) || n.expression.name.text !== 'add') return;
+    for (let p: ts.Node | undefined = n.parent; p; p = p.parent) {
+      if (ts.isJsxAttribute(p) && p.name.getText(sf) === 'onError') return;
+    }
+    out.push(n.getText(sf).slice(0, 60));
+  });
+  return out;
+}
+
+/** Every `naturalWidth` read that is not exactly `naturalWidth > 0` — zero pixels is not failure. */
+function naturalWidthGuesses(sf: ts.SourceFile): string[] {
+  const out: string[] = [];
+  walk(sf, (n) => {
+    if (!ts.isPropertyAccessExpression(n) || n.name.text !== 'naturalWidth') return;
+    const b = n.parent;
+    const ok = ts.isBinaryExpression(b) && b.left === n && b.operatorToken.kind === ts.SyntaxKind.GreaterThanToken
+      && ts.isNumericLiteral(b.right) && b.right.text === '0';
+    if (!ok) out.push(b.getText(sf).slice(0, 60));
+  });
+  return out;
+}
+
+/** Whether `node` sits under a `?:`, `&&`, `||` or `??` before reaching `stop` — rendered only sometimes. */
+function conditionalBetween(node: ts.Node, stop: ts.Node): boolean {
+  const shortCircuits = [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken];
+  for (let p: ts.Node | undefined = node.parent; p && p !== stop; p = p.parent) {
+    if (ts.isConditionalExpression(p)) return true;
+    if (ts.isBinaryExpression(p) && shortCircuits.includes(p.operatorToken.kind)) return true;
+  }
+  return false;
+}
+
+function isAncestor(ancestor: ts.Node, node: ts.Node): boolean {
+  for (let p: ts.Node | undefined = node.parent; p; p = p.parent) if (p === ancestor) return true;
+  return false;
+}
+
+/**
+ * Violations of "the tile is always the box, and the logo is invisible until it loads" (F1):
+ * - the placeholder initial is rendered inside an element that is not itself conditional within
+ *   its `return`, and every `img` sits inside that element — laid over the tile, not instead of it;
+ * - every `img` has an `onLoad`, and its `className` carries a hiding class (`opacity-0` or
+ *   `invisible`) in some fragment: the state it is in until `onLoad` says otherwise.
+ * The first version (img OR tile, img visible while loading) fails all of these.
+ */
+function visibleBeforeLoad(sf: ts.SourceFile): string[] {
+  const out: string[] = [];
+  const initialNames = new Set<string>();
+  walk(sf, (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && isCallTo(n.initializer, 'placeholderInitial')) initialNames.add(n.name.text);
+  });
+  const tiles: ts.JsxElement[] = [];
+  walk(sf, (n) => {
+    if (!ts.isJsxExpression(n) || !n.expression || !ts.isJsxElement(n.parent)) return;
+    const e = n.expression;
+    if (!(isCallTo(e, 'placeholderInitial') || (ts.isIdentifier(e) && initialNames.has(e.text)))) return;
+    let ret: ts.Node | undefined = n.parent;
+    while (ret && !ts.isReturnStatement(ret)) ret = ret.parent;
+    if (ret && !conditionalBetween(n.parent, ret)) tiles.push(n.parent);
+  });
+  if (tiles.length === 0) out.push('no unconditionally rendered tile carries the placeholder initial');
+  for (const img of jsxElements(sf, 'img')) {
+    const label = img.getText(sf).slice(0, 60);
+    if (!tiles.some((t) => isAncestor(t, img))) out.push(`img not laid over the tile: ${label}`);
+    if (attr(img, 'onLoad') === undefined) out.push(`img without onLoad: ${label}`);
+    let hides = false;
+    const cls = attr(img, 'className')?.initializer;
+    if (cls) {
+      walk(cls, (m) => {
+        if ((ts.isStringLiteralLike(m) || ts.isTemplateLiteralToken(m)) && /(^|\s)(opacity-0|invisible)(\s|$)/.test(m.text)) hides = true;
+      });
+    }
+    if (!hides) out.push(`img className never hides it: ${label}`);
+  }
+  return out;
 }
 
 /** Every `img` missing `referrerPolicy="no-referrer"` or an `onError`. */
@@ -256,6 +360,12 @@ describe('the checkers catch what they are meant to (fabricated sources)', () =>
     expect(unsanitisedImages(bad('const C = ({ t }) => <Image src={t.logo_url} alt="" />;'))).toHaveLength(1);
     // And passes the two allowed shapes.
     expect(unsanitisedImages(bad('const C = ({ u }) => <img src={safeLogoUrl(u)} />;'))).toEqual([]);
+    // srcSet / srcset not from the sanitiser, a spread, and a style that names the logo.
+    expect(unsanitisedImages(bad('const C = ({ u, t }) => <img src={safeLogoUrl(u)} srcSet={t.logo_url} />;'))).toHaveLength(1);
+    expect(unsanitisedImages(bad('const C = ({ u, t }) => <img src={safeLogoUrl(u)} srcset={`${t.logo_url} 2x`} />;'))).toHaveLength(1);
+    expect(unsanitisedImages(bad('const C = ({ u, p }) => <img src={safeLogoUrl(u)} {...p} />;'))).toHaveLength(1);
+    expect(unsanitisedImages(bad('const C = ({ u, t }) => <img src={safeLogoUrl(u)} style={{ backgroundImage: `url(${t.logo_url})` }} />;'))).toHaveLength(1);
+    expect(unsanitisedImages(bad('const C = ({ u }) => <img src={safeLogoUrl(u)} srcSet={safeLogoUrl(u)} style={{ width: 28 }} />;'))).toEqual([]);
     expect(unsanitisedImages(bad('function C({ u }) { const s = safeLogoUrl(u); return <img src={s} />; }'))).toEqual([]);
   });
 
@@ -279,6 +389,27 @@ describe('the checkers catch what they are meant to (fabricated sources)', () =>
     expect(isRequiredNullableString(rowTypeMembers(bad('interface R { x: string | null }'), 'R').get('x'))).toBe(true);
   });
 
+  it('flags an img visible before it loads, an img without onLoad, and an img instead of the tile', () => {
+    const mark = (body: string) => bad(`function M({ u, n, ok }) { const s = safeLogoUrl(u); const initial = placeholderInitial(n); ${body} }`);
+    // Visible while loading: no hiding class.
+    expect(visibleBeforeLoad(mark('return <span>{initial}<img src={s} onLoad={f} className="size-7" /></span>;'))).toHaveLength(1);
+    // No onLoad, so nothing would ever show it.
+    expect(visibleBeforeLoad(mark('return <span>{initial}<img src={s} className="opacity-0" /></span>;'))).toHaveLength(1);
+    // The first version's shape: the img OR the tile, never both.
+    expect(visibleBeforeLoad(mark('if (s) return <img src={s} onLoad={f} className="opacity-0" />; return <span>{initial}</span>;')).length).toBeGreaterThanOrEqual(1);
+    expect(visibleBeforeLoad(mark('return ok ? <img src={s} onLoad={f} className="opacity-0" /> : <span>{initial}</span>;')).length).toBeGreaterThanOrEqual(1);
+    // And passes the required shape.
+    expect(visibleBeforeLoad(mark("return <span>{initial}{s && <img src={s} onLoad={f} className={`a ${ok ? 'opacity-100' : 'opacity-0'}`} />}</span>;"))).toEqual([]);
+  });
+
+  it('flags a failure recorded outside onError, and a zero naturalWidth read as failure', () => {
+    expect(addsOutsideOnError(bad('useEffect(() => { if (img.complete) dead.add(src); });'))).toHaveLength(1);
+    expect(addsOutsideOnError(bad('const x = <img onError={() => { dead.add(src); }} />;'))).toEqual([]);
+    expect(naturalWidthGuesses(bad('if (img.complete && img.naturalWidth === 0) fail();'))).toHaveLength(1);
+    expect(naturalWidthGuesses(bad('if (!img.naturalWidth) fail();'))).toHaveLength(1);
+    expect(naturalWidthGuesses(bad('if (img.complete && img.naturalWidth > 0) show();'))).toEqual([]);
+  });
+
   it('flags a detail computed but never rendered', () => {
     const sf = bad('rows.map((t) => { const d = enrichmentDetail(t); return <li>{t.name}</li>; });');
     const calls: ts.CallExpression[] = [];
@@ -298,7 +429,7 @@ describe('the enriched rows are wired through the sanitiser (AST)', () => {
     expect(jsxElements(sf, 'img').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('1. every img/Image in the mark and both row components takes its src from safeLogoUrl, and none imports next/image', () => {
+  it('1. every img/Image in the mark and both row components takes its src (and any srcSet) from safeLogoUrl, with no spread and no logo-fed style, and none imports next/image', () => {
     for (const file of [MARK, ...ROW_COMPONENTS]) {
       const sf = parse(file);
       expect({ file: relative(WEB, file), unsanitised: unsanitisedImages(sf) }).toEqual({ file: relative(WEB, file), unsanitised: [] });
@@ -321,6 +452,16 @@ describe('the enriched rows are wired through the sanitiser (AST)', () => {
       expect(attr(el, 'width')).toBeDefined();
       expect(attr(el, 'height')).toBeDefined();
     }
+  });
+
+  it('R4/F1. the tile is always the box, and the logo stays invisible until it has loaded', () => {
+    expect(visibleBeforeLoad(parse(MARK))).toEqual([]);
+  });
+
+  it('R4/H9. a logo is recorded as failed only by a real error event, never by a zero naturalWidth', () => {
+    const sf = parse(MARK);
+    expect(addsOutsideOnError(sf)).toEqual([]);
+    expect(naturalWidthGuesses(sf)).toEqual([]);
   });
 
   it('3. both row components render the shared mark and the enrichment detail inside the row map', () => {

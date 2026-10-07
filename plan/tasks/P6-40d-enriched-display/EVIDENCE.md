@@ -14,7 +14,7 @@ directory). `b8_finance` was never touched. No network, no Plaid.
 | File | Change |
 |---|---|
 | `apps/web/lib/enrichedDisplay.ts` | **New**, pure. `safeLogoUrl` (R1): trims; refuses non-strings, empty, over 2048 chars, any control char/space/DEL inside the trimmed text (so `java<TAB>script:` is refused as stored rather than repaired by the URL parser), anything not starting `https://` in the raw text, anything `new URL` throws on (caught), a non-`https:` protocol, an empty host, any username/password; returns the normalized `href` (re-checked against the bound). `enrichmentDetail` (R2): authorized date only when it is ISO `YYYY-MM-DD`, a real calendar day (checked by hand, not `new Date`), and `!==` the posted `date` string; location `City, ST` / city / region after trimming, blank is absent. `detailLine`: joins the non-null parts with one ` · `, labels the date `Authorized <date>` in the caller's date style, returns `null` when there is nothing. `placeholderInitial` (R3): first `\p{L}`/`\p{N}`, uppercased, first code point of the result. |
-| `apps/web/components/MerchantMark.tsx` | **New**, `'use client'`. The one shared mark (R3/R4). `src` is `const src = safeLogoUrl(logoUrl)`; no `<img>` when that is `null`. Plain `<img>`, `alt=""`, `width`/`height` 28, `loading="lazy"`, `referrerPolicy="no-referrer"`, `draggable={false}`, no `crossOrigin`, `onError` swaps to the placeholder. A failed URL is remembered in state AND in a module-level set, so it is not retried on re-render or on remount (Show fewer → Show more). A mount-time check (`complete && naturalWidth === 0`) catches an image that failed before hydration, when React's `onError` was not attached yet. Placeholder: `size-7` slate-100 tile with the initial, same box as the logo. |
+| `apps/web/components/MerchantMark.tsx` | **New**, `'use client'`. The one shared mark (R3/R4). `src` is `const src = safeLogoUrl(logoUrl)`; no `<img>` when that is `null`. Plain `<img>`, `alt=""`, `width`/`height` 28, `loading="lazy"`, `referrerPolicy="no-referrer"`, `draggable={false}`, no `crossOrigin`, `onError` swaps to the placeholder. A failed URL is remembered in state AND in a module-level set, so it is not retried on re-render or on remount (Show fewer → Show more). A mount-time check (`complete && naturalWidth === 0`) catches an image that failed before hydration, when React's `onError` was not attached yet. Placeholder: `size-7` slate-100 tile with the initial, same box as the logo. **Superseded in Cycle 1 (below):** the tile is now always rendered, the img is invisible until `onLoad`, and the `naturalWidth === 0` check is gone. |
 | `apps/web/components/AccountStatementList.tsx` | `StatementRow` gains the four fields as `string \| null`. Row grid gains a leading fixed `1.75rem` track (phone `[1.75rem_minmax(0,1fr)_auto]`, sm+ `[1.75rem_minmax(0,1fr)_12rem_9rem_2rem]`); every existing cell's `col-start` shifted by one, explicit placement kept on every cell; the mark spans both phone lines (`row-span-2`, `sm:row-span-1`). Phone `gap-x` reduced from 4 to 3 to give the title back most of the 28px (sm+ keeps 4). Detail line rendered under the title only when non-null, `text-xs text-slate-400 truncate`, "Mon D" style via the file's own `shortDate`. Amount, balance, sign, `fmt`, Show more and swipe are untouched. |
 | `apps/web/components/TransactionTable.tsx` | `TxRow` gains the four fields as `string \| null`. The mark and detail line go INSIDE the existing Merchant `<td>` (a flex wrapper), so no new grid cell is added to the phone layout and no cell placement changes. Detail line in ISO style (the Date column's), visible on phone too, `wrap-anywhere` so a long city cannot widen the desktop column. Amount/sign/sort/filters/controls untouched; Duplicate still POSTs its explicit field list. |
 | `apps/web/app/accounts/[id]/page.tsx` | Local `TxRow` gains the four fields; SELECT gains `logo_url, authorized_date::text, location_city, location_region`. No WHERE/JOIN/ORDER change. |
@@ -195,5 +195,135 @@ credentials, and the app's server never fetches a logo (no `next/image`, no `ima
 - Browser screenshots, `getBoundingClientRect` alignment, 390px overflow, swipe and Show more with
   a logo, the dead-URL fallback in a real browser, the Referer header check, and the hidden-row
   opacity: the orchestrator's, per the spec. Not run by me — I had no browser.
-- The pre-hydration error fallback (mount-time `complete && naturalWidth === 0` check) is reasoned
+- (Superseded in Cycle 1: the heuristic below was removed.) The pre-hydration error fallback (mount-time `complete && naturalWidth === 0` check) is reasoned
   from the HTML spec's definition of `complete`, not observed; the dead-host row exercises it.
+
+# Cycle 1 (after G3 NIT H9, G4 finding F1)
+
+Run on 2026-10-07 in the same worktree, on top of 2575066. Same scratch DB, same fabricated seed.
+
+## Changes in this cycle
+
+| File | Change |
+|---|---|
+| `apps/web/components/MerchantMark.tsx` | **F1.** The slate tile with the initial is ALWAYS rendered and is the box (`relative size-7`). When `safeLogoUrl` gives a URL, the `<img>` is rendered inside the tile, `absolute inset-0 size-7`, and starts at `opacity-0`; it becomes `opacity-100` only once `onLoad` fires. `onError` unmounts it (it was never visible). A failure is therefore never painted, whether it happens before hydration, after hydration, or when a lazy image scrolls into view. **H9.** I removed the mount-time `complete && naturalWidth === 0` heuristic. The tab-wide set (renamed `failedLogos`) is now added to only inside `onError`, so a deferred `loading="lazy"` image can no longer be marked dead before it is requested. A failed URL is still not retried, on re-render (state) or on remount (the set). **Loaded before hydration:** on mount, `img.complete && img.naturalWidth > 0` marks it loaded and visible. `naturalWidth === 0` is never read as failure. The R4 attributes are unchanged: `src` from `safeLogoUrl` only, `alt=""`, 28×28, lazy, `no-referrer`, not draggable, no crossOrigin, `onError` present, plus `onLoad`. I rewrote the comments for the new R4 behaviour. |
+| `apps/web/lib/enrichedDisplayWiring.test.ts` | 11 → 15 tests. **Item 1 extended:** an img fails on any of the following, and each has a self-test on a fabricated bad source. The self-tests also include a passing shape: `srcSet` from `safeLogoUrl` plus a harmless `style`.<br>• a `srcSet`/`srcset` present and not from `safeLogoUrl`<br>• any JSX spread attribute<br>• a `style` whose expression mentions an identifier or string matching `logo`, `url` or `src` (case-insensitive)<br>**New R4/F1 test:**<br>• the placeholder initial is rendered inside a JSX element that is not under `?:`, `&&`, `\|\|` or `??` within its `return`<br>• every `img` is a descendant of that element (on top of the tile, not instead of it)<br>• every `img` has `onLoad`<br>• the img's `className` has an `opacity-0` or `invisible` token in some string or template fragment<br>**New R4/H9 test:** every `x.add(...)` call in the mark is inside the `onError` attribute, and every `naturalWidth` read is exactly `naturalWidth > 0`.<br>Two more self-test blocks cover these new checkers. Among them are the cycle-0 shape (img OR tile, via an early return and via a ternary), a visible-while-loading img, a missing `onLoad`, `.add` in an effect, `naturalWidth === 0` and `!naturalWidth`. The referrerPolicy and onError checks are unchanged. |
+| `plan/tasks/P6-40d-enriched-display/EVIDENCE.md` | I marked the cycle-0 R4 wording as superseded in place and appended this section. |
+
+## What the new structural checks can and cannot see
+- **F1 check (P6):** it proves the hiding class is present and that the img has an `onLoad`. It does not prove that `onLoad` is what removes the class. A component that kept `opacity-0` forever, with an `onLoad` that did nothing, would pass this test and show no logos. That would be a visible regression, not a privacy or broken-icon one, and the browser evidence would catch it. Proving the data flow from `onLoad` to `className` needs a DOM, and this repo deliberately has no DOM test environment.
+- **H9 check (P7):** it is caught structurally, by two independent assertions. P7's mutation failed on the first assertion, `.add` outside `onError`. The second assertion, `naturalWidthGuesses`, would also have failed; the test stops at the first failure. A heuristic written as `setFailedSrc` alone, without `.add`, would still be caught by the `naturalWidth` assertion. A heuristic that did not read `naturalWidth` at all (for example, a timeout) would not be caught by either assertion.
+
+## Acceptance re-run (cycle 1)
+```
+$ npx tsc --noEmit
+exit=0
+
+$ npm run lint 2>&1 | tail -4
+✖ 4 problems (0 errors, 4 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+exit=0
+
+$ npm test -w @b8/web -- lib/enrichedDisplay.test.ts 2>&1 | tail -8
+ RUN  v4.1.10 /Users/andreianpilogov/Documents/b8/app/.claude/worktrees/agent-a88333accd5bf0711/apps/web
+ Test Files  1 passed (1)
+      Tests  60 passed (60)
+   Start at  10:04:09
+   Duration  175ms (transform 29ms, setup 0ms, import 38ms, tests 7ms, environment 0ms)
+exit=0
+
+$ npm test -w @b8/web -- lib/enrichedDisplayWiring.test.ts 2>&1 | tail -8
+ RUN  v4.1.10 /Users/andreianpilogov/Documents/b8/app/.claude/worktrees/agent-a88333accd5bf0711/apps/web
+ Test Files  1 passed (1)
+      Tests  15 passed (15)
+   Start at  10:04:10
+   Duration  487ms (transform 74ms, setup 0ms, import 316ms, tests 57ms, environment 0ms)
+exit=0
+
+$ npm test 2>&1 | tail -8
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:27596) ExperimentalWarning: The ML-DSA-44 Web Crypto API algorithm is an experimental feature and might change at any time
+ Test Files  72 passed (72)
+      Tests  1112 passed (1112)
+   Start at  10:04:11
+   Duration  6.11s (transform 2.05s, setup 0ms, import 5.51s, tests 7.01s, environment 6ms)
+exit=0
+
+$ git diff --exit-code -- apps/web/next.config.ts packages/contracts db migrations package.json package-lock.json
+exit=0
+
+$ git diff --exit-code 879ad00 -- apps/web/next.config.ts packages/contracts db migrations package.json package-lock.json
+exit=0
+
+$ grep -rniE "website" apps/web/components/AccountStatementList.tsx apps/web/components/TransactionTable.tsx apps/web/app/accounts/\[id\]/page.tsx apps/web/app/transactions/page.tsx
+exit=1
+
+$ grep -c "authorized_date::text" "apps/web/app/accounts/[id]/page.tsx" apps/web/app/transactions/page.tsx
+apps/web/app/accounts/[id]/page.tsx:1
+apps/web/app/transactions/page.tsx:1
+exit=0
+```
+Unpiped exit codes: `npm run lint exit=0`, `#3 exit=0`, `#4 exit=0`, `npm test exit=0`. #5: 1112 = 1037 + 60 + 15.
+The 4 lint warnings are the baseline's 4. `npm run build -w @b8/web`: `✓ Generating static pages using 7 workers (35/35)`.
+
+## Mutation probes (cycle 1): the five originals plus two new
+Each probe was applied alone, its command run, and the file restored. Output trimmed to the result lines:
+```
+=== P1 permit http: in safeLogoUrl
+$ npm test -w @b8/web -- lib/enrichedDisplay.test.ts
+exit=1
+ FAIL  lib/enrichedDisplay.test.ts > safeLogoUrl — only an absolute https URL with a host reaches src > refuses http: (mixed content, and not what Plaid sends)
+AssertionError: expected 'http://example.com/l.png' to be null
+
+=== P2 drop referrerPolicy from the img
+$ npm test -w @b8/web -- lib/enrichedDisplayWiring.test.ts
+exit=1
+      Tests  1 failed | 14 passed (15)
+ FAIL  lib/enrichedDisplayWiring.test.ts > the enriched rows are wired through the sanitiser (AST) > 2. every img sends no referrer, falls back on error, and is a fixed, lazy, decorative, undraggable box with no crossOrigin
++   "leaky": [
+
+=== P3 src from the raw field   (src={src} -> src={logoUrl ?? undefined})
+$ npm test -w @b8/web -- lib/enrichedDisplayWiring.test.ts
+exit=1
+      Tests  1 failed | 14 passed (15)
+ FAIL  lib/enrichedDisplayWiring.test.ts > the enriched rows are wired through the sanitiser (AST) > 1. every img/Image in the mark and both row components takes its src (and any srcSet) from safeLogoUrl, with no spread and no logo-fed style, and none imports next/image
++   "unsanitised": [
+
+=== P4 drop the authorized == posted check
+$ npm test -w @b8/web -- lib/enrichedDisplay.test.ts
+exit=1
+      Tests  1 failed | 59 passed (60)
+ FAIL  lib/enrichedDisplay.test.ts > enrichmentDetail — what the secondary line says > an authorized date equal to the posted date, no location
+AssertionError: expected { authorized: '2026-03-04', …(1) } to match object { authorized: null, location: null }
+
+=== P5 remove ::text from the account page SELECT
+$ grep -c "authorized_date::text" "apps/web/app/accounts/[id]/page.tsx" apps/web/app/transactions/page.tsx
+exit=0
+apps/web/app/accounts/[id]/page.tsx:0
+apps/web/app/transactions/page.tsx:1
+
+=== P6 img visible while loading   (${loaded ? 'opacity-100' : 'opacity-0'} -> opacity-100)
+$ npm test -w @b8/web -- lib/enrichedDisplayWiring.test.ts
+exit=1
+      Tests  1 failed | 14 passed (15)
+ FAIL  lib/enrichedDisplayWiring.test.ts > the enriched rows are wired through the sanitiser (AST) > R4/F1. the tile is always the box, and the logo stays invisible until it has loaded
++   "img className never hides it: <img
+
+=== P7 restore the naturalWidth === 0 mount heuristic   (adds `if (src !== null && img && img.complete && img.naturalWidth === 0) { failedLogos.add(src); setFailedSrc(src); }` to the effect)
+$ npm test -w @b8/web -- lib/enrichedDisplayWiring.test.ts
+exit=1
+      Tests  1 failed | 14 passed (15)
+ FAIL  lib/enrichedDisplayWiring.test.ts > the enriched rows are wired through the sanitiser (AST) > R4/H9. a logo is recorded as failed only by a real error event, never by a zero naturalWidth
+AssertionError: expected [ 'failedLogos.add(src)' ] to deeply equal []
+```
+All seven turn red. As in cycle 0, P5 goes red only in #8's printed count: `0` for the mutated file.
+
+## Server-render check (cycle 1)
+`next dev` against `b8_p640d_preview`, curl with a fresh fabricated scratch session, revoked afterwards.
+- **Image markup:** each page has 3 `<img>`. Every one is server-rendered `opacity-0` (0 at `opacity-100`), as a child of the tile `<span aria-hidden="true" class="relative … size-7 … bg-slate-100 …">` that also carries the initial. So before hydration the reader sees only the tile, including for the dead-host row.
+- **Rows with no image:** rows without a usable logo render the same tile and no img.
+- **Unchanged money and order:** I compared against the 879ad00 render again, using the same comparison as cycle 0. Result: `account page: 28 font-mono values, identical=true; 11 row titles in order, identical=true` / `transactions page: 21 font-mono values, identical=true; 10 row titles in order, identical=true`.
+
+## Not done (cycle 1)
+- **Browser checks:** I have not observed F1's fix in a browser (no browser here), so the 390px dead-host recheck is the orchestrator's.
+- **Loaded before hydration:** I have not observed the "loaded before hydration → visible" path either. It relies on `complete && naturalWidth > 0` after mount. If that check ever fails, the logo stays hidden and the tile shows. That fails safe: no broken icon, but no logo.
