@@ -404,3 +404,19 @@ The probes were run twice: first before a usage-limit interruption, then again a
 - H-f and H-g are reported, not fixed: both are sync-semantics changes outside this spec's surface. H-f needs the orchestrator's read-only log/dump check described above to be confirmed or refuted against real data.
 - The real dry run and apply, the reconciliation with DIAGNOSIS.md's counts, and the 40c re-run are orchestrator steps after merge (evidence items 4–10), and were not run.
 - RC-03 arranges physical row order by re-writing the leading row until the order flips (up to 200 tries). That worked on every run here (7 runs). If a future Postgres placed row versions differently, the test fails loudly with `could not arrange the physical row order`. It does not pass vacuously.
+
+---
+
+## Real run on the home server (orchestrator, 2026-10-07 ~15:30 server time, after deploy 741d4e1) — counts and hashes only
+
+**Before:** transactions 1777; enriched 406; cursor fingerprint `7d59cdf77eff8a79`; csv/manual rows 515 (id-set hash `d062ad9f1ba59957`); id-map hash `40b2f2cd5a572e48`; tombstones 0.
+
+**Dry run:** `stored_rows=1721 excluded_csv_manual=459 stored_tombstoned=0 not_orphaned=406 orphans=856 no_match=333 excluded_new_id_stored=0 excluded_new_id_tombstoned=0 ambiguous=5 would_rekey=518 … items_failed=0`. Reconciliation with DIAGNOSIS.md: 518 + 5 ambiguous = 523 vs the diagnosis's 524 fingerprint matches — the script's rules are stricter (ambiguity counted per stored row, CSV lookalikes count on the stored side); item 2 = 38 exactly as diagnosed; `no_match=333` are rows older than Plaid's returned history.
+
+**Apply** (outside the 06:00 sync window): `rekeyed=518 skipped_at_write=0 items_failed=0`; backup 518 rows, `~/b8-backfill-backups/plaid-rekey-20261007T223148.923Z.csv`, `-rw-------` in a `drwx------` dir.
+
+**After:** total 1777 (unchanged); cursor fingerprint unchanged; csv/manual 515, hash unchanged; tombstones 0; id-map hash changed (`644d0aabaa867b20`). Backup vs table, every column except `plaid_transaction_id`: `csv_rows 518, missing 0, rows_differing_outside_id 0, rows_with_id_unchanged 0`.
+
+**Idempotency:** second `--apply` → `would_rekey=0 rekeyed=0`, "nothing to re-key", no new CSV.
+
+**40c re-run:** dry run `not_local=23 matched=924 would_update=518 already_enriched=406`; apply `updated=518 items_failed=0`, backup 518 rows. **Final: 924 of 1777 rows enriched** (the rest are 515 CSV/manual rows and ~333 Plaid rows older than Plaid's returned history). `not_local` fell from 541 to 23 — recent transactions the next daily sync will deliver.
