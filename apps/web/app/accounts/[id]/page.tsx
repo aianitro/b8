@@ -25,6 +25,10 @@ type AccountRow = {
 type TxRow = {
   id: number; date: string; amount: string;
   name: string | null; merchant_name: string | null; mapped_category: string | null;
+  // Plaid's enrichment (P6-40b), for the statement row's mark and detail line. Display only:
+  // nothing below reads them, and the running balance is untouched by them.
+  logo_url: string | null; authorized_date: string | null;
+  location_city: string | null; location_region: string | null;
 };
 
 export default async function AccountPage({ params }: { params: Promise<{ id: string }> }) {
@@ -46,9 +50,12 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
       [id, year]
     ),
     // From whichever is earlier, January 1st or a year ago: the statement needs the calendar year,
-    // the chart needs twelve months back, and one query covers both.
+    // the chart needs twelve months back, and one query covers both. The authorized date is cast
+    // to text like the posted one: a pg Date would not survive the trip to the client component,
+    // and could not be compared with the posted date by equality.
     db.query<TxRow>(
-      `SELECT id, date::text, amount::text, name, merchant_name, mapped_category
+      `SELECT id, date::text, amount::text, name, merchant_name, mapped_category,
+              logo_url, authorized_date::text, location_city, location_region
        FROM transactions
        WHERE account_id = $1 AND date >= LEAST(make_date($2, 1, 1), CURRENT_DATE - $3::int)
        ORDER BY date ASC, id ASC`,

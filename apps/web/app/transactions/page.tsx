@@ -20,6 +20,11 @@ type TxRow = Transaction & {
   property_id: number | null;
   /** Nickname of the property this lands on either way — null if it lands on none. */
   effective_property: string | null;
+  // Plaid's enrichment (P6-40b), for the row's mark and detail line. Display only.
+  logo_url: string | null;
+  authorized_date: string | null;
+  location_city: string | null;
+  location_region: string | null;
 };
 
 type AccountOption = { id: string; name: string; landscape: string };
@@ -135,6 +140,12 @@ async function getData(
               t.amount, t.name, t.merchant_name, t.plaid_category, t.mapped_category,
               t.rule_applied, t.created_at, t.transfer_group_id, t.hidden,
               t.watched_at::text AS watched_at, t.note,
+              -- Enrichment for display: columns only, no join, so the row set is unchanged. The
+              -- authorized date as text, like the posted one, so the two compare as strings and
+              -- no zone moves it on the way to the client. Never the retained raw Plaid object:
+              -- it is large, and this whole result set is shipped to the browser.
+              t.logo_url, t.authorized_date::text AS authorized_date,
+              t.location_city, t.location_region,
               a.name AS account_name, a.landscape AS account_landscape,
               t.property_id,
               (SELECT p.nickname FROM properties p

@@ -4,7 +4,9 @@ import { useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Trash2, Eye, EyeOff, Copy, Flag } from 'lucide-react';
 import CategorySelect from './CategorySelect';
+import MerchantMark from './MerchantMark';
 import TransferLinkButton from './TransferLinkButton';
+import { detailLine, enrichmentDetail } from '@/lib/enrichedDisplay';
 
 type AccountOption = { id: string; name: string; landscape: string };
 type GroupPeer = { account_name: string; amount: number | string };
@@ -31,6 +33,12 @@ type TxRow = {
   property_id: number | null;
   /** Nickname of the property this actually lands on, tag or inherited — null if neither. */
   effective_property: string | null;
+  /** Plaid's logo for the merchant, as stored. Untrusted: only `safeLogoUrl`'s output reaches an `img`. */
+  logo_url: string | null;
+  /** `YYYY-MM-DD` (selected `::text`), the day the card was authorised; `date` above is posted. */
+  authorized_date: string | null;
+  location_city: string | null;
+  location_region: string | null;
 };
 
 type PropertyOption = { id: number; nickname: string };
@@ -664,6 +672,8 @@ export default function TransactionTable({ transactions, categories, accounts, p
                   ? `${t.group_peers[0].account_name} · ${fmt(Number(t.group_peers[0].amount))}`
                   : `${t.group_peers.length + 1}-way · ${t.group_peers.map((p) => p.account_name).join(', ')}`
                 : null;
+              // ISO, the Date column's own style, so the two dates read as a pair.
+              const detail = detailLine(enrichmentDetail(t), (iso) => iso);
 
               return (
                 <tr
@@ -696,13 +706,29 @@ export default function TransactionTable({ transactions, categories, accounts, p
                     />
                   </td>
                   <td className="col-start-2 row-start-1 text-slate-400 whitespace-nowrap text-xs font-mono sm:table-cell sm:px-6 sm:py-3.5">{t.date}</td>
+                  {/* THE MARK LIVES INSIDE THE MERCHANT CELL, not in a cell of its own. On a phone
+                      every cell of this row is placed into the grid by hand, and a tenth cell
+                      would have to be threaded through all of them; inside this one it moves
+                      nothing. The cell starts at the same x on every row, and the mark is a fixed
+                      box, so the name after it does too. */}
                   <td className="col-start-2 col-span-2 row-start-2 min-w-0 sm:table-cell sm:px-4 sm:py-3.5">
-                    <span className="font-medium text-slate-800">
-                      {t.merchant_name ?? t.name ?? <span className="text-slate-300">—</span>}
-                    </span>
-                    {t.name && t.merchant_name && t.name !== t.merchant_name && (
-                      <div className="hidden sm:block text-xs text-slate-400 mt-0.5">{t.name}</div>
-                    )}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <MerchantMark logoUrl={t.logo_url} title={t.merchant_name ?? t.name} />
+                      <div className="min-w-0">
+                        <span className="font-medium text-slate-800">
+                          {t.merchant_name ?? t.name ?? <span className="text-slate-300">—</span>}
+                        </span>
+                        {t.name && t.merchant_name && t.name !== t.merchant_name && (
+                          <div className="hidden sm:block text-xs text-slate-400 mt-0.5">{t.name}</div>
+                        )}
+                        {/* Shown on a phone too, unlike the raw name above: it is the only place
+                            these two facts appear, and there is no hover to reveal them. Wraps
+                            ANYWHERE rather than at word breaks only: in the desktop table's auto
+                            layout only `anywhere` lowers a cell's minimum width, so one very long
+                            city name cannot widen the Merchant column for every row. */}
+                        {detail !== null && <div className="text-xs text-slate-400 mt-0.5 wrap-anywhere">{detail}</div>}
+                      </div>
+                    </div>
                   </td>
                   <td className="col-start-2 col-span-2 row-start-3 min-w-0 sm:table-cell sm:px-4 sm:py-3.5">
                     <div className="flex flex-wrap items-center gap-1.5">
