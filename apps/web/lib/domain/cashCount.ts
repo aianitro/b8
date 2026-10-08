@@ -7,7 +7,7 @@
  * ─── THE SIGN CONVENTION IS THE WHOLE RISK HERE ───────────────────────────────────────────────
  *
  * In `transactions`, a POSITIVE amount is money OUT and a NEGATIVE amount is money IN — the balance
- * is `money in − money out`, which `app/balances/page.tsx` spells out. Getting this backwards does
+ * is `money in − money out`, which `lib/netWorth.ts`'s ledger query spells out. Getting this backwards does
  * not fail loudly: it produces an adjustment of exactly the right magnitude in exactly the wrong
  * direction, so the wallet lands twice as far from the truth as before the count and the ledger looks
  * internally consistent throughout. That is why the direction is named in the return type rather than

@@ -17,8 +17,8 @@ const signed = (n: number) => (n < 0 ? `−${fmt(Math.abs(n))}` : fmt(n));
 // Presentation metadata per component, including where each one's detail actually lives — the
 // point of the page is that a total is a poor place to stop.
 const COMPONENTS: { key: NetWorthComponent; label: string; href: string; hint: string; accent: string }[] = [
-  { key: 'operational', label: 'Operational', href: '/balances', hint: 'Day-to-day cash and cards', accent: 'bg-blue-500' },
-  { key: 'capitalFinancial', label: 'Capital', href: '/accounts', hint: 'Savings, brokerage, retirement', accent: 'bg-violet-500' },
+  { key: 'operational', label: 'Operational', href: '/accounts?landscape=operational', hint: 'Day-to-day cash and cards', accent: 'bg-blue-500' },
+  { key: 'capitalFinancial', label: 'Capital', href: '/accounts?landscape=capital', hint: 'Savings, brokerage, retirement', accent: 'bg-violet-500' },
   { key: 'realEstateEquity', label: 'Real estate', href: '/properties', hint: 'Property value less its mortgage', accent: 'bg-emerald-500' },
   { key: 'liabilities', label: 'Other debt', href: '/accounts', hint: 'Unsecured loans and tenant deposits held', accent: 'bg-red-500' },
 ];

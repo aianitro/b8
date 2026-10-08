@@ -85,7 +85,7 @@ function FlowTooltip({ active, payload, label }: {
  * transfer — 220 of them worth $312,357 this year — while P/L starts at zero and moves only when
  * money is earned or spent. Moving $5,000 between your own accounts shifts one line and not the
  * other, which made the pair read as a contradiction rather than as two answers. The balance line
- * is gone; /balances is where that question belongs.
+ * is gone; the accounts page is where that question belongs.
  */
 export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
   return (

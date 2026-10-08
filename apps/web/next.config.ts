@@ -52,6 +52,13 @@ const nextConfig: NextConfig = {
    * way: both the old path and the new one require a session, and the five pre-auth surfaces all
    * live under `/api/v1/auth/` already and never moved.
    */
+  // The balances page was folded into the accounts page (its tabs, cards and per-account balances
+  // all live there now). Permanent, because nothing will be served at /balances again; Next carries
+  // the query string across, so `?landscape=capital` still opens the Capital tab.
+  async redirects() {
+    return [{ source: '/balances', destination: '/accounts', permanent: true }];
+  },
+
   async rewrites() {
     return [
       {

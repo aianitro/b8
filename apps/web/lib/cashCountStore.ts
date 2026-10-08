@@ -45,7 +45,7 @@ export type RecordCountResult =
 /**
  * The ledger balance of an account: money in minus money out.
  *
- * Spelled the same way as `app/balances/page.tsx` rather than `-SUM(amount)`, which is algebraically
+ * Spelled the same way as `lib/netWorth.ts`'s ledger query rather than `-SUM(amount)`, which is algebraically
  * identical but reads as a sign trick. If one of them ever changes, the other should be found by
  * searching for this shape.
  */

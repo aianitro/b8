@@ -3,14 +3,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ArrowLeftRight, Building2, FlaskConical, Home, Landmark, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Wallet, X, Zap } from 'lucide-react';
+import { ArrowLeftRight, Building2, FlaskConical, Home, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Wallet, X, Zap } from 'lucide-react';
 
 // The order is the owner's: Budget directly under Dashboard, Net Worth directly above Properties.
 const NAV = [
   { href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard },
   { href: '/budget',       label: 'Budget',        icon: PieChart },
   { href: '/profit-loss',  label: 'Profit & Loss', icon: TrendingUp },
-  { href: '/balances',     label: 'Balances',      icon: Landmark },
   { href: '/transactions', label: 'Transactions',  icon: ArrowLeftRight },
   { href: '/net-worth',    label: 'Net Worth',     icon: Wallet },
   { href: '/properties',   label: 'Properties',    icon: Home },
