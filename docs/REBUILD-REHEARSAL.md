@@ -62,9 +62,9 @@ cheaply, before the clock starts.
 | age private key | Decrypts every backup | ✅ rehearsed 2026-09-25 |
 | Backblaze account login (+ how its 2FA is satisfied) | Only route to the bucket once the laptop's rclone key is gone | ✅ in the password manager (confirmed 2026-10-08). The second factor is a code sent by email, so the route to the bucket also depends on reaching that mailbox from the phone. Step 1 tests it |
 | Tailscale account login | Admitting a new node; removing the dead one | ? |
-| The server's MagicDNS name | Passkeys are bound to it (see 2) | Not in the repo, deliberately — the repo is public |
+| The server's MagicDNS name | Passkeys are bound to it (see 2) | ✅ captured 2026-10-08. Kept out of the repo deliberately, because the repo is public |
 | Plaid dashboard login | Re-linking, if restored access tokens turn out not to work | ? |
-| A full-scope personal token | Data access without a browser (see 3) | Not yet minted |
+| A full-scope personal token | Data access without a browser (see 3) | ✅ minted 2026-10-08, with a one-year expiry. Rotate it before it lapses |
 
 **2. Decide on hostname reuse, because the passkeys hinge on it.** WebAuthn credentials restore from
 the dump bound to the old hostname's RP ID. A replacement that keeps the **same** MagicDNS name keeps
