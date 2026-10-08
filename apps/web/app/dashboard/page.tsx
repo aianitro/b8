@@ -251,7 +251,8 @@ async function PastMonth({ year, month, current }: { year: number; month: number
 
   return (
     <div className="p-4 sm:p-8 max-w-6xl mx-auto">
-      <div className="mb-6 sm:mb-8">
+      {/* In the installed app the month sits on the title's line, on the right — see DashboardMonthNav. */}
+      <div className="mb-6 sm:mb-8 standalone:flex standalone:items-center standalone:justify-between standalone:gap-3">
         <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
         <DashboardMonthNav year={year} month={month} current={current} day={monthLength} monthLength={monthLength} />
       </div>
@@ -346,7 +347,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           health leads inside the popover, because a stale feed is what explains the drift under
           it. */}
       <div className="flex items-start justify-between gap-4 sm:gap-6 mb-6 sm:mb-8">
-        <div>
+        {/* `flex-1` so that in the installed app, where the month moves onto the title's line, the
+            row is as wide as the header and the month can sit at its right edge. In a tab this div
+            stays a block of two lines and the extra width changes nothing. */}
+        <div className="flex-1 min-w-0 standalone:flex standalone:items-center standalone:justify-between standalone:gap-3">
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
           <DashboardMonthNav year={asOf.year} month={asOf.month} current={asOf.month} day={asOf.day} monthLength={monthLength} />
         </div>

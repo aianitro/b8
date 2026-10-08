@@ -13,6 +13,11 @@ import { MONTHS } from '@/lib/drilldown';
  * Links, not buttons: each month is its own URL, so the back button and a bookmark both work.
  * The current month has no `?month=` at all, so `/dashboard` stays the page it always was.
  *
+ * IN THE INSTALLED APP (`standalone:`) it sits on the title's line, at the right, and drops
+ * "day 7 of 31" — the owner's call: a phone's title line has room for the month and its arrows,
+ * not for a day count the date on the phone already gives. A closed month keeps "closed", which
+ * is what tells it apart from the current one.
+ *
  * @param month    0-based, the month on screen.
  * @param current  0-based, today's month.
  */
@@ -27,7 +32,7 @@ export default function DashboardMonthNav({ year, month, current, day, monthLeng
   const arrow = 'p-1 -m-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors';
 
   return (
-    <div className="flex items-center gap-2 text-sm text-slate-500 mt-1">
+    <div className="flex items-center gap-2 text-sm text-slate-500 mt-1 standalone:mt-0 shrink-0">
       {month > 0
         ? <Link href={href(month - 1)} aria-label={`${MONTHS[month - 1]} ${year}`} className={arrow}><ChevronLeft size={16} /></Link>
         : <span className="p-1 -m-1 text-slate-200"><ChevronLeft size={16} /></span>}
@@ -35,7 +40,7 @@ export default function DashboardMonthNav({ year, month, current, day, monthLeng
       {month < current
         ? <Link href={href(month + 1)} aria-label={`${MONTHS[month + 1]} ${year}`} className={arrow}><ChevronRight size={16} /></Link>
         : <span className="p-1 -m-1 text-slate-200"><ChevronRight size={16} /></span>}
-      <span className="text-slate-400">
+      <span className={`text-slate-400 ${month === current ? 'standalone:hidden' : ''}`}>
         {month === current ? `· day ${day} of ${monthLength}` : '· closed'}
       </span>
     </div>
