@@ -178,7 +178,11 @@ export default async function NetWorthPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      {/* STACKED ON A PHONE, the accounts page's summary-card shape: one line per part, label and
+          hint left, figure right. Four columns at every width gave each card about 80px at 390,
+          and a six-figure balance overflowed it while the hint wrapped a word per line. Two across
+          from `sm:`, four from `lg:`, where the original layout fits. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 mb-6">
         {COMPONENTS.map((c) => {
           const amount = amountOf(c.key);
           const lines = byComponent.get(c.key) ?? [];
@@ -187,16 +191,19 @@ export default async function NetWorthPage() {
             <Link
               key={c.key}
               href={c.href}
-              className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 hover:border-slate-200 hover:shadow transition-all"
+              className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-3 sm:p-5 flex items-center justify-between gap-3 sm:block hover:border-slate-200 hover:shadow transition-all"
             >
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`w-1.5 h-1.5 rounded-full ${c.accent}`} />
-                <p className="text-[10px] uppercase tracking-wide text-slate-400">{c.label}</p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 sm:mb-2">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.accent}`} />
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400">{c.label}</p>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5 sm:hidden">{c.hint}</p>
               </div>
-              <p className={`text-xl font-mono font-semibold ${amount < 0 ? 'text-red-600' : 'text-slate-800'}`}>
+              <p className={`text-lg sm:text-xl font-mono font-semibold shrink-0 ${amount < 0 ? 'text-red-600' : 'text-slate-800'}`}>
                 {signed(amount)}
               </p>
-              <p className="text-[10px] text-slate-400 mt-1.5">{c.hint}</p>
+              <p className="hidden sm:block text-[10px] text-slate-400 mt-1.5">{c.hint}</p>
             </Link>
           );
         })}
