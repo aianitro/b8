@@ -1,48 +1,46 @@
 import { describe, expect, it } from 'vitest';
-import { lastPerPeriod, periodLabel, weekStart } from './netWorthPeriods';
+import { dayLabel, daysBefore, withinHorizon } from './netWorthPeriods';
 
 // Fabricated snapshots; only the dates matter here.
-const snap = (iso: string, total = 0) => ({ iso, total });
+const snap = (iso: string) => ({ iso });
 
-describe('weekStart', () => {
-  it('returns the Monday of the ISO week, across month and year boundaries', () => {
-    expect(weekStart('2026-10-08')).toBe('2026-10-05'); // Thursday
-    expect(weekStart('2026-10-05')).toBe('2026-10-05'); // Monday is its own start
-    expect(weekStart('2026-10-11')).toBe('2026-10-05'); // Sunday belongs to the week before it
-    expect(weekStart('2026-03-01')).toBe('2026-02-23');
-    expect(weekStart('2027-01-01')).toBe('2026-12-28');
+describe('daysBefore', () => {
+  it('counts calendar days back across month, year and leap-day boundaries', () => {
+    expect(daysBefore('2026-10-08', 7)).toBe('2026-10-01');
+    expect(daysBefore('2026-03-01', 1)).toBe('2026-02-28');
+    expect(daysBefore('2028-03-01', 1)).toBe('2028-02-29');
+    expect(daysBefore('2027-01-05', 30)).toBe('2026-12-06');
+    expect(daysBefore('2026-10-08', 365)).toBe('2025-10-08');
   });
 });
 
-describe('lastPerPeriod', () => {
-  const daily = [
-    snap('2026-09-29', 1), snap('2026-09-30', 2), snap('2026-10-01', 3),
-    snap('2026-10-04', 4), snap('2026-10-05', 5), snap('2026-10-08', 6),
-  ];
+describe('withinHorizon', () => {
+  const daily = ['2025-10-07', '2025-10-08', '2026-09-07', '2026-09-08', '2026-09-30',
+    '2026-10-01', '2026-10-02', '2026-10-08'].map(snap);
 
-  it('keeps the closing snapshot of each month — the 1st does not slip into the month before', () => {
-    expect(lastPerPeriod(daily, 'month').map((s) => s.iso)).toEqual(['2026-09-30', '2026-10-08']);
+  it('keeps the last 7 days, counted from the latest snapshot and including the first day', () => {
+    expect(withinHorizon(daily, 'week').map((s) => s.iso)).toEqual(['2026-10-01', '2026-10-02', '2026-10-08']);
   });
 
-  it('keeps the closing snapshot of each week, Monday to Sunday', () => {
-    expect(lastPerPeriod(daily, 'week').map((s) => s.iso)).toEqual(['2026-10-04', '2026-10-08']);
+  it('keeps the last 30 and the last 365 days', () => {
+    expect(withinHorizon(daily, 'month').map((s) => s.iso)).toEqual(
+      ['2026-09-08', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-08']);
+    expect(withinHorizon(daily, 'year')[0].iso).toBe('2025-10-08');
   });
 
-  it('keeps one point per year, and sorts input that arrives out of order', () => {
-    const shuffled = [snap('2027-02-01', 9), snap('2025-12-31', 7), snap('2026-06-30', 8), snap('2025-03-01', 6)];
-    expect(lastPerPeriod(shuffled, 'year').map((s) => s.total)).toEqual([7, 8, 9]);
+  it('counts from the latest snapshot, not from today, and sorts input that arrives out of order', () => {
+    const stale = [snap('2026-06-30'), snap('2026-06-20'), snap('2026-06-26')];
+    expect(withinHorizon(stale, 'week').map((s) => s.iso)).toEqual(['2026-06-26', '2026-06-30']);
   });
 
   it('is empty for no snapshots', () => {
-    expect(lastPerPeriod([], 'month')).toEqual([]);
+    expect(withinHorizon([], 'month')).toEqual([]);
   });
 });
 
-describe('periodLabel', () => {
-  it('labels weeks by closing date, months by name, years by number', () => {
-    expect(periodLabel('2026-10-08', 'week', false)).toBe('Oct 8');
-    expect(periodLabel('2026-10-08', 'month', false)).toBe('Oct');
-    expect(periodLabel('2026-10-08', 'month', true)).toBe("Oct '26");
-    expect(periodLabel('2026-10-08', 'year', true)).toBe('2026');
+describe('dayLabel', () => {
+  it('reads the calendar date as written', () => {
+    expect(dayLabel('2026-10-08')).toBe('Oct 8');
+    expect(dayLabel('2026-03-01')).toBe('Mar 1');
   });
 });

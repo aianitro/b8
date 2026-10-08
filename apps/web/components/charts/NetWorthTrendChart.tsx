@@ -5,7 +5,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { LANDSCAPE_HEX, STATUS_HEX } from '@/lib/chartColors';
-import { lastPerPeriod, periodLabel, type NetWorthPeriod } from '@/lib/domain/netWorthPeriods';
+import { dayLabel, withinHorizon, type NetWorthHorizon } from '@/lib/domain/netWorthPeriods';
 
 export interface NetWorthTrendPoint {
   /** `YYYY-MM-DD`, the snapshot's calendar date. */
@@ -19,10 +19,10 @@ export interface NetWorthTrendPoint {
 const fmt = (v: number | undefined) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v ?? 0);
 
-const PERIODS: { key: NetWorthPeriod; label: string }[] = [
-  { key: 'week', label: 'Weekly' },
-  { key: 'month', label: 'Monthly' },
-  { key: 'year', label: 'Yearly' },
+const HORIZONS: { key: NetWorthHorizon; label: string; phrase: string }[] = [
+  { key: 'week', label: 'Week', phrase: 'the last 7 days' },
+  { key: 'month', label: 'Month', phrase: 'the last 30 days' },
+  { key: 'year', label: 'Year', phrase: 'the last 365 days' },
 ];
 
 type SeriesKey = 'total' | 'operational' | 'capitalFinancial' | 'realEstateEquity';
@@ -53,21 +53,20 @@ function tickFormatter(range: number) {
 // a shared axis is set by the largest: operational cash moving by thousands drew as a flat line
 // under a total in the millions, so the chart answered "how is the total doing" and nothing else.
 // A tab per series lets each fill the plot. The axis no longer starts at zero, which magnifies
-// small moves — so the change over the period is printed beside the tabs, in dollars, and the
+// small moves — so the change over the window is printed beside the tabs, in dollars, and the
 // chart's slope is read against a figure rather than on its own.
 //
-// WEEKLY, MONTHLY OR YEARLY — the owner's call, monthly first. A snapshot is taken daily, and a
-// year of daily points is a line too dense to read on a phone; each period is drawn by its CLOSING
-// snapshot — see `lib/domain/netWorthPeriods.ts` for why the close and not an average.
+// THE LAST WEEK, MONTH OR YEAR — a look-back from the latest snapshot, the owner's call after a
+// first version grouped by calendar week, month and year. Every daily snapshot in the window is
+// drawn; see `lib/domain/netWorthPeriods.ts` for how the window is counted.
 export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorthTrendPoint[] }) {
   const [selected, setSelected] = useState<SeriesKey>('total');
-  // Monthly unless that leaves a single point — under a month of history would otherwise open on an
-  // empty chart. Decided once, on mount; a period the owner picks afterwards is theirs.
-  const [period, setPeriod] = useState<NetWorthPeriod>(() =>
-    lastPerPeriod(snapshots, 'month').length >= 2 ? 'month' : 'week');
-  const closing = lastPerPeriod(snapshots, period);
-  const spansYears = closing.length > 0 && closing[0].iso.slice(0, 4) !== closing[closing.length - 1].iso.slice(0, 4);
-  const data = closing.map((p) => ({ ...p, date: periodLabel(p.iso, period, spansYears) }));
+  // The month, unless it holds a single snapshot — then the year, which reaches further back. Decided
+  // once, on mount; a window the owner picks afterwards is theirs.
+  const [horizon, setHorizon] = useState<NetWorthHorizon>(() =>
+    withinHorizon(snapshots, 'month').length >= 2 || withinHorizon(snapshots, 'year').length < 2 ? 'month' : 'year');
+  const windowPhrase = HORIZONS.find((x) => x.key === horizon)?.phrase ?? '';
+  const data = withinHorizon(snapshots, horizon).map((p) => ({ ...p, date: dayLabel(p.iso) }));
   const series = SERIES.find((x) => x.key === selected) ?? SERIES[0];
   const values = data.map((d) => d[selected]);
   const range = values.length ? Math.max(...values) - Math.min(...values) : 0;
@@ -78,16 +77,16 @@ export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorth
       <div className="flex items-center justify-between gap-3 mb-4">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Net worth over time</p>
         {snapshots.length > 0 && (
-          <div role="tablist" aria-label="Period" className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
-            {PERIODS.map((x) => (
+          <div role="tablist" aria-label="Horizon" className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
+            {HORIZONS.map((x) => (
               <button
                 key={x.key}
                 type="button"
                 role="tab"
-                aria-selected={x.key === period}
-                onClick={() => setPeriod(x.key)}
+                aria-selected={x.key === horizon}
+                onClick={() => setHorizon(x.key)}
                 className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                  x.key === period ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                  x.key === horizon ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
                 {x.label}
@@ -97,9 +96,9 @@ export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorth
         )}
       </div>
 
-      {/* THE SERIES CHIPS SIT OUTSIDE THE EMPTY STATE. They lived inside the chart branch, so a period
-          that left one point — Monthly on a single month of history — took the chips away with the
-          line, and switching back did not explain where they had gone. */}
+      {/* THE SERIES CHIPS SIT OUTSIDE THE EMPTY STATE. They lived inside the chart branch, so a window
+          that held one point took the chips away with the line, and switching back did not explain
+          where they had gone. */}
       {snapshots.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-4">
           <div role="tablist" className="flex flex-wrap gap-1">
@@ -124,16 +123,15 @@ export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorth
               <span className={`font-mono font-semibold ${change < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                 {change < 0 ? '−' : '+'}{fmt(Math.abs(change))}
               </span>{' '}
-              {/* The exact date, whatever the period: "since Jan" would leave which day unsaid. */}
-              since {periodLabel(data[0].iso, 'week', false)}
+              since {dayLabel(data[0].iso)}
             </p>
           )}
         </div>
       )}
 
       {/* A line needs two points. One snapshot renders as an invisible dot on a collapsed axis,
-          which reads as a broken chart rather than as "history starts here". With periods there is a
-          second way to get here — a year of history is one yearly point — so that case says so. */}
+          which reads as a broken chart rather than as "history starts here". A window can also hold
+          one point when the sync has missed days, so that case says so. */}
       {data.length < 2 ? (
         <div className="h-[220px] flex flex-col items-center justify-center text-center">
           <p className="text-2xl font-mono font-semibold text-slate-800">
@@ -144,7 +142,7 @@ export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorth
               ? 'No snapshots yet — the daily sync records one after each run.'
               : snapshots.length === 1
                 ? 'First snapshot recorded. The daily sync adds one per day, so a trend appears from tomorrow.'
-                : `All ${snapshots.length} snapshots fall in one ${period}. Pick a shorter period to see the trend.`}
+                : `Only one snapshot in ${windowPhrase}. Pick a longer view to see the trend.`}
           </p>
         </div>
       ) : (
