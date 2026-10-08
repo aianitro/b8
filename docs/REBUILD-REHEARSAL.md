@@ -61,10 +61,16 @@ cheaply, before the clock starts.
 |---|---|---|
 | age private key | Decrypts every backup | ✅ rehearsed 2026-09-25 |
 | Backblaze account login (+ how its 2FA is satisfied) | Only route to the bucket once the laptop's rclone key is gone | ✅ in the password manager (confirmed 2026-10-08). The second factor is a code sent by email, so the route to the bucket also depends on reaching that mailbox from the phone. Step 1 tests it |
-| Tailscale account login | Admitting a new node; removing the dead one | ? |
+| Tailscale account login | Admitting a new node; removing the dead one | ✅ confirmed 2026-10-08, signs in through the Google account |
 | The server's MagicDNS name | Passkeys are bound to it (see 2) | ✅ captured 2026-10-08. Kept out of the repo deliberately, because the repo is public |
-| Plaid dashboard login | Re-linking, if restored access tokens turn out not to work | ? |
+| Plaid dashboard login | Re-linking, if restored access tokens turn out not to work | ✅ confirmed 2026-10-08, signs in through the Google account |
 | A full-scope personal token | Data access without a browser (see 3) | ✅ minted 2026-10-08, with a one-year expiry. Rotate it before it lapses |
+
+**The Google account is the root of the whole list.** Tailscale and Plaid sign in through it, and
+Backblaze sends its second factor to that mailbox. Losing it locks you out of the backups, the
+tailnet and the bank links at once. So its own recovery must work from the phone and the password
+manager alone. Check where its 2FA and recovery codes live, because nothing else in this plan
+protects it.
 
 **2. Decide on hostname reuse, because the passkeys hinge on it.** WebAuthn credentials restore from
 the dump bound to the old hostname's RP ID. A replacement that keeps the **same** MagicDNS name keeps
