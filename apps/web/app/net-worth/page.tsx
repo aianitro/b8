@@ -20,7 +20,7 @@ const COMPONENTS: { key: NetWorthComponent; label: string; href: string; hint: s
   { key: 'operational', label: 'Operational', href: '/accounts?landscape=operational', hint: 'Day-to-day cash and cards', accent: 'bg-blue-500' },
   { key: 'capitalFinancial', label: 'Capital', href: '/accounts?landscape=capital', hint: 'Savings, brokerage, retirement', accent: 'bg-violet-500' },
   { key: 'realEstateEquity', label: 'Real estate', href: '/properties', hint: 'Property value less its mortgage', accent: 'bg-emerald-500' },
-  { key: 'liabilities', label: 'Other debt', href: '/accounts', hint: 'Unsecured loans and tenant deposits held', accent: 'bg-red-500' },
+  { key: 'liabilities', label: 'Other debt', href: '/accounts', hint: 'Loans not tied to a property', accent: 'bg-red-500' },
 ];
 
 // The recorded history, in one read, for two consumers: the trend chart's labelled points and the
@@ -42,7 +42,9 @@ async function getSnapshots(): Promise<{ points: NetWorthTrendPoint[]; history: 
     points: result.rows.map((r) => ({
       iso: r.iso_date,
       operational: Number(r.operational),
-      capitalFinancial: Number(r.capital_financial),
+      // Deposits held netted into Capital, as the cards show it — see the note in the page body.
+      // NULL marks a snapshot from before deposits were counted at all, so it nets nothing.
+      capitalFinancial: Number(r.capital_financial) + Number(r.liabilities_security_deposits ?? 0),
       realEstateEquity: Number(r.real_estate_equity),
       total: Number(r.total),
     })),
@@ -79,18 +81,32 @@ export default async function NetWorthPage() {
   // Null, never 0: a zero would assert that net worth did not move.
   const ytd = ytdDelta(netWorth.total, snapshots.history);
 
+  // TENANT DEPOSITS ARE SHOWN UNDER CAPITAL, not as "Other debt" — the owner's call. The deposit
+  // cash sits in each property's trust checking account, which is a Capital account, so the
+  // domain function counts it there in full and books the obligation to repay it as a negative
+  // liability. Correct, and it summed right, but it read as cash in one card and a mysterious
+  // debt in another. Netting the obligation inside Capital puts the adjustment beside the money
+  // it adjusts, and leaves "Other debt" for loans tied to no property — of which there may be none.
+  //
+  // PRESENTATION ONLY. `computeNetWorth` and the stored snapshots are untouched, so the total, the
+  // year-to-date comparison and every snapshot keep the definition they were written under; the
+  // move is `liabilitiesSecurityDeposits` added to one side and taken from the other.
+  const deposits = netWorth.liabilitiesSecurityDeposits; // negative, or 0
   const amountOf = (k: NetWorthComponent) =>
     k === 'operational' ? netWorth.operational
-      : k === 'capitalFinancial' ? netWorth.capitalFinancial
+      : k === 'capitalFinancial' ? netWorth.capitalFinancial + deposits
       : k === 'realEstateEquity' ? netWorth.realEstateEquity
-      : netWorth.liabilities;
+      : netWorth.liabilities - deposits;
 
   // Contributions come from the domain function rather than being re-derived here, so this page
-  // can never disagree with the dashboard about which account belongs to which component.
+  // can never disagree with the dashboard about which account belongs to which component. The one
+  // reassignment is the deposits above: a `property` line in `liabilities` is a deposit held.
+  const isDeposit = (c: (typeof netWorth.contributions)[number]) => c.component === 'liabilities' && c.kind === 'property';
   const byComponent = new Map<NetWorthComponent, typeof netWorth.contributions>();
   for (const c of netWorth.contributions) {
-    if (!byComponent.has(c.component)) byComponent.set(c.component, []);
-    byComponent.get(c.component)!.push(c);
+    const component = isDeposit(c) ? 'capitalFinancial' : c.component;
+    if (!byComponent.has(component)) byComponent.set(component, []);
+    byComponent.get(component)!.push(isDeposit(c) ? { ...c, component } : c);
   }
 
   const unvaluedNames = netWorth.unvaluedPropertyIds.map((id) => labels.properties.get(String(id)) ?? `Property ${id}`);
@@ -121,7 +137,10 @@ export default async function NetWorthPage() {
           kind: l.kind,
           id: l.id,
           value: l.value,
-          name: l.kind === 'property' ? labels.properties.get(l.id) ?? `Property ${l.id}` : labels.accounts.get(l.id) ?? l.id,
+          // A property line outside real estate is a deposit held, so it says so.
+          name: l.kind === 'property'
+            ? `Tenant deposit · ${labels.properties.get(l.id) ?? `Property ${l.id}`}`
+            : labels.accounts.get(l.id) ?? l.id,
           href: l.kind === 'property' ? `/properties/${l.id}` : `/accounts/${l.id}`,
         })),
   }));
@@ -160,7 +179,7 @@ export default async function NetWorthPage() {
           )}
         </div>
         <p className="text-xs text-slate-500 mt-3">
-          Ledger balances, recorded valuations, and real-estate equity — the four parts below sum to this exactly.
+          Ledger balances, recorded valuations, and real-estate equity — the parts below sum to this exactly.
         </p>
       </div>
 
