@@ -176,6 +176,58 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
                 strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2.5 }} connectNulls={false} />
         </ComposedChart>
       </ResponsiveContainer>
+      {/* Phone only — `md:hidden`, the same width switch as the chart's compact shape above. */}
+      <div className="md:hidden">
+        <ProfitLossFigures data={data} />
+      </div>
     </div>
+  );
+}
+
+/**
+ * The chart's figures, as rows — the phone app's `PlFigures`, at the owner's request.
+ *
+ * On a phone it is the only place the exact numbers sit in view: the compact chart has no axis, and
+ * a tooltip shows one month at a time. Read off the SAME points the chart draws, so the table cannot
+ * disagree with the picture above it. A month is projected when it has no settled bar, which is the
+ * boundary the chart fades and dashes at; projected rows are faded and marked here the same way.
+ *
+ * Money out is coloured as its bar is on this chart (blue), not as the phone app's (orange), so each
+ * figure matches the bar directly above it.
+ */
+function ProfitLossFigures({ data }: { data: ProfitLossPoint[] }) {
+  const cell = 'py-1.5 text-right font-mono tabular-nums';
+  return (
+    <table className="w-full mt-4 text-xs">
+      <thead>
+        <tr className="text-[10px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+          <th className="pb-1.5 px-2 text-left font-medium">Month</th>
+          <th className="pb-1.5 text-right font-medium">In</th>
+          <th className="pb-1.5 text-right font-medium">Out</th>
+          <th className="pb-1.5 px-2 text-right font-medium">Net so far</th>
+        </tr>
+      </thead>
+      <tbody>
+        {data.map((p) => {
+          const projected = p.spent === null;
+          const moneyIn = p.received ?? p.receivedProjected ?? 0;
+          const moneyOut = Math.abs(p.spent ?? p.spentProjected ?? 0);
+          const net = p.pl ?? p.plProjected ?? 0;
+          return (
+            <tr key={p.month} className={`border-b border-slate-50 last:border-0 ${projected ? 'opacity-50' : ''}`}>
+              <td className="py-1.5 px-2 text-slate-500">{p.month}{projected ? ' ·' : ''}</td>
+              <td className={`${cell} text-emerald-600`}>{fmt(moneyIn)}</td>
+              <td className={`${cell} text-blue-600`}>{fmt(moneyOut)}</td>
+              <td className={`${cell} px-2 font-semibold ${net < 0 ? 'text-red-600' : 'text-slate-800'}`}>
+                {net < 0 ? '−' : ''}{fmt(Math.abs(net))}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+      <tfoot>
+        <tr><td colSpan={4} className="pt-2 px-2 text-right text-[10px] text-slate-400">· projected</td></tr>
+      </tfoot>
+    </table>
   );
 }
