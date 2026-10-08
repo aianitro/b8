@@ -98,7 +98,8 @@ export default function CategoryBubbles({ categories, month }: {
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">
       <div className="flex items-baseline justify-between mb-1">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Where the month sits</p>
-        <p className="text-[10px] text-slate-400">
+        {/* Not in the installed app, at the owner's request; the browser keeps it. */}
+        <p className="text-[10px] text-slate-400 standalone:hidden">
           outer = this month&apos;s budget · inner = spent so far · colour = spent or heading over
         </p>
       </div>

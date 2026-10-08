@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* The installed app (home screen or desktop install), as opposed to a browser tab. CSS, so the
+   server-rendered page is already right on first paint — no hydration swap. Use it for what the
+   installed app should show differently; width-driven layout stays on the breakpoints. */
+@custom-variant standalone (@media (display-mode: standalone));
+
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;

@@ -191,7 +191,9 @@ export default function CategoryHeatmap({ categories, month }: {
           page once already. */}
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 mb-1">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Where the month sits</p>
-        <p className="text-[10px] text-slate-400">
+        {/* Not in the installed app, like the bubbles' legend; the browser keeps it. The colour key
+            under the tiles stays everywhere. */}
+        <p className="text-[10px] text-slate-400 standalone:hidden">
           size = budget · icon = category · figure = spent · colour = spent or heading over
         </p>
       </div>
