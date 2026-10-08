@@ -19,7 +19,7 @@ export default function BudgetViewToggle({ current, landscape }: Props) {
             document.cookie = `budgetView=${v};path=/;max-age=31536000`;
             router.push(`/budget?landscape=${landscape}&view=${v}`);
           }}
-          className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize ${
+          className={`px-4 standalone:px-3 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize ${
             current === v
               ? 'bg-white text-slate-800 shadow-sm'
               : 'text-slate-500 hover:text-slate-700'

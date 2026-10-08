@@ -260,11 +260,17 @@ export default async function BudgetPage({ searchParams }: PageProps) {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Budget {new Date().getFullYear()}</h1>
+          {/* The year drops in the installed app, at the owner's request: the phone's header line
+              needs the room for the toggle and the pace pill, and the year is this one. */}
+          <h1 className="text-2xl font-bold text-slate-900">
+            Budget<span className="standalone:hidden"> {new Date().getFullYear()}</span>
+          </h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 standalone:gap-2">
           <BudgetViewToggle current={view} landscape={landscape} />
-          <span className={`text-sm font-medium px-3 py-1 rounded-full ${
+          {/* One line always: at phone width "↑ Over pace" wrapped to three. Smaller in the
+              installed app, where it shares 358px with the title and the toggle. */}
+          <span className={`text-sm standalone:text-xs font-medium px-3 standalone:px-2.5 py-1 rounded-full whitespace-nowrap ${
             onTrack ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
           }`}>
             {onTrack ? '✓ On track' : '↑ Over pace'}
