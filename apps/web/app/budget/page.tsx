@@ -10,6 +10,7 @@ import BudgetMonthlyGrid from '@/components/BudgetMonthlyGrid';
 import BudgetViewToggle from '@/components/BudgetViewToggle';
 import BudgetTabsToggle from '@/components/BudgetTabsToggle';
 import BeginningBalanceEdit from '@/components/BeginningBalanceEdit';
+import KpiCard from '@/components/KpiCard';
 
 type SummaryRow = BudgetSummary & { landscape: Landscape; is_income: boolean; monthly_amounts: string[] | null; closed_months: string; current_month: string };
 interface UncategorizedRow { landscape: Landscape; count: string; total_out: string; total_in: string; }
@@ -221,7 +222,7 @@ export default async function BudgetPage({ searchParams }: PageProps) {
   const totalSpent  = expenseRows.reduce((s, r) => s + Number(r.ytd_spent), 0);
   const totalRemaining = totalBudget - totalSpent;
   // What the plan says should have been spent by today — the figure the on-track pill is decided
-  // on, and the one printed under YTD Spent.
+  // on.
   //
   // It used to be `annual / 12 * monthsElapsed`, which is wrong twice over. It spread every budget
   // evenly no matter what schedule the category actually carries: property tax is two bills, April
@@ -278,42 +279,23 @@ export default async function BudgetPage({ searchParams }: PageProps) {
         <p className="text-slate-500 text-sm">No categories yet. <Link href="/categories" className="underline">Add some.</Link></p>
       ) : (
         <>
-          {/* KPIs */}
-          <div className={`grid gap-4 mb-8 ${view === 'monthly' ? 'grid-cols-2 lg:grid-cols-4 max-w-4xl' : 'grid-cols-2 lg:grid-cols-4'}`}>
-            {[
-              { label: 'Annual Budget', value: fmt(totalBudget) },
-              {
-                label: 'YTD Spent',
-                value: fmt(totalSpent),
-                // Expected alone. "72% used" measured spend against the WHOLE year, which says
-                // nothing in September without the reader supplying the elapsed fraction
-                // themselves — and 72% of the year's money at 78% through the year is either fine
-                // or not depending on a second number that was not on screen. Expected is that
-                // comparison already made, on the real schedules, and it is what the Remaining
-                // card is coloured by, so the two now agree instead of offering rival yardsticks.
-                sub: `expected ${fmt(expectedSpend)}`,
-              },
-              {
-                label: 'Remaining',
-                value: (totalRemaining < 0 ? '-' : '') + fmt(Math.abs(totalRemaining)),
-                highlight: totalRemaining < 0 ? 'text-red-500' : onTrack ? 'text-emerald-600' : 'text-amber-500',
-              },
-              {
-                label: 'Projected P/L',
-                value: (projectedPL < 0 ? '−' : '+') + fmt(Math.abs(projectedPL)),
-                sub: `${netToDate < 0 ? '−' : '+'}${fmt(Math.abs(netToDate))} so far`
-                  + (yearEnd.uncategorized.net !== 0
-                      ? ` · ${fmt(Math.abs(yearEnd.uncategorized.net))} unfiled, not counted`
-                      : ''),
-                highlight: projectedPL < 0 ? 'text-red-500' : 'text-emerald-600',
-              },
-            ].map(({ label, value, sub, highlight }) => (
-              <div key={label} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{label}</p>
-                <p className={`text-3xl font-bold mt-2 font-mono ${highlight ?? 'text-slate-900'}`}>{value}</p>
-                {sub && <p className="text-xs text-slate-400 mt-1.5">{sub}</p>}
-              </div>
-            ))}
+          {/* THE DASHBOARD'S TWO CARDS, at the owner's request, in place of the four this page
+              carried. Annual Budget and YTD Spent move under Budget remaining as its context line,
+              and the expected-to-date figure gives way to the On track pill in the header, which is
+              decided on it. Projected P/L drops its unfiled note for the reason the dashboard did. */}
+          <div className={`grid grid-cols-2 gap-3 sm:gap-4 mb-8 ${view === 'monthly' ? 'max-w-4xl' : ''}`}>
+            <KpiCard
+              label="Projected P/L"
+              value={`${projectedPL < 0 ? '−' : '+'}${fmt(Math.abs(projectedPL))}`}
+              sub={`${netToDate < 0 ? '−' : '+'}${fmt(Math.abs(netToDate))} so far`}
+              highlight={projectedPL < 0 ? 'red' : 'green'}
+            />
+            <KpiCard
+              label="Budget remaining"
+              value={fmt(totalRemaining)}
+              highlight={totalRemaining < 0 ? 'red' : 'green'}
+              sub={`${fmt(totalSpent)} spent of ${fmt(totalBudget)}`}
+            />
           </div>
 
           {view === 'monthly' ? (
