@@ -29,7 +29,8 @@
 #
 # ─── ORDER, AND WHY THIS ORDER ────────────────────────────────────────────────────────────────
 #
-# fetch → reset → install (only if the lockfile moved) → BUILD → migrate → restart → health check.
+# fetch → BACKUP (only if migrations changed) → reset → install (only if the lockfile moved) →
+# BUILD → migrate → restart → health check.
 #
 # Build before migrate, so a commit that does not compile never reaches the database. Migrate
 # before restart, so the new code never starts against the old schema. This repo's migrations have
@@ -41,7 +42,8 @@ APP="$HOME/b8"
 BRANCH="${B8_DEPLOY_BRANCH:-main}"
 HEALTH_URL="http://127.0.0.1:${B8_PORT:-3000}/login"
 LOCK="$APP/.deploy.lock"
-export PATH="$HOME/opt/node/bin:$HOME/opt/pg16/bin:$PATH"
+# `~/opt/age` because the pre-migration backup below encrypts to it, exactly as daily.sh's does.
+export PATH="$HOME/opt/node/bin:$HOME/opt/pg16/bin:$HOME/opt/age:$PATH"
 
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*"; }
 fail() { log "FAILED: $*"; rmdir "$LOCK" 2>/dev/null; exit 1; }
@@ -136,6 +138,33 @@ else
   log "deploying ${CURRENT%${CURRENT#???????}}..${TARGET%${TARGET#???????}}"
 fi
 
+# ─── A BACKUP THAT CAME BACK, BEFORE ANY MIGRATION ────────────────────────────────────────────
+#
+# Migrations here are forward-only, so the rollback below restores CODE and never schema or data.
+# A bad migration applied by an unattended deploy is the one failure in this file that damages the
+# ledger, and without this the newest backup is whatever the morning run took — up to a day of
+# categorising, counting and notes behind.
+#
+# Taken only when the commit range touches `migrations/`: a deploy that cannot change the schema
+# cannot need it, and every one of these counts against the pruner's KEEP. `--force` always takes
+# one, because a forced pass on an unchanged commit is how a migrate that failed last time gets
+# retried, and that range is empty.
+#
+# BEFORE the reset, deliberately. If the backup fails, nothing has moved — checkout, published tree
+# and schema are all as they were — so the next pass retries the whole deploy on its own. Taken after
+# the publish instead, a failure would leave a new tree in `~/b8-run` that the next launchd restart
+# would serve against the old schema. The cost is that writes made during the build (a minute or
+# two) are not in this dump; the morning backup has them.
+#
+# `npm run backup` restores its own dump into a scratch database and compares counts before keeping
+# it, so success here means "came back", not "was written". Same environment as daily.sh: run from
+# the web workspace, with the role and host the rehearsal's createdb/psql/dropdb need.
+if [ "${1:-}" = "--force" ] || ! git diff --quiet "$CURRENT" "$TARGET" -- migrations/; then
+  log "migrations in range; taking a verified backup first"
+  (cd "$APP/apps/web" && PGHOST=127.0.0.1 PGUSER=b8 npm run --silent backup) \
+    || fail "pre-migration backup; nothing was changed, the next pass will retry"
+fi
+
 # The lockfile is compared BEFORE the reset moves it, so `npm ci` runs only when dependencies
 # actually changed. It takes about a minute; most deploys touch no dependency at all.
 LOCK_BEFORE=$(shasum package-lock.json 2>/dev/null | cut -d' ' -f1)
@@ -164,8 +193,10 @@ npm run build >/dev/null 2>&1 || fail "build"
 log "publishing"
 "$APP/ops/server/publish.sh" >/dev/null 2>&1 || fail "publish"
 
+# Output kept, unlike the build's: it is a few lines naming each migration applied, and after a
+# failure it is the only record of which one stopped and why.
 log "migrating"
-npm run migrate:up >/dev/null 2>&1 || fail "migrate"
+npm run --silent migrate:up 2>&1 || fail "migrate"
 
 log "restarting"
 # launchd owns the process and will bring it straight back; killing it IS the restart. Matched on

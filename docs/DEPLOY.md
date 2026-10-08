@@ -554,7 +554,10 @@ within 45 seconds it resets to the commit that was serving, rebuilds and restart
 which commit was bad.
 
 Build before migrate, so a commit that does not compile never reaches the database. Migrate before
-restart, so the new code never starts against the old schema.
+restart, so the new code never starts against the old schema. **When the commit range touches
+`migrations/` (or on `--force`), a verified `npm run backup` runs first, before anything moves** —
+migrations are forward-only, so that dump is the only way back from a bad one. If it fails, the
+deploy stops untouched and the next pass retries it.
 
 **The build no longer touches what is being served, so the outage is the restart.** `npm run build`
 writes into `apps/web/.next`, which nothing serves from: `ops/server/publish.sh` assembles a
