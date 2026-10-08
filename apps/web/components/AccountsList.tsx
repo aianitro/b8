@@ -45,9 +45,14 @@ interface Props {
   valuations: Record<string, number>;
   /** Ledger balance per account id, as net worth computes it; absent for an untracked account. */
   ledgerBalances: Record<string, number>;
+  /** The tab to open on: `?landscape=`, else the last one chosen (cookie), else operational. */
+  initialTab: Section;
 }
 
-export default function AccountsList({ operational, capital, txnCounts, valuations, ledgerBalances }: Props) {
+export default function AccountsList({ operational, capital, txnCounts, valuations, ledgerBalances, initialTab }: Props) {
+  // Switched in the browser rather than by navigation: both books are already on the page, so a
+  // round-trip would only add a wait. The cookie is what reopens the page on the same tab.
+  const [tab, setTab] = useState<Section>(initialTab);
   const [operationalOrder, setOperationalOrder] = useState<Account[]>(operational);
   const [capitalOrder, setCapitalOrder] = useState<Account[]>(capital);
   const [dragOver, setDragOver] = useState<string | null>(null); // account id
@@ -112,14 +117,34 @@ export default function AccountsList({ operational, capital, txnCounts, valuatio
     dragRef.current = null;
   }
 
+  const counts: Record<Section, number> = { operational: operationalOrder.length, capital: capitalOrder.length };
+
+  // Same tab bar as the budget page's landscape tabs, so the two books look alike wherever they split.
   return (
     <>
+      <div role="tablist" className="flex border-b border-slate-200 mb-6">
+        {(['operational', 'capital'] as const).map((ls) => (
+          <button
+            key={ls}
+            role="tab"
+            aria-selected={tab === ls}
+            onClick={() => {
+              setTab(ls);
+              document.cookie = `accountsLandscape=${ls};path=/;max-age=31536000`;
+            }}
+            className={`px-5 py-3 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
+              tab === ls
+                ? 'border-slate-900 text-slate-900'
+                : 'border-transparent text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            {ls}
+            <span className="ml-1.5 text-xs font-normal text-slate-400">{counts[ls]}</span>
+          </button>
+        ))}
+      </div>
       <Group
-        title="Operational" items={operationalOrder} section="operational" dragOver={dragOver} txnCounts={txnCounts} valuations={valuations} ledgerBalances={ledgerBalances}
-        onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onDragEnd={onDragEnd}
-      />
-      <Group
-        title="Capital" items={capitalOrder} section="capital" dragOver={dragOver} txnCounts={txnCounts} valuations={valuations} ledgerBalances={ledgerBalances}
+        items={tab === 'operational' ? operationalOrder : capitalOrder} section={tab} dragOver={dragOver} txnCounts={txnCounts} valuations={valuations} ledgerBalances={ledgerBalances}
         onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onDragEnd={onDragEnd}
       />
     </>
@@ -127,9 +152,8 @@ export default function AccountsList({ operational, capital, txnCounts, valuatio
 }
 
 function Group({
-  title, items, section, dragOver, txnCounts, valuations, ledgerBalances, onDragStart, onDragOver, onDrop, onDragEnd,
+  items, section, dragOver, txnCounts, valuations, ledgerBalances, onDragStart, onDragOver, onDrop, onDragEnd,
 }: {
-  title: string;
   items: Account[];
   section: Section;
   dragOver: string | null;
@@ -141,15 +165,20 @@ function Group({
   onDrop: (section: Section, targetId: string) => void;
   onDragEnd: () => void;
 }) {
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    return (
+      <div className="mb-8 bg-white rounded-2xl border border-slate-100 shadow-sm p-12 text-center">
+        <p className="text-slate-400 text-sm">No {section} accounts. An account&apos;s landscape is set on its own page.</p>
+      </div>
+    );
+  }
   const accent = section === 'operational' ? 'bg-blue-500' : 'bg-violet-500';
   return (
     <div className="mb-8">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">{title}</h2>
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {/* Column headers: the compact controls (an eye, a short select) only read
-            unambiguously once the column is named. No Landscape column — the group heading
-            above already says it — and no Balance from: that is set on the account's own page. */}
+            unambiguously once the column is named. No Landscape column — the tab above
+            already says it — and no Balance from: that is set on the account's own page. */}
         <div className={`${ROW_GRID} hidden sm:grid px-6 py-2 bg-slate-50/60 border-b border-slate-100`}>
           <span />
           <span />

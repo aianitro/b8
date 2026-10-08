@@ -3,6 +3,7 @@
 // generate them. Nothing about the page was wrong — the missing declaration was.
 export const dynamic = 'force-dynamic';
 
+import { cookies } from 'next/headers';
 import db from '@/lib/db';
 import { computeCurrentNetWorth } from '@/lib/netWorth';
 import PlaidLinkButton from '@/components/PlaidLinkButton';
@@ -41,7 +42,15 @@ async function getTxnCounts(): Promise<Map<string, number>> {
   return new Map(result.rows.map((r) => [r.account_id, Number(r.cnt)]));
 }
 
-export default async function AccountsPage() {
+type PageProps = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+const isLandscape = (v: unknown): v is 'operational' | 'capital' => v === 'operational' || v === 'capital';
+
+export default async function AccountsPage({ searchParams }: PageProps) {
+  const params = await searchParams;
+  const cookieTab = (await cookies()).get('accountsLandscape')?.value;
+  const initialTab = isLandscape(params.landscape) ? params.landscape : isLandscape(cookieTab) ? cookieTab : 'operational';
+
   // Ledger balances come from the net worth computation rather than a sum spelled out here, so a
   // balance on this page is the same figure the dashboard and net worth add up.
   const [accounts, txnCounts, latestValuations, { ledgerBalances }] = await Promise.all([
@@ -93,6 +102,7 @@ export default async function AccountsPage() {
           txnCounts={txnCountsObj}
           valuations={Object.fromEntries(latestValuations)}
           ledgerBalances={Object.fromEntries(ledgerBalances)}
+          initialTab={initialTab}
         />
       )}
 
