@@ -34,7 +34,7 @@
 import db from './db';
 import { roundCents } from './budgetMath';
 import { withoutNegativeZero } from './domain/adherence';
-import type { AsOf } from './domain/pacing';
+import type { AsOf, CategoryPace } from './domain/pacing';
 import type { MonthOutlook, OutlookCategory } from './domain/monthOutlook';
 import { asOfFromDate } from './domain/monthOutlook';
 import type { CategorizationCoverage } from './domain/monthOutlook';
@@ -923,6 +923,35 @@ async function readBudgetVsActual(asOf: AsOf): Promise<OverviewSources['budgetVs
 }
 
 /**
+ * The as-of month's budgeted categories, in the shape the dashboard's tiles take.
+ *
+ * Scoped to the as-of month AND to categories with an allocation. `categoryPacing` emits one
+ * record per category PER MONTH — that is what lets an earlier month's breach be reported — so
+ * taking the array whole would carry a category once for every month it has a budget in. The
+ * dashboard hit exactly that: 28 circles over 21 categories.
+ */
+export function monthCategoriesFrom(allPaces: CategoryPace[], asOf: AsOf) {
+  return allPaces
+    .filter((p) => p.month === asOf.month && p.budgeted > 0)
+    .map((p) => ({
+      category: p.category,
+      budgeted: p.budgeted,
+      actual: p.actual,
+      projectedRatio: p.projectedRatio,
+      tooEarly: p.status === 'too-early' || p.status === 'future' || p.status === 'no-budget',
+    }));
+}
+
+/**
+ * The tiles for a month other than the current one — the dashboard's look back. Only the month
+ * outlook is read: every other section of the overview describes the present (arrivals, alerts,
+ * the watchlist, the year-end forecast) and has no honest value as of an earlier date.
+ */
+export async function loadMonthCategories(asOf: AsOf) {
+  return monthCategoriesFrom((await loadMonthOutlook(asOf)).allPaces, asOf);
+}
+
+/**
  * The whole payload, from one clock read.
  *
  * ONE CLOCK READ, like the page: `asOfFromDate(new Date())` happens here and everything downstream —
@@ -973,19 +1002,7 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
     uncategorized,
     budgetVsActual,
     monthOutlook: monthRead.outlook,
-    // Scoped to the as-of month AND to categories with an allocation. `categoryPacing` emits one
-    // record per category PER MONTH — that is what lets an earlier month's breach be reported — so
-    // taking the array whole would carry a category once for every month it has a budget in. The
-    // dashboard hit exactly that: 28 circles over 21 categories.
-    monthCategories: monthRead.allPaces
-      .filter((p) => p.month === asOf.month && p.budgeted > 0)
-      .map((p) => ({
-        category: p.category,
-        budgeted: p.budgeted,
-        actual: p.actual,
-        projectedRatio: p.projectedRatio,
-        tooEarly: p.status === 'too-early' || p.status === 'future' || p.status === 'no-budget',
-      })),
+    monthCategories: monthCategoriesFrom(monthRead.allPaces, asOf),
     yearEnd,
     feedHealth,
     driftFindings,

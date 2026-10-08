@@ -19,7 +19,8 @@ import PushSetup from '@/components/PushSetup';
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
 // this one replaces was already in tension with it.
 import { asOfFromDate, type OutlookCategory } from '@/lib/domain/monthOutlook';
-import { loadOverview } from '@/lib/overviewRead';
+import { loadMonthCategories, loadOverview } from '@/lib/overviewRead';
+import DashboardMonthNav from '@/components/DashboardMonthNav';
 import { dashboardFromWire } from '@/lib/overviewFromWire';
 // The SQL behind that verdict now lives in `lib/`, shared with the daily job's breach alert, so the
 // page and the email can never drift on what this month's outlook is. It moved for the same reason
@@ -231,13 +232,75 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-export default async function DashboardPage() {
+/**
+ * A closed month of this year, looked back on: its tiles and what they add up to.
+ *
+ * Only the month outlook is read for it, as of the month's last day. Everything else on the
+ * dashboard describes the present — alerts, arrivals, the watchlist, what is unfiled, the year-end
+ * forecast — and dated to an earlier month would be wrong rather than merely old, so it is not
+ * shown here at all.
+ */
+async function PastMonth({ year, month, current }: { year: number; month: number; current: number }) {
+  const monthLength = daysInMonth(year, month);
+  const categories: MonthCategoryView[] = await loadMonthCategories({ year, month, day: monthLength });
+  const budget = categories.reduce((s, c) => s + c.budgeted, 0);
+  const spent = categories.reduce((s, c) => s + c.actual, 0);
+  const left = budget - spent;
+  const over = categories.filter((c) => c.actual > c.budgeted).length;
+
+  return (
+    <div className="p-4 sm:p-8 max-w-6xl mx-auto">
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
+        <DashboardMonthNav year={year} month={month} current={current} day={monthLength} monthLength={monthLength} />
+      </div>
+
+      {/* The same three-figure grid the current month's counts use, for the same reason: on a
+          phone three across is the glance, and these are read together. */}
+      <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-6">
+        <KpiCard label="Spent" value={fmt(spent)} sub={`of ${fmt(budget)} budgeted`} />
+        <KpiCard
+          label={left < 0 ? 'Over budget' : 'Under budget'}
+          value={fmt(Math.abs(left))}
+          highlight={left < 0 ? 'red' : 'green'}
+          sub={budget > 0 ? `${pct(spent / budget)} of plan used` : undefined}
+        />
+        <KpiCard
+          label="Categories over"
+          value={String(over)}
+          highlight={over > 0 ? 'red' : 'green'}
+          sub={`of ${categories.length} budgeted`}
+        />
+      </div>
+
+      <WhereTheMonthSits categories={categories} month={month} />
+
+      <p className="mt-6 text-xs text-slate-400">
+        Budgeted operational categories only, as the tiles show them. Alerts, new arrivals and what
+        is waiting on you describe today —{' '}
+        <Link href="/dashboard" className="underline hover:text-slate-600">back to {MONTHS[current]}</Link>.
+      </p>
+    </div>
+  );
+}
+
+type PageProps = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+export default async function DashboardPage({ searchParams }: PageProps) {
   // The page's ONE clock read. Everything downstream — the domain module's as-of point, every
   // date-bounded query, the year in the header — is derived from these three integers, in local
   // calendar time, so nothing on this page can straddle midnight or a New Year in two directions.
   const now = new Date();
   const asOf = asOfFromDate(now);
   const monthLength = daysInMonth(asOf.year, asOf.month);
+
+  // `?month=` is 1-based, like the Transactions drilldown's. Anything that is not an earlier month
+  // of this year — garbage, the current month, the future — is simply the current month.
+  const params = await searchParams;
+  const asked = typeof params.month === 'string' && /^\d{1,2}$/.test(params.month) ? Number(params.month) - 1 : null;
+  if (asked !== null && asked >= 0 && asked < asOf.month) {
+    return <PastMonth year={asOf.year} month={asked} current={asOf.month} />;
+  }
 
   // The picker behind every row editor in the panels below. Not from the payload, and not a figure
   // — see the note on the reader. Awaited beside the overview rather than after it, so the page
@@ -284,9 +347,7 @@ export default async function DashboardPage() {
       <div className="flex items-start justify-between gap-4 sm:gap-6 mb-6 sm:mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-1">
-            {MONTHS[asOf.month]} {asOf.year} · day {asOf.day} of {monthLength}
-          </p>
+          <DashboardMonthNav year={asOf.year} month={asOf.month} current={asOf.month} day={asOf.day} monthLength={monthLength} />
         </div>
         {/* Counted by CARD, not by finding: two institutions behind is one message about the
             feed, and five drifting accounts is one message about the ledger. The number is how
