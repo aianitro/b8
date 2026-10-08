@@ -14,7 +14,6 @@ import UncategorizedCard from '@/components/UncategorizedCard';
 import WatchlistCard from '@/components/WatchlistCard';
 import ExpandableKpiCards from '@/components/ExpandableKpiCards';
 import PushSetup from '@/components/PushSetup';
-import BudgetBar from '@/components/BudgetBar';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
@@ -87,9 +86,9 @@ export interface RecentArrival {
   note: string | null;
 }
 
-function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
+function KpiCard({ label, value, sub, subColor, highlight, href }: {
   label: string; value: string; sub?: string; subColor?: StatusColor;
-  highlight?: StatusColor; href?: string; footer?: ReactNode;
+  highlight?: StatusColor; href?: string;
 }) {
   const content = (
     <>
@@ -117,7 +116,6 @@ function KpiCard({ label, value, sub, subColor, highlight, href, footer }: {
         {value}
       </p>
       {sub && <p className={`text-[11px] sm:text-xs mt-1 sm:mt-1.5 ${subColor ? STATUS_CLASS[subColor] : 'text-slate-400'}`}>{sub}</p>}
-      {footer && <div className="mt-3 pt-3 border-t border-slate-100">{footer}</div>}
     </>
   );
   if (href) {
@@ -362,20 +360,16 @@ export default async function DashboardPage() {
             to say something that does not move.
 
             The headline is what is LEFT, because that is the figure anyone acts on. The target and
-            the spend become the line under it, where they are context rather than competition, and
-            the bar turns the pair into a ratio neither card could show alone.
+            the spend become the line under it, where they are context rather than competition.
 
-            NO YEAR-ELAPSED MARKER on the track, deliberately. Spending 60% of an annual plan by
-            mid-September means something quite different from spending it by March, so a marker
-            would help — but this page already answers pacing twice, in the bubbles and in Projected
-            P/L, and both are computed per category per month. A third answer on an annual basis
-            would disagree with them in exactly the months that matter. */}
+            NO PROGRESS BAR, removed at the owner's request. It showed annual spend as a share of
+            the annual plan, which reads as pacing without being it — this page already answers
+            pacing twice, in the bubbles and in Projected P/L, both per category per month. */}
         <KpiCard
           label="Budget remaining"
           value={fmt(stats.remaining)}
           highlight={stats.remaining < 0 ? 'red' : 'green'}
           sub={`${fmt(stats.spent)} spent of ${fmt(stats.budget)}`}
-          footer={<BudgetBar spent={stats.spent} budget={stats.budget} />}
         />
       </div>
 
