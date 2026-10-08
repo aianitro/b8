@@ -1,5 +1,6 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
@@ -22,6 +23,30 @@ export interface ProfitLossPoint {
 
 /** Pixels. Paired with an equal and opposite `barGap` so the two series share one column. */
 const BAR_WIDTH = 40;
+/** The phone's bar, the width the phone app draws: twelve 40px columns do not fit 340px. */
+const BAR_WIDTH_NARROW = 8;
+
+// THE PHONE GETS THE PHONE APP'S CHART, at the owner's request: no y-axis and no legend, so the
+// plot takes the card's whole width. The axis cost about a fifth of a 390px screen to label a scale
+// the tooltip already gives exactly, and the legend wrapped to three lines above a chart the
+// caption already explains.
+//
+// Width, not `display-mode: standalone`, for the reason set out in WhereTheMonthSits.tsx: the
+// installed app also runs in a desktop window, and a phone browser tab is just as narrow. A hook
+// rather than CSS because these are Recharts props, and it costs no flash: the chart is measured
+// on the client before it draws anything, so there is no server-rendered shape to swap.
+const NARROW = '(max-width: 767px)';
+function useNarrow(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      const mq = window.matchMedia(NARROW);
+      mq.addEventListener('change', cb);
+      return () => mq.removeEventListener('change', cb);
+    },
+    () => window.matchMedia(NARROW).matches,
+    () => false,
+  );
+}
 
 const fmt = (v: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v);
@@ -88,10 +113,12 @@ function FlowTooltip({ active, payload, label }: {
  * is gone; the accounts page is where that question belongs.
  */
 export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
+  const narrow = useNarrow();
+  const barSize = narrow ? BAR_WIDTH_NARROW : BAR_WIDTH;
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Profit &amp; Loss</p>
-      <p className="text-[11px] text-slate-400 mb-4">
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 max-md:px-3 max-md:py-5">
+      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1 max-md:px-2">Profit &amp; Loss</p>
+      <p className="text-[11px] text-slate-400 mb-4 max-md:px-2">
         Bars: money in above the line, money out below · Line: cumulative income less spending, dashed once forecast
       </p>
       <ResponsiveContainer width="100%" height={260}>
@@ -108,13 +135,16 @@ export default function ProfitLossChart({ data }: { data: ProfitLossPoint[] }) {
             documented fix for that, which hangs the renderer outright on this chart, mixing bars
             and a null-gapped line. Overlap needs neither: the two series have opposite signs, so
             they can never collide vertically. */}
-        <ComposedChart data={data} barSize={BAR_WIDTH} barGap={-BAR_WIDTH}
-                       margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+        <ComposedChart data={data} barSize={barSize} barGap={-barSize}
+                       margin={narrow ? { top: 4, right: 4, left: 4, bottom: 0 } : { top: 4, right: 16, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-          <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} />
+          {/* Every month labelled on the phone too — `interval={0}` — or Recharts thins them to
+              every other one, and "which bar is June" becomes a count. */}
+          <XAxis dataKey="month" tick={{ fontSize: narrow ? 10 : 11, fill: '#94a3b8' }} interval={0}
+                 axisLine={false} tickLine={false} />
+          <YAxis hide={narrow} tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} />
           <Tooltip content={<FlowTooltip />} />
-          <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: '#64748b' }} />
+          {!narrow && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: '#64748b' }} />}
           {/* Break-even. On a P/L the zero line is the whole verdict — above it the year is up,
               below it the year is down — so it is drawn darker than the grid behind it. */}
           <ReferenceLine y={0} stroke="#cbd5e1" strokeWidth={1} />
