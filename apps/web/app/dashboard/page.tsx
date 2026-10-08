@@ -407,10 +407,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <KpiCard
           label="Projected P/L"
           value={`${yearEnd.profitLoss < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.profitLoss))}`}
-          sub={`${yearEnd.netToDate < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.netToDate))} so far`
-            + (yearEnd.uncategorizedNet !== 0
-                ? ` · ${fmt(Math.abs(yearEnd.uncategorizedNet))} unfiled, not counted`
-                : '')}
+          // No "unfiled, not counted" note, at the owner's request: Uncategorized sits in the row
+          // below with its own count, which is where unfiled records are dealt with.
+          sub={`${yearEnd.netToDate < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.netToDate))} so far`}
           highlight={yearEnd.profitLoss < 0 ? 'red' : 'green'}
           href="/budget"
         />
