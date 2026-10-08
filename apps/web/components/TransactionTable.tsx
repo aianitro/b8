@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Trash2, Eye, EyeOff, Copy, Flag } from 'lucide-react';
 import CategorySelect from './CategorySelect';
 import MerchantMark from './MerchantMark';
+import { TransactionDetailButton } from './TransactionDetailSheet';
 import TransferLinkButton from './TransferLinkButton';
 import { detailLine, enrichmentDetail } from '@/lib/enrichedDisplay';
 
@@ -712,10 +713,11 @@ export default function TransactionTable({ transactions, categories, accounts, p
                       nothing. The cell starts at the same x on every row, and the mark is a fixed
                       box, so the name after it does too. */}
                   <td className="col-start-2 col-span-2 row-start-2 min-w-0 sm:table-cell sm:px-4 sm:py-3.5">
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    {/* The mark and name open the detail sheet; the rest of the row keeps its controls. */}
+                    <TransactionDetailButton transactionId={t.id} className="flex items-center gap-2.5">
                       <MerchantMark logoUrl={t.logo_url} title={t.merchant_name ?? t.name} />
                       <div className="min-w-0">
-                        <span className="font-medium text-slate-800">
+                        <span className="detail-title font-medium text-slate-800 transition-colors">
                           {t.merchant_name ?? t.name ?? <span className="text-slate-300">—</span>}
                         </span>
                         {t.name && t.merchant_name && t.name !== t.merchant_name && (
@@ -728,7 +730,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
                             city name cannot widen the Merchant column for every row. */}
                         {detail !== null && <div className="text-xs text-slate-400 mt-0.5 wrap-anywhere">{detail}</div>}
                       </div>
-                    </div>
+                    </TransactionDetailButton>
                   </td>
                   <td className="col-start-2 col-span-2 row-start-3 min-w-0 sm:table-cell sm:px-4 sm:py-3.5">
                     <div className="flex flex-wrap items-center gap-1.5">

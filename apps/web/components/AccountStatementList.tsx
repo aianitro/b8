@@ -4,6 +4,7 @@ import { useState } from 'react';
 import CategorySelect from '@/components/CategorySelect';
 import MerchantMark from '@/components/MerchantMark';
 import SwipeDeleteRow from '@/components/SwipeDeleteRow';
+import { TransactionDetailButton } from '@/components/TransactionDetailSheet';
 import { detailLine, enrichmentDetail } from '@/lib/enrichedDisplay';
 import type { BudgetCategory } from '@b8/contracts/types';
 
@@ -118,13 +119,17 @@ export default function AccountStatementList({ months, categories }: {
                   description={`${title ?? 'Transaction'} · ${shortDate(t.date)}`}
                   className="grid grid-cols-[1.75rem_minmax(0,1fr)_auto] sm:grid-cols-[1.75rem_minmax(0,1fr)_12rem_9rem_2rem] items-center gap-x-3 sm:gap-x-4 gap-y-1 px-4 sm:px-5 py-3 hover:bg-slate-50 transition-colors"
                 >
-                  <div className="col-start-1 row-start-1 row-span-2 sm:row-span-1">
+                  {/* The mark and the name each open the detail sheet. Two buttons rather than one
+                      around both, because the grid gives them separate tracks. */}
+                  <TransactionDetailButton transactionId={t.id} className="col-start-1 row-start-1 row-span-2 sm:row-span-1">
                     <MerchantMark logoUrl={t.logo_url} title={title} />
-                  </div>
+                  </TransactionDetailButton>
                   <div className="col-start-2 row-start-1 min-w-0">
-                    <p className="font-medium text-sm text-slate-800 truncate">
-                      {title ?? <span className="text-slate-300">—</span>}
-                    </p>
+                    <TransactionDetailButton transactionId={t.id} className="block max-w-full">
+                      <p className="detail-title font-medium text-sm text-slate-800 truncate transition-colors">
+                        {title ?? <span className="text-slate-300">—</span>}
+                      </p>
+                    </TransactionDetailButton>
                     <p className="hidden sm:block text-xs text-slate-400 mt-0.5">{shortDate(t.date)}</p>
                     {/* Plain text, no hover — a phone has none. Not rendered at all when there is
                         nothing to say, so such a row is exactly as tall as before. */}

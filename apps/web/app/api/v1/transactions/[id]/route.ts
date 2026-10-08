@@ -3,8 +3,35 @@ import db from '@/lib/db';
 import { parseWatchInput } from '@/lib/watchlist';
 import type { ApiResponse } from '@b8/contracts/types';
 import { createLogger } from '@/lib/logger';
+import { transactionDetail, type DetailRow, type TransactionDetail } from '@/lib/transactionDetail';
 
 const log = createLogger('transactions');
+
+/**
+ * One transaction for the detail sheet. `plaid_raw` is selected here and goes no further than
+ * `transactionDetail`, which picks out named fields; the blob itself never reaches the response.
+ */
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  if (!/^\d+$/.test(id)) {
+    return Response.json({ success: false, error: { code: 'NOT_FOUND', message: 'No such transaction' } } satisfies ApiResponse<never>, { status: 404 });
+  }
+  const result = await db.query<DetailRow>(
+    `SELECT t.id, t.date::text AS date, t.authorized_date::text AS authorized_date, t.amount,
+            t.name, t.merchant_name, t.logo_url, t.website, t.account_id, a.name AS account_name,
+            t.mapped_category, t.plaid_category, t.plaid_category_detailed, t.plaid_category_confidence,
+            t.payment_channel, t.location_city, t.location_region, t.location_country,
+            t.note, t.watched_at, t.hidden, t.plaid_raw
+       FROM transactions t
+       JOIN accounts a ON a.id = t.account_id
+      WHERE t.id = $1`,
+    [id]
+  );
+  if (result.rowCount === 0) {
+    return Response.json({ success: false, error: { code: 'NOT_FOUND', message: 'No such transaction' } } satisfies ApiResponse<never>, { status: 404 });
+  }
+  return Response.json({ success: true, data: transactionDetail(result.rows[0]) } satisfies ApiResponse<TransactionDetail>);
+}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
