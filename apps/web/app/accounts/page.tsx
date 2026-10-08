@@ -11,6 +11,7 @@ import AddAccountForm from '@/components/AddAccountForm';
 import AccountsList from '@/components/AccountsList';
 import SyncControls from '@/components/SyncControls';
 import SyncHealthCard from '@/components/SyncHealthCard';
+import { summarizeLandscape, type SummaryInputs } from '@/lib/domain/accountsSummary';
 import type { Account } from '@b8/contracts/types';
 
 async function getAccounts(): Promise<Account[]> {
@@ -35,6 +36,37 @@ async function getLatestValuations(): Promise<Map<string, number>> {
   return new Map(result.rows.map((r) => [r.account_id, Number(r.value)]));
 }
 
+// The year's opening figures for the summary cards: each ledger account's beginning balance, and
+// each valued account's latest valuation recorded by Jan 1 (a valuation dated Jan 1 itself is the
+// opening one) or, failing that, its first one after. Compared as dates in the server's time
+// zone, like every other date on the page.
+async function getYearOpening(year: number): Promise<{
+  beginning: Map<string, number>; valuations: Map<string, number>; first: Map<string, number>;
+}> {
+  const [beginningRes, valuationRes, firstRes] = await Promise.all([
+    db.query<{ account_id: string; beginning_balance: string }>(
+      'SELECT account_id, beginning_balance FROM account_balances WHERE year = $1', [year]
+    ),
+    db.query<{ account_id: string; value: string }>(
+      `SELECT DISTINCT ON (account_id) account_id, value
+         FROM account_valuations
+        WHERE valued_at < make_date($1, 1, 2)
+        ORDER BY account_id, valued_at DESC`, [year]
+    ),
+    db.query<{ account_id: string; value: string }>(
+      `SELECT DISTINCT ON (account_id) account_id, value
+         FROM account_valuations
+        WHERE valued_at >= make_date($1, 1, 2)
+        ORDER BY account_id, valued_at ASC`, [year]
+    ),
+  ]);
+  return {
+    beginning: new Map(beginningRes.rows.map((r) => [r.account_id, Number(r.beginning_balance)])),
+    valuations: new Map(valuationRes.rows.map((r) => [r.account_id, Number(r.value)])),
+    first: new Map(firstRes.rows.map((r) => [r.account_id, Number(r.value)])),
+  };
+}
+
 async function getTxnCounts(): Promise<Map<string, number>> {
   const result = await db.query<{ account_id: string; cnt: string }>(
     'SELECT account_id, COUNT(*)::text AS cnt FROM transactions GROUP BY account_id'
@@ -53,14 +85,30 @@ export default async function AccountsPage({ searchParams }: PageProps) {
 
   // Ledger balances come from the net worth computation rather than a sum spelled out here, so a
   // balance on this page is the same figure the dashboard and net worth add up.
-  const [accounts, txnCounts, latestValuations, { ledgerBalances }] = await Promise.all([
+  const [accounts, txnCounts, latestValuations, { ledgerBalances }, opening] = await Promise.all([
     getAccounts(), getTxnCounts(), getLatestValuations(), computeCurrentNetWorth(),
+    getYearOpening(new Date().getFullYear()),
   ]);
   const operational = accounts.filter((a) => a.landscape === 'operational');
   const capital     = accounts.filter((a) => a.landscape === 'capital');
   const plaidCount  = accounts.filter((a) => !a.is_manual).length;
   const manualCount = accounts.filter((a) => a.is_manual).length;
   const txnCountsObj = Object.fromEntries(txnCounts);
+
+  const summaryAccounts = accounts.map((a) => ({
+    id: a.id, landscape: a.landscape, valuationMode: a.valuation_mode, isLiability: a.is_liability,
+  }));
+  const summaryInputs: SummaryInputs = {
+    ledgerBalances: Object.fromEntries(ledgerBalances),
+    beginningBalances: Object.fromEntries(opening.beginning),
+    latestValuations: Object.fromEntries(latestValuations),
+    openingValuations: Object.fromEntries(opening.valuations),
+    firstValuations: Object.fromEntries(opening.first),
+  };
+  const summaries = {
+    operational: summarizeLandscape(summaryAccounts, 'operational', summaryInputs),
+    capital: summarizeLandscape(summaryAccounts, 'capital', summaryInputs),
+  };
 
   const subtitle = [
     plaidCount > 0 && `${plaidCount} via Plaid`,
@@ -103,6 +151,7 @@ export default async function AccountsPage({ searchParams }: PageProps) {
           valuations={Object.fromEntries(latestValuations)}
           ledgerBalances={Object.fromEntries(ledgerBalances)}
           initialTab={initialTab}
+          summaries={summaries}
         />
       )}
 

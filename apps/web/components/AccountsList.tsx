@@ -8,6 +8,8 @@ import AccountDeleteButton from './AccountDeleteButton';
 import RelativeTime from './RelativeTime';
 import type { Account } from '@b8/contracts/types';
 import { accountTypeLabel } from '@/lib/accountTypes';
+import AccountsSummaryCards from './AccountsSummaryCards';
+import type { LandscapeSummary } from '@/lib/domain/accountsSummary';
 
 type Section = 'operational' | 'capital';
 
@@ -47,9 +49,11 @@ interface Props {
   ledgerBalances: Record<string, number>;
   /** The tab to open on: `?landscape=`, else the last one chosen (cookie), else operational. */
   initialTab: Section;
+  /** The three cards' figures for each tab, worked out on the server. */
+  summaries: Record<Section, LandscapeSummary>;
 }
 
-export default function AccountsList({ operational, capital, txnCounts, valuations, ledgerBalances, initialTab }: Props) {
+export default function AccountsList({ operational, capital, txnCounts, valuations, ledgerBalances, initialTab, summaries }: Props) {
   // Switched in the browser rather than by navigation: both books are already on the page, so a
   // round-trip would only add a wait. The cookie is what reopens the page on the same tab.
   const [tab, setTab] = useState<Section>(initialTab);
@@ -143,6 +147,7 @@ export default function AccountsList({ operational, capital, txnCounts, valuatio
           </button>
         ))}
       </div>
+      <AccountsSummaryCards summary={summaries[tab]} />
       <Group
         items={tab === 'operational' ? operationalOrder : capitalOrder} section={tab} dragOver={dragOver} txnCounts={txnCounts} valuations={valuations} ledgerBalances={ledgerBalances}
         onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop} onDragEnd={onDragEnd}
