@@ -10,10 +10,19 @@ const fmtSigned = (n: number) => (Math.abs(n) < 0.5 ? fmt(0) : (n > 0 ? '+' : 'â
 /**
  * The balances page's three cards, for one tab of the accounts page.
  *
- * STACKED ON A PHONE, three across from `sm:` up. Three columns at 361px leave each figure under
- * 90px, and a seven-figure balance does not fit in that at any readable size. On a phone each card
- * is one line, the label left and the figure right, so the stack costs little height.
+ * THREE ACROSS AT EVERY WIDTH, as the balances page had them â€” the owner's call, after a phone
+ * version that stacked them as one-line rows. Side by side they read as one sentence (opened at,
+ * moved by, stands at), which a stack breaks up. To fit a third of a 390px screen the phone gets
+ * the dashboard's small-card sizing: a 9px label, a figure at `text-base`, and a 10px caption that
+ * may wrap. A seven-figure balance does not fit at `text-base`, so `figureSize` steps it down by
+ * length rather than letting it break mid-number; `break-words` stays as the last backstop.
  */
+function figureSize(value: string): string {
+  if (value.length <= 9) return 'text-base';
+  if (value.length <= 10) return 'text-sm';
+  return 'text-[13px]';
+}
+
 export default function AccountsSummaryCards({ summary }: { summary: LandscapeSummary }) {
   const month = MONTHS[new Date().getMonth()];
   const { yearBegin, change, current, counted, noOpening } = summary;
@@ -39,18 +48,12 @@ export default function AccountsSummaryCards({ summary }: { summary: LandscapeSu
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 mb-6">
+    <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-6">
       {cards.map(({ label, value, sub, color }) => (
-        <div
-          key={label}
-          className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-3 sm:p-6 flex items-center justify-between gap-3 sm:block"
-        >
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 sm:mb-2">{label}</p>
-            <p className="text-xs text-slate-400 mt-0.5 sm:hidden">{sub}</p>
-          </div>
-          <p className={`text-lg sm:text-3xl font-bold font-mono shrink-0 ${color}`}>{value}</p>
-          <p className="hidden sm:block text-xs text-slate-400 mt-1.5">{sub}</p>
+        <div key={label} className="min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-6">
+          <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-normal sm:tracking-wider text-slate-400 mb-1 sm:mb-2">{label}</p>
+          <p className={`${figureSize(value)} sm:text-3xl font-bold font-mono break-words ${color}`}>{value}</p>
+          <p className="text-[10px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5">{sub}</p>
         </div>
       ))}
     </div>
