@@ -130,7 +130,6 @@ export default async function NetWorthPage() {
     <div className="p-4 sm:p-8 max-w-5xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Net Worth</h1>
-        <p className="text-sm text-slate-500 mt-1">What it is, and what it is made of</p>
       </div>
 
       <div className="bg-slate-900 rounded-2xl shadow-sm p-8 mb-6">
