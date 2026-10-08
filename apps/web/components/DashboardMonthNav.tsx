@@ -14,9 +14,9 @@ import { MONTHS } from '@/lib/drilldown';
  * The current month has no `?month=` at all, so `/dashboard` stays the page it always was.
  *
  * IN THE INSTALLED APP (`standalone:`) it sits on the title's line, at the right, and drops
- * "day 7 of 31" — the owner's call: a phone's title line has room for the month and its arrows,
- * not for a day count the date on the phone already gives. A closed month keeps "closed", which
- * is what tells it apart from the current one.
+ * both suffixes — the owner's call: a phone's title line has room for the month and its arrows,
+ * not for a day count the date on the phone already gives, nor for "closed" on a month the owner
+ * already knows is not this one.
  *
  * @param month    0-based, the month on screen.
  * @param current  0-based, today's month.
@@ -40,7 +40,7 @@ export default function DashboardMonthNav({ year, month, current, day, monthLeng
       {month < current
         ? <Link href={href(month + 1)} aria-label={`${MONTHS[month + 1]} ${year}`} className={arrow}><ChevronRight size={16} /></Link>
         : <span className="p-1 -m-1 text-slate-200"><ChevronRight size={16} /></span>}
-      <span className={`text-slate-400 ${month === current ? 'standalone:hidden' : ''}`}>
+      <span className="text-slate-400 standalone:hidden">
         {month === current ? `· day ${day} of ${monthLength}` : '· closed'}
       </span>
     </div>
