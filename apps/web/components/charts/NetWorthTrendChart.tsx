@@ -61,7 +61,10 @@ function tickFormatter(range: number) {
 // snapshot — see `lib/domain/netWorthPeriods.ts` for why the close and not an average.
 export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorthTrendPoint[] }) {
   const [selected, setSelected] = useState<SeriesKey>('total');
-  const [period, setPeriod] = useState<NetWorthPeriod>('month');
+  // Monthly unless that leaves a single point — under a month of history would otherwise open on an
+  // empty chart. Decided once, on mount; a period the owner picks afterwards is theirs.
+  const [period, setPeriod] = useState<NetWorthPeriod>(() =>
+    lastPerPeriod(snapshots, 'month').length >= 2 ? 'month' : 'week');
   const closing = lastPerPeriod(snapshots, period);
   const spansYears = closing.length > 0 && closing[0].iso.slice(0, 4) !== closing[closing.length - 1].iso.slice(0, 4);
   const data = closing.map((p) => ({ ...p, date: periodLabel(p.iso, period, spansYears) }));
@@ -94,13 +97,47 @@ export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorth
         )}
       </div>
 
+      {/* THE SERIES CHIPS SIT OUTSIDE THE EMPTY STATE. They lived inside the chart branch, so a period
+          that left one point — Monthly on a single month of history — took the chips away with the
+          line, and switching back did not explain where they had gone. */}
+      {snapshots.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-4">
+          <div role="tablist" className="flex flex-wrap gap-1">
+            {SERIES.map((x) => (
+              <button
+                key={x.key}
+                type="button"
+                role="tab"
+                aria-selected={x.key === selected}
+                onClick={() => setSelected(x.key)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                  x.key === selected ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: x.color }} />
+                {x.label}
+              </button>
+            ))}
+          </div>
+          {data.length >= 2 && (
+            <p className="text-xs text-slate-500">
+              <span className={`font-mono font-semibold ${change < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                {change < 0 ? '−' : '+'}{fmt(Math.abs(change))}
+              </span>{' '}
+              {/* The exact date, whatever the period: "since Jan" would leave which day unsaid. */}
+              since {periodLabel(data[0].iso, 'week', false)}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* A line needs two points. One snapshot renders as an invisible dot on a collapsed axis,
           which reads as a broken chart rather than as "history starts here". With periods there is a
           second way to get here — a year of history is one yearly point — so that case says so. */}
       {data.length < 2 ? (
         <div className="h-[220px] flex flex-col items-center justify-center text-center">
           <p className="text-2xl font-mono font-semibold text-slate-800">
-            {data.length === 1 ? fmt(data[0].total) : '—'}
+            {data.length === 1 ? fmt(data[0][selected]) : '—'}
           </p>
           <p className="text-xs text-slate-400 mt-2 max-w-sm">
             {snapshots.length === 0
@@ -112,32 +149,6 @@ export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorth
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mb-4">
-            <div role="tablist" className="flex flex-wrap gap-1">
-              {SERIES.map((x) => (
-                <button
-                  key={x.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={x.key === selected}
-                  onClick={() => setSelected(x.key)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                    x.key === selected ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: x.color }} />
-                  {x.label}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-slate-500">
-              <span className={`font-mono font-semibold ${change < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                {change < 0 ? '−' : '+'}{fmt(Math.abs(change))}
-              </span>{' '}
-              {/* The exact date, whatever the period: "since Jan" would leave which day unsaid. */}
-              since {periodLabel(data[0].iso, 'week', false)}
-            </p>
-          </div>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
