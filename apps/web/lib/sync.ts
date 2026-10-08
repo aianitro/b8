@@ -1,4 +1,4 @@
-import { CountryCode } from 'plaid';
+import { CountryCode, TransactionsUpdateStatus, type TransactionsSyncResponse } from 'plaid';
 import { plaidClient } from './plaid';
 import { reconcileAccountIds } from './plaidReconcile';
 import { recordPlaidBalances } from './plaidBalances';
@@ -48,24 +48,169 @@ async function syncItem(
   cursor: string | null,
   rules: RuleMap
 ): Promise<{ added: number; unmatchedAccountIds: string[] }> {
-  let currentCursor = cursor ?? undefined;
+  let currentCursor = cursor || undefined;
   let added = 0;
   // Counted only for the log line below. Not part of the return: a skipped deletion is not a sync
   // outcome the caller acts on, and `added` already excludes these.
   let skippedTombstoned = 0;
   let hasMore = true;
   const unmatchedAccountIds = new Set<string>();
+  const knownIds = new Set(accountIds);
 
+  // TWO KINDS OF WALK, AND THEY RE-IDENTIFY DIFFERENTLY (P6-40f, R5).
+  //
+  // A walk from NO cursor is the re-auth phase: a new token nulls the cursor (exchange-token), and an
+  // item with a never-synced account starts over (the cursor grouping in `runSyncInner`). Plaid then
+  // re-delivers history under the new Item's ids, and any stored row it no longer names is a
+  // candidate for a same-key new id — the page-by-page matching below. `!cursor`, not `=== null`:
+  // Plaid answers a NOT_READY item with `next_cursor: ''`, and a walk from '' is a walk from the
+  // start, so treating it as a stored cursor would run the whole re-delivery with no re-identification.
+  //
+  // A walk from a STORED cursor is handed only what changed since. A new id there with the same
+  // account, date, amount and name as a stored row is ordinarily a SECOND identical purchase, and
+  // pairing it would rename the first purchase's row and store the second nowhere — one real
+  // transaction silently lost. So such a walk inserts every new id, with one exception: a stored row
+  // whose own id Plaid lists in this walk's `removed`. Plaid has then said in so many words that the
+  // old id is retired, and a same-key new id in the same walk is that transaction renumbered (an
+  // incremental reissue). Renaming it keeps the owner's hidden flag, note, category, watch, transfer
+  // group and property; letting the DELETE below run first would throw all of them away and insert a
+  // bare copy. Within one walk nothing else separates a reissue from a genuine second purchase — the
+  // two deliveries are byte-identical — so `removed` is the only licence this walk gets to use.
+  const reauthWalk = !cursor;
+
+  // EVERY ID THIS WALK HAS ALREADY HANDLED, across all its pages (P6-40f, H-g from P6-40e). The
+  // matcher works on one page at a time, and to it "a stored row Plaid no longer refers to by id"
+  // means "an id not in THIS page". So a row renamed on page 1, or inserted by page 1's plain upsert,
+  // looked orphaned to page 2 and was claimed again by page 2's same-key id: the second rename
+  // overwrote the first, and page 1's id ended up stored nowhere. Every row this walk writes carries
+  // an id from this set — an upsert writes the id it was given, and a rename writes an id the upsert
+  // right after it then handles — so one set answers both questions: an id in it may not claim
+  // (it was already processed), and a stored row bearing one is not a candidate (Plaid still refers
+  // to it, earlier in this walk). Kept per item walk, never per run: another item's ids say nothing
+  // about this one's rows. Nothing persists past the walk; a row from an EARLIER run is still a
+  // candidate, which is the matcher's designed behaviour for a full re-delivery.
+  const seenInWalk = new Set<string>();
+  // Walk-scoped for the same reason: a renamed row whose id Plaid repeats on a later page reaches the
+  // upsert there as a conflict, and a page-local set would count that refresh as a new transaction.
+  const reidentified = new Set<string>();
+
+  // THE WHOLE WALK IS FETCHED BEFORE ANY OF IT IS WRITTEN. A `removed` entry that licenses a rename
+  // can arrive on a later page than the new id it licenses, or on an earlier one — and on an earlier
+  // one, processing pages as they arrive would delete the owner's row before the new id could claim
+  // it. Holding the pages first is also what Plaid's own guidance asks of a `/transactions/sync`
+  // walk (apply the changes once `has_more` is false), and it costs nothing a failure could expose:
+  // the cursor was only ever written after the last page, so a walk that fails mid-way is fetched
+  // again from the same cursor either way; now it simply has written nothing in the meantime.
+  const walk: TransactionsSyncResponse[] = [];
   while (hasMore) {
     const res = await plaidClient().transactionsSync({
       access_token: accessToken,
       cursor: currentCursor,
       options: { include_personal_finance_category: true },
     });
+    walk.push(res.data);
+    currentCursor = res.data.next_cursor;
+    hasMore = res.data.has_more;
+  }
+  // The FINAL page's status is Plaid's word on how much history this cursor covers.
+  const finalStatus = walk[walk.length - 1]?.transactions_update_status;
 
-    const { added: newTxns, modified, removed, next_cursor, has_more } = res.data;
+  // Ids whose LAST word in this walk is a removal — Plaid's net view once the walk is over. Within a
+  // page the order is added, then modified, then removed, which is the order the loops below apply
+  // them in. Such an id may still be written by an earlier page and is then deleted by its own
+  // removal, so it is not counted as a new transaction: `synced` would otherwise report a row that
+  // the same walk took away again (P6-40f cycle 2, PG-15e).
+  const lastEvent = new Map<string, 'delivered' | 'removed'>();
+  for (const page of walk) {
+    for (const t of [...page.added, ...page.modified]) lastEvent.set(t.transaction_id, 'delivered');
+    for (const t of page.removed) lastEvent.set(t.transaction_id, 'removed');
+  }
+  const netRemoved = new Set([...lastEvent].filter(([, e]) => e === 'removed').map(([id]) => id));
 
-    const knownIds = new Set(accountIds);
+  if (!reauthWalk) {
+    const delivered = new Set<string>();
+    const claimants: TransactionsSyncResponse['added'] = [];
+    for (const page of walk) {
+      for (const t of [...page.added, ...page.modified]) {
+        if (knownIds.has(t.account_id) && !t.pending) delivered.add(t.transaction_id);
+      }
+    }
+    const removedInWalk = new Set(walk.flatMap((page) => page.removed.map((r) => r.transaction_id)));
+    const retired = [...removedInWalk]
+      // An id Plaid both retires and still sends in the same walk is not retired for this purpose.
+      .filter((id) => !delivered.has(id));
+    if (retired.length > 0) {
+      // First occurrence of each posted new id, in walk order — page order, then in-page order —
+      // which is the delivery order the pairing law is stated in. A repeat claims nothing.
+      //
+      // An id that is itself in this walk's `removed` claims nothing either (P6-40f cycle 2, N1). Plaid
+      // reissuing twice in one walk — old-1 to new-1, then new-1 to new-2 — would otherwise rename the
+      // owner's row to new-1, and new-1's own removal would then delete it, owner fields and all, while
+      // new-2 arrived as a bare insert. Skipping new-1 leaves the row for new-2, the id Plaid ends on.
+      const firstSeen = new Set<string>();
+      for (const page of walk) {
+        for (const t of page.added) {
+          if (!knownIds.has(t.account_id) || t.pending || firstSeen.has(t.transaction_id)) continue;
+          if (removedInWalk.has(t.transaction_id)) continue;
+          firstSeen.add(t.transaction_id);
+          claimants.push(t);
+        }
+      }
+      // Tombstoned ids take no part in either role, for the reasons given at the per-page block below.
+      const { rows: tombRows } = await db.query<{ plaid_transaction_id: string }>(
+        'SELECT plaid_transaction_id FROM transaction_tombstones WHERE plaid_transaction_id = ANY($1)',
+        [[...claimants.map((t) => t.transaction_id), ...retired]]
+      );
+      const tombstoned = new Set(tombRows.map((r) => r.plaid_transaction_id));
+      // A new id already stored somewhere is the upsert's to refresh, not a claimant. The matcher
+      // checks that only against the rows it is handed, and it is handed the retired rows alone here.
+      const { rows: storedRows } = await db.query<{ plaid_transaction_id: string }>(
+        'SELECT plaid_transaction_id FROM transactions WHERE plaid_transaction_id = ANY($1)',
+        [claimants.map((t) => t.transaction_id)]
+      );
+      const alreadyStored = new Set(storedRows.map((r) => r.plaid_transaction_id));
+      const eligible = claimants.filter((t) => !tombstoned.has(t.transaction_id) && !alreadyStored.has(t.transaction_id));
+      if (eligible.length > 0) {
+        // The candidate pool is exactly the stored rows Plaid retired in this walk, on this item's
+        // accounts — no date range, because the licence is the id, not the page the row fell in.
+        const retiredRows = await db.query<{
+          id: number; plaid_transaction_id: string; account_id: string; date: Date; amount: string; name: string | null;
+        }>(
+          `SELECT id, plaid_transaction_id, account_id, date, amount, name
+             FROM transactions
+            WHERE account_id = ANY($1) AND plaid_transaction_id = ANY($2)`,
+          [accountIds, retired.filter((id) => !tombstoned.has(id))]
+        );
+        const { reidentify } = matchReissuedTransactions(
+          eligible.map((t) => ({
+            plaidTransactionId: t.transaction_id, accountId: t.account_id,
+            date: t.date, amount: t.amount, name: t.name ?? null,
+          })),
+          retiredRows.rows.map((r) => ({
+            id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id,
+            date: toDateOnly(r.date), amount: Number(r.amount), name: r.name,
+          }))
+        );
+        // Renamed before any page is applied, so the retired id's DELETE below finds no row: the
+        // row it would have deleted now carries the new id, and the licence cannot destroy what it
+        // licensed. The upsert for the new id then refreshes the Plaid-sourced fields, as it does
+        // after every rename.
+        for (const m of reidentify) {
+          await db.query('UPDATE transactions SET plaid_transaction_id = $1 WHERE id = $2', [
+            m.newPlaidTransactionId, m.existingId,
+          ]);
+          reidentified.add(m.newPlaidTransactionId);
+        }
+        if (reidentify.length > 0) {
+          log.info('re-identified transactions after item change', { count: reidentify.length });
+        }
+      }
+    }
+  }
+
+  for (const page of walk) {
+    const { added: newTxns, modified, removed } = page;
+
 
     // A re-auth gives the bank a new Plaid Item, and transaction_id is scoped to the Item — so
     // the same real transactions arrive with brand-new ids and the upsert below, keyed on
@@ -92,7 +237,14 @@ async function syncItem(
     // upsert path, whose write-time check below catches it. What remains is an id stored OUTSIDE
     // that range (Plaid moved its date) deleted in the milliseconds between this read and the
     // UPDATE below — a window this narrow is accepted rather than locked against.
-    const pageCandidates = newTxns.filter((t) => knownIds.has(t.account_id) && !t.pending);
+    //
+    // Empty in a stored-cursor walk (see `reauthWalk`; its one licensed exception ran above), which
+    // skips this whole block: no claimants, no read, no rename. The upserts below still apply the tombstone guard and the
+    // pending skip to every id exactly as before. An id already handled earlier in this walk is not
+    // a claimant either; it is the upsert's, which finds its row by conflict.
+    const pageCandidates = reauthWalk
+      ? newTxns.filter((t) => knownIds.has(t.account_id) && !t.pending && !seenInWalk.has(t.transaction_id))
+      : [];
     const tombstoned = new Set<string>();
     if (pageCandidates.length > 0) {
       const { rows } = await db.query<{ plaid_transaction_id: string }>(
@@ -102,7 +254,6 @@ async function syncItem(
       for (const r of rows) tombstoned.add(r.plaid_transaction_id);
     }
     const eligible = pageCandidates.filter((t) => !tombstoned.has(t.transaction_id));
-    const reidentified = new Set<string>();
     if (eligible.length > 0) {
       const dates = eligible.map((t) => t.date);
       const existingRows = await db.query<{
@@ -119,7 +270,13 @@ async function syncItem(
           plaidTransactionId: t.transaction_id, accountId: t.account_id,
           date: t.date, amount: t.amount, name: t.name ?? null,
         })),
-        existingRows.rows.filter((r) => !tombstoned.has(r.plaid_transaction_id)).map((r) => ({
+        // A row bearing an id this walk already handled is excluded the way a tombstoned one is:
+        // it was renamed, inserted or refreshed on an earlier page, so Plaid still refers to it.
+        // Excluded by its id rather than by a list of primary keys written, because every write in
+        // the walk is keyed on an id that `seenInWalk` already holds.
+        existingRows.rows.filter((r) =>
+          !tombstoned.has(r.plaid_transaction_id) && !seenInWalk.has(r.plaid_transaction_id)
+        ).map((r) => ({
           id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id,
           date: toDateOnly(r.date), amount: Number(r.amount), name: r.name,
         }))
@@ -147,6 +304,10 @@ async function syncItem(
       // post (pending: false) before saving it; the posted version arrives later as its own
       // `added` or `modified` event.
       if (txn.pending) continue;
+      // Recorded before the write, whatever it does: an id the tombstone guard refuses is still one
+      // Plaid sent in this walk, and must neither claim on a later page nor leave a stored row
+      // bearing it in the candidate pool there.
+      seenInWalk.add(txn.transaction_id);
       const plaidCategory = txn.personal_finance_category?.primary ?? null;
       const { mapped, ruleApplied } = applyRule(
         { plaidCategory, merchantName: txn.merchant_name ?? null }, rules);
@@ -173,7 +334,7 @@ async function syncItem(
       // so there is one write path for Plaid's fields, not a second one that could skip the
       // tombstone guard or forget a column. The values come from `plaidEnrichment`, which both
       // loops share, and `$12::date` takes Plaid's zone-less string with no Date in between.
-      const written = await db.query(
+      const written = await db.query<{ inserted: boolean }>(
         `INSERT INTO transactions
            (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied,
             plaid_category_detailed, plaid_category_confidence, authorized_date, payment_channel,
@@ -198,15 +359,24 @@ async function syncItem(
                location_city             = EXCLUDED.location_city,
                location_region           = EXCLUDED.location_region,
                location_country          = EXCLUDED.location_country,
-               plaid_raw                 = EXCLUDED.plaid_raw`,
+               plaid_raw                 = EXCLUDED.plaid_raw
+         RETURNING (xmax = 0) AS inserted`,
         [txn.transaction_id, txn.account_id, txn.date, txn.amount,
          txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied,
          ...enrichmentParams(plaidEnrichment(txn))]
       );
       // A re-identified row is not new to the ledger, only newly-numbered — counting it as
       // added would report a re-auth as hundreds of fresh transactions.
+      //
+      // ONLY A TRUE INSERT COUNTS (P6-40f cycle 2). `rowCount` is 1 for the DO UPDATE branch too, so a
+      // walk from no cursor that re-delivers rows already stored under the same id counted every one
+      // of them — and the held-cursor phase re-walks from no cursor every night until Plaid reports
+      // history complete, which would report the same history as new each time. `xmax = 0` is
+      // Postgres's mark of a row version this statement inserted rather than updated.
       if (written.rowCount === 0) skippedTombstoned++;
-      else if (!reidentified.has(txn.transaction_id)) added++;
+      else if (
+        written.rows[0]?.inserted && !reidentified.has(txn.transaction_id) && !netRemoved.has(txn.transaction_id)
+      ) added++;
     }
 
     for (const txn of modified) {
@@ -219,6 +389,9 @@ async function syncItem(
       // of a plain UPDATE so that case still creates the row the first time it posts, even
       // though we never stored it while pending.
       if (txn.pending) continue;
+      // Seen for the rest of the walk, like the `added` loop: a row this upsert inserts or refreshes
+      // is not a re-identification candidate for a later page's same-key id (P6-40f, R3).
+      seenInWalk.add(txn.transaction_id);
       const plaidCategory = txn.personal_finance_category?.primary ?? null;
       const { mapped, ruleApplied } = applyRule(
         { plaidCategory, merchantName: txn.merchant_name ?? null }, rules);
@@ -269,12 +442,11 @@ async function syncItem(
     // Plaid's view changing, not the owner deciding; if the same id came back later it would be
     // Plaid changing its mind again, which is not something to override. Only the owner's delete
     // writes a tombstone. For an id that is already tombstoned this matches no row and is a no-op.
+    // An id that licensed a rename above also matches no row: that row already carries its new id.
     for (const txn of removed) {
       await db.query('DELETE FROM transactions WHERE plaid_transaction_id = $1', [txn.transaction_id]);
     }
 
-    currentCursor = next_cursor;
-    hasMore = has_more;
   }
 
   // What Plaid says about ITS OWN refresh of the institution, recorded beside our cursor.
@@ -338,6 +510,30 @@ async function syncItem(
     }
   }
 
+  // THE RE-AUTH PHASE ENDS ONLY WHEN PLAID SAYS HISTORY IS IN (P6-40f, R5). After a re-auth Plaid
+  // delivers the recent pull first (INITIAL_UPDATE_COMPLETE) and the years of history later
+  // (HISTORICAL_UPDATE_COMPLETE). Storing the cursor at the first point made the later historical
+  // pull arrive in a stored-cursor walk, where it can no longer be told apart from new purchases —
+  // and every older transaction would be stored a second time. So while a walk from no cursor ends
+  // on NOT_READY or INITIAL_UPDATE_COMPLETE, its rows are written but the cursor stays NULL, and the
+  // next sync re-walks from the start and re-identifies whatever has arrived by then. Re-walking is
+  // cheap and idempotent (the upserts absorb what is already stored); a stored cursor taken too
+  // early cannot be undone. An absent or UNKNOWN status keeps today's behaviour: the cursor is
+  // stored, since holding it NULL forever on a status Plaid never reports would re-walk every night.
+  const reauthIncomplete = reauthWalk && (
+    finalStatus === TransactionsUpdateStatus.NotReady || finalStatus === TransactionsUpdateStatus.InitialUpdateComplete
+  );
+  // The held phase is not silent (P6-40f cycle 2, N2): one line per walk that ends with the cursor
+  // held, carrying the status and nothing else — no ids, token or account names — so a re-auth that
+  // never reaches HISTORICAL_UPDATE_COMPLETE shows up in the logs as a run of these lines.
+  if (reauthIncomplete) {
+    log.info('cursor held until Plaid reports history complete', { status: finalStatus });
+  }
+  if (finalStatus === TransactionsUpdateStatus.TransactionsUpdateStatusUnknown) {
+    log.info('transactions update status unknown; cursor stored as usual');
+  }
+  const cursorToStore = reauthIncomplete ? null : currentCursor;
+
   // One statement, so an item's cursor and its freshness can never disagree about which sync they
   // came from. COALESCE keeps the last known reading when this run could not fetch one, rather
   // than blanking it to NULL — which `feedHealth` reads as "never observed" and declines to
@@ -355,7 +551,7 @@ async function syncItem(
             item_institution_status     = COALESCE($6, item_institution_status),
             item_institution_status_at  = COALESCE($7::timestamptz, item_institution_status_at)
       WHERE id = ANY($2)`,
-    [currentCursor, accountIds, itemOk, itemFailed, institutionId, instStatus, instStatusAt]
+    [cursorToStore, accountIds, itemOk, itemFailed, institutionId, instStatus, instStatusAt]
   );
 
   // A count, never the ids: a steady trickle here is Plaid revising transactions the owner
@@ -465,7 +661,8 @@ async function runSyncInner({
     if (!byToken.has(a.access_token)) byToken.set(a.access_token, { ids: [], cursor: a.cursor });
     const group = byToken.get(a.access_token)!;
     group.ids.push(a.id);
-    if (a.cursor === null) group.cursor = null;
+    // `!a.cursor`, not `=== null`: an empty cursor is no cursor (P6-40f, R5; see `syncItem`).
+    if (!a.cursor) group.cursor = null;
   }
 
   // If a specific account is requested, only sync the item that contains it.
