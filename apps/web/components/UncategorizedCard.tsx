@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Tag } from 'lucide-react';
 import TransactionEditButton from './TransactionEditButton';
+import { TransactionDetailButton } from './TransactionDetailSheet';
 import type { CategoryOption } from '@/lib/transactionEdits';
 import type { UnfiledTransaction } from '@/app/dashboard/page';
 
@@ -64,7 +65,9 @@ export default function UncategorizedCard({ items, total, categories }: {
                 // an edit button do not fit 358px on one line, and the label is what would lose.
                 <div key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 first:pt-0 last:pb-0">
                   <span className="text-[10px] font-mono text-slate-300 w-11 shrink-0">{dayLabel(t.date)}</span>
-                  <span className="text-sm text-slate-700 truncate flex-1 min-w-0">{t.label}</span>
+                  <TransactionDetailButton transactionId={t.id} className="flex-1 truncate">
+                    <span className="detail-title text-sm text-slate-700">{t.label}</span>
+                  </TransactionDetailButton>
                   <span className={`text-xs font-mono shrink-0 w-20 text-right ${inbound ? 'text-emerald-600' : 'text-slate-700'}`}>
                     {inbound ? `+${fmt(t.amount)}` : fmt(t.amount)}
                   </span>

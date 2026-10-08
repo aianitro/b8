@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Inbox } from 'lucide-react';
 import type { RecentArrival } from '@/app/dashboard/page';
 import TransactionEditButton from './TransactionEditButton';
+import { TransactionDetailButton } from './TransactionDetailSheet';
 import type { CategoryOption } from '@/lib/transactionEdits';
 
 const fmt = (n: number) =>
@@ -62,7 +63,11 @@ export default function RecentArrivals({ arrivals, staleFeed, categories }: {
               // what would lose. The chip and the figure take the second line.
               <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 first:pt-0 last:pb-0">
                 <span className="text-[10px] font-mono text-slate-300 w-11 shrink-0">{dayLabel(a.date)}</span>
-                <span className="text-sm text-slate-700 truncate flex-1 min-w-0">{a.label}</span>
+                {/* The label opens the row's detail sheet, as the ledger's does — where, which card, what
+                    the bank said. The edit button beside it is for changing the row, not reading it. */}
+                <TransactionDetailButton transactionId={a.id} className="flex-1 truncate">
+                  <span className="detail-title text-sm text-slate-700">{a.label}</span>
+                </TransactionDetailButton>
                 {a.category ? (
                   <Link
                     href={`/transactions?category=${encodeURIComponent(a.category)}&from=dashboard`}

@@ -3,6 +3,7 @@ import { Flag } from 'lucide-react';
 import { WATCHLIST_STALE_DAYS } from '@b8/contracts/overview';
 import type { WatchedTransaction } from '@/lib/watchlistRead';
 import TransactionEditButton from './TransactionEditButton';
+import { TransactionDetailButton } from './TransactionDetailSheet';
 import type { CategoryOption } from '@/lib/transactionEdits';
 
 const fmt = (n: number) =>
@@ -77,7 +78,9 @@ export default function WatchlistCard({ items, categories }: {
             // why a row is on this list. Below `sm:` the reason takes a line of its own.
             <div key={item.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm">
               <Flag size={13} className={`shrink-0 translate-y-0.5 ${stale ? 'text-amber-500' : 'text-slate-300'}`} />
-              <span className="text-slate-900 truncate max-w-[10rem] sm:max-w-[14rem]">{item.label}</span>
+              <TransactionDetailButton transactionId={item.id} className="truncate max-w-[10rem] sm:max-w-[14rem]">
+                <span className="detail-title text-slate-900">{item.label}</span>
+              </TransactionDetailButton>
               <span className="order-last sm:order-none basis-full sm:basis-auto sm:flex-1 text-xs text-slate-400 truncate pl-6 sm:pl-0">
                 {item.note ?? <span className="text-slate-300">no reason given</span>}
               </span>
