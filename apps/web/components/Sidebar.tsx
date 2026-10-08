@@ -5,10 +5,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ArrowLeftRight, Building2, FlaskConical, Home, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Wallet, X, Zap } from 'lucide-react';
 
-// The order is the owner's: Budget directly under Dashboard, Net Worth directly above Properties.
+// The order is the owner's: Budget directly under Dashboard, Accounts directly under Budget, Net
+// Worth directly above Properties.
 const NAV = [
   { href: '/dashboard',    label: 'Dashboard',    icon: LayoutDashboard },
   { href: '/budget',       label: 'Budget',        icon: PieChart },
+  { href: '/accounts',     label: 'Accounts',      icon: Building2 },
   { href: '/profit-loss',  label: 'Profit & Loss', icon: TrendingUp },
   { href: '/transactions', label: 'Transactions',  icon: ArrowLeftRight },
   { href: '/net-worth',    label: 'Net Worth',     icon: Wallet },
@@ -16,9 +18,9 @@ const NAV = [
 ];
 
 // WHAT SHAPES THE LEDGER, not places you go to read it — so these sit under their own
-// heading instead of among the pages above.
+// heading instead of among the pages above. Accounts left this list for the one above once its
+// page became a place to read balances rather than only to set accounts up.
 const CONFIGURATION = [
-  { href: '/accounts',     label: 'Accounts',      icon: Building2 },
   { href: '/rules',        label: 'Rules',         icon: Zap },
   { href: '/categories',   label: 'Categories',    icon: Tag },
 ];
