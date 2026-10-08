@@ -5,9 +5,11 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { LANDSCAPE_HEX, STATUS_HEX } from '@/lib/chartColors';
+import { lastPerPeriod, periodLabel, type NetWorthPeriod } from '@/lib/domain/netWorthPeriods';
 
 export interface NetWorthTrendPoint {
-  date: string;
+  /** `YYYY-MM-DD`, the snapshot's calendar date. */
+  iso: string;
   operational: number;
   capitalFinancial: number;
   realEstateEquity: number;
@@ -16,6 +18,12 @@ export interface NetWorthTrendPoint {
 
 const fmt = (v: number | undefined) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v ?? 0);
+
+const PERIODS: { key: NetWorthPeriod; label: string }[] = [
+  { key: 'week', label: 'Weekly' },
+  { key: 'month', label: 'Monthly' },
+  { key: 'year', label: 'Yearly' },
+];
 
 type SeriesKey = 'total' | 'operational' | 'capitalFinancial' | 'realEstateEquity';
 
@@ -47,8 +55,16 @@ function tickFormatter(range: number) {
 // A tab per series lets each fill the plot. The axis no longer starts at zero, which magnifies
 // small moves — so the change over the period is printed beside the tabs, in dollars, and the
 // chart's slope is read against a figure rather than on its own.
-export default function NetWorthTrendChart({ data }: { data: NetWorthTrendPoint[] }) {
+//
+// WEEKLY, MONTHLY OR YEARLY — the owner's call, monthly first. A snapshot is taken daily, and a
+// year of daily points is a line too dense to read on a phone; each period is drawn by its CLOSING
+// snapshot — see `lib/domain/netWorthPeriods.ts` for why the close and not an average.
+export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorthTrendPoint[] }) {
   const [selected, setSelected] = useState<SeriesKey>('total');
+  const [period, setPeriod] = useState<NetWorthPeriod>('month');
+  const closing = lastPerPeriod(snapshots, period);
+  const spansYears = closing.length > 0 && closing[0].iso.slice(0, 4) !== closing[closing.length - 1].iso.slice(0, 4);
+  const data = closing.map((p) => ({ ...p, date: periodLabel(p.iso, period, spansYears) }));
   const series = SERIES.find((x) => x.key === selected) ?? SERIES[0];
   const values = data.map((d) => d[selected]);
   const range = values.length ? Math.max(...values) - Math.min(...values) : 0;
@@ -56,26 +72,42 @@ export default function NetWorthTrendChart({ data }: { data: NetWorthTrendPoint[
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 max-md:px-4">
-      <div className="flex items-baseline justify-between mb-4">
+      <div className="flex items-center justify-between gap-3 mb-4">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Net worth over time</p>
-        {data.length > 0 && (
-          <p className="text-[10px] text-slate-400">
-            {data.length} snapshot{data.length === 1 ? '' : 's'}
-          </p>
+        {snapshots.length > 0 && (
+          <div role="tablist" aria-label="Period" className="flex items-center bg-slate-100 rounded-lg p-0.5 shrink-0">
+            {PERIODS.map((x) => (
+              <button
+                key={x.key}
+                type="button"
+                role="tab"
+                aria-selected={x.key === period}
+                onClick={() => setPeriod(x.key)}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  x.key === period ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {x.label}
+              </button>
+            ))}
+          </div>
         )}
       </div>
 
       {/* A line needs two points. One snapshot renders as an invisible dot on a collapsed axis,
-          which reads as a broken chart rather than as "history starts here". */}
+          which reads as a broken chart rather than as "history starts here". With periods there is a
+          second way to get here — a year of history is one yearly point — so that case says so. */}
       {data.length < 2 ? (
         <div className="h-[220px] flex flex-col items-center justify-center text-center">
           <p className="text-2xl font-mono font-semibold text-slate-800">
             {data.length === 1 ? fmt(data[0].total) : '—'}
           </p>
           <p className="text-xs text-slate-400 mt-2 max-w-sm">
-            {data.length === 1
-              ? 'First snapshot recorded. The daily sync adds one per day, so a trend appears from tomorrow.'
-              : 'No snapshots yet — the daily sync records one after each run.'}
+            {snapshots.length === 0
+              ? 'No snapshots yet — the daily sync records one after each run.'
+              : snapshots.length === 1
+                ? 'First snapshot recorded. The daily sync adds one per day, so a trend appears from tomorrow.'
+                : `All ${snapshots.length} snapshots fall in one ${period}. Pick a shorter period to see the trend.`}
           </p>
         </div>
       ) : (
@@ -102,7 +134,8 @@ export default function NetWorthTrendChart({ data }: { data: NetWorthTrendPoint[
               <span className={`font-mono font-semibold ${change < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                 {change < 0 ? '−' : '+'}{fmt(Math.abs(change))}
               </span>{' '}
-              since {data[0].date}
+              {/* The exact date, whatever the period: "since Jan" would leave which day unsaid. */}
+              since {periodLabel(data[0].iso, 'week', false)}
             </p>
           </div>
           <ResponsiveContainer width="100%" height={260}>

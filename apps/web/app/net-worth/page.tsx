@@ -40,7 +40,7 @@ async function getSnapshots(): Promise<{ points: NetWorthTrendPoint[]; history: 
   );
   return {
     points: result.rows.map((r) => ({
-      date: r.snapshot_date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      iso: r.iso_date,
       operational: Number(r.operational),
       capitalFinancial: Number(r.capital_financial),
       realEstateEquity: Number(r.real_estate_equity),
