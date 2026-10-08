@@ -17,7 +17,20 @@ import { Bell, BellOff } from 'lucide-react';
  * CLICK TIME rather than on render: a component that decides on mount is a component that gets the
  * answer wrong once and keeps it.
  */
-export default function PushSetup({ vapidPublicKey }: { vapidPublicKey: string | null }) {
+export type PushState = 'checking' | 'idle' | 'working' | 'on' | 'repair' | 'error';
+
+export interface PushSubscriptionControl {
+  state: PushState;
+  message: string | null;
+  enable: () => Promise<void>;
+}
+
+/**
+ * The device's notification state and the action that turns it on — shared by this footer control
+ * and the app bar's bell in the installed app (`NotificationBell`), so both read the device the
+ * same way and neither can report a state the other contradicts.
+ */
+export function usePushSubscription(vapidPublicKey: string | null): PushSubscriptionControl {
   /**
    * `checking` until the device has been asked, because the honest opening state is "I do not know
    * yet" rather than "off".
@@ -35,7 +48,7 @@ export default function PushSetup({ vapidPublicKey }: { vapidPublicKey: string |
    * the server never heard of it (the registering POST failed) or has revoked it (a send came back
    * `gone`). Reporting that as "on" would be a lie nothing arriving would explain.
    */
-  const [state, setState] = useState<'checking' | 'idle' | 'working' | 'on' | 'repair' | 'error'>('checking');
+  const [state, setState] = useState<PushState>('checking');
   const [message, setMessage] = useState<string | null>(null);
 
   /**
@@ -78,17 +91,8 @@ export default function PushSetup({ vapidPublicKey }: { vapidPublicKey: string |
     return () => { live = false; };
   }, [vapidPublicKey]);
 
-  // The server has no VAPID pair, so there is nothing to subscribe to. Said plainly rather than
-  // offering a button that cannot work.
-  if (!vapidPublicKey) {
-    return (
-      <p className="text-xs text-slate-400">
-        Notifications are not configured on the server.
-      </p>
-    );
-  }
-
   async function enable() {
+    if (!vapidPublicKey) return;
     setState('working');
     setMessage(null);
     try {
@@ -137,6 +141,26 @@ export default function PushSetup({ vapidPublicKey }: { vapidPublicKey: string |
       setState('error');
       setMessage(err instanceof Error ? err.message : 'Something went wrong.');
     }
+  }
+
+  return { state, message, enable };
+}
+
+export default function PushSetup({ vapidPublicKey }: { vapidPublicKey: string | null }) {
+  const push = usePushSubscription(vapidPublicKey);
+  return <PushControls vapidPublicKey={vapidPublicKey} {...push} />;
+}
+
+/** What the footer shows, and what the bell's popover shows: the state in words and the button. */
+export function PushControls({ vapidPublicKey, state, message, enable }: PushSubscriptionControl & { vapidPublicKey: string | null }) {
+  // The server has no VAPID pair, so there is nothing to subscribe to. Said plainly rather than
+  // offering a button that cannot work.
+  if (!vapidPublicKey) {
+    return (
+      <p className="text-xs text-slate-400">
+        Notifications are not configured on the server.
+      </p>
+    );
   }
 
   // Nothing at all while the answer is unknown. A button that appears saying "off" and corrects

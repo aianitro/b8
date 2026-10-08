@@ -14,6 +14,7 @@ import UncategorizedCard from '@/components/UncategorizedCard';
 import WatchlistCard from '@/components/WatchlistCard';
 import ExpandableKpiCards from '@/components/ExpandableKpiCards';
 import PushSetup from '@/components/PushSetup';
+import NotificationBell from '@/components/NotificationBell';
 // The whole verdict comes from one pure function, called once. This page issues SQL and renders;
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
@@ -365,6 +366,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               which is why it is the only card here carrying an action. */}
           <CashStalenessCard findings={walletFindings} />
         </AlertBell>
+        {/* The installed app's notification switch, in the app bar after the warning sign. It
+            portals there, so its place in this markup only decides that it comes second. */}
+        <NotificationBell vapidPublicKey={process.env.VAPID_PUBLIC_KEY ?? null} />
       </div>
 
       {/* THE WATCHLIST AND THE ARRIVALS FEED MOVED INTO THE KPI ROW BELOW, as counts that open.
@@ -506,7 +510,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           The PUBLIC key only. It is handed to every browser that subscribes and is not secret; the
           private half signs the push and never leaves the server. Read here rather than in the
           client component because `process.env` is not there to read. */}
-      <div className="mt-10 pt-6 border-t border-slate-100">
+      {/* Not in the installed app on a phone, where the bell in the app bar replaces it. */}
+      <div className="mt-10 pt-6 border-t border-slate-100 max-md:standalone:hidden">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Notifications</p>
         <PushSetup vapidPublicKey={process.env.VAPID_PUBLIC_KEY ?? null} />
       </div>
