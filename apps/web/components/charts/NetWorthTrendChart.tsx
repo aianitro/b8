@@ -155,7 +155,8 @@ export default function NetWorthTrendChart({ data: snapshots }: { data: NetWorth
                 contentStyle={{ border: '1px solid #e2e8f0', borderRadius: '10px', fontSize: 12, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }}
               />
               <Line dataKey={selected} name={series.label} type="monotone" stroke={series.color}
-                    strokeWidth={2.5} dot={{ r: 2.5, fill: series.color }} isAnimationActive={false} />
+                    strokeWidth={2.5} dot={false} activeDot={{ r: 4, fill: series.color }}
+                    isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </>
