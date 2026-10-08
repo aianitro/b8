@@ -1,6 +1,6 @@
 /**
- * Send one real content-free ping to every installed PWA — the Web Push counterpart of
- * `ping-test.ts`.
+ * Send one real content-free ping to every installed PWA. Its Expo counterpart, `ping-test.ts`,
+ * went with the phone app.
  *
  *   npm run ping:web -w @b8/web        # from the repo root: npm run ping:web
  *
@@ -16,8 +16,7 @@
  * indistinguishable from a real one on the lock screen: expect it, then ignore it.
  *
  * RUN BY THE OWNER, NOT BY AN AGENT. Step 33's decision is that no agent sends a message to any
- * real address at any point in building this, and a push notification to a real phone is that. The
- * same line sits at the top of `ping-test.ts` and means the same thing here.
+ * real address at any point in building this, and a push notification to a real phone is that.
  */
 import { sendWebPushIfDelivered } from '../lib/webPush';
 

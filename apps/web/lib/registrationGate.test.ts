@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { registrationDecision, sessionMayEnrol, type EnrolCandidate } from './registrationGate';
 
 const BROWSER: EnrolCandidate = { kind: 'browser', scope: 'full' };
+// The retired phone app's session kind. Rows of it may survive in `auth_sessions`; none may enrol.
 const PHONE: EnrolCandidate = { kind: 'device', scope: 'full' };
 const SCRIPT: EnrolCandidate = { kind: 'personal', scope: 'full' };
 const READ_ONLY: EnrolCandidate = { kind: 'personal', scope: 'read' };
@@ -32,7 +33,7 @@ describe('registrationDecision', () => {
     expect(registrationDecision({ session: BROWSER, credentialCount: 1 }))
       .toEqual({ allowed: true, enrolledVia: 'authenticated' });
     expect(registrationDecision({ session: PHONE, credentialCount: 1 }))
-      .toEqual({ allowed: true, enrolledVia: 'authenticated' });
+      .toEqual({ allowed: false });
   });
 
   it('tags provenance from the session rather than from the count', () => {
@@ -64,9 +65,9 @@ describe('registrationDecision', () => {
 });
 
 describe('sessionMayEnrol', () => {
-  it('accepts a signed-in browser and a phone app', () => {
+  it('accepts a signed-in browser — and no longer the retired phone app', () => {
     expect(sessionMayEnrol(BROWSER)).toBe(true);
-    expect(sessionMayEnrol(PHONE)).toBe(true);
+    expect(sessionMayEnrol(PHONE)).toBe(false);
   });
 
   it('refuses no session, a personal token, and anything read-only', () => {

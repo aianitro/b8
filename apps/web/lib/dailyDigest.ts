@@ -98,7 +98,7 @@ export async function runDailyDigest(): Promise<AlertKind[]> {
       return [];
     }
 
-    // `['digest']` only when it actually went out. `runDailyJob` hands this to `sendPingIfDelivered`,
+    // `['digest']` only when it actually went out. `runDailyJob` hands this to `sendWebPushIfDelivered`,
     // so the ping inherits this function's suppression rather than deciding newsworthiness twice.
     return (await attempt(message, data)) ? ['digest'] : [];
   } catch (err) {

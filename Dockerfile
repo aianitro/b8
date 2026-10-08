@@ -7,11 +7,10 @@
 FROM node:24-alpine AS deps
 WORKDIR /app
 # P1-10a: every workspace manifest is needed for `npm ci` to resolve the tree, and the lockfile
-# describes all three. Copying only the root package.json would make npm ci fail on the
+# describes both. Copying only the root package.json would make npm ci fail on the
 # `@b8/contracts` link rather than on anything informative.
 COPY package.json package-lock.json ./
 COPY apps/web/package.json ./apps/web/
-COPY apps/mobile/package.json ./apps/mobile/
 COPY packages/contracts/package.json ./packages/contracts/
 RUN npm ci
 

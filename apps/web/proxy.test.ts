@@ -180,32 +180,17 @@ describe('the request boundary', () => {
     expect(letsThrough(await proxy(requestFor('/login')))).toBe(true);
     expect(letsThrough(await proxy(requestFor('/login/')))).toBe(true);
 
-    // ─── TWO ADDED BY P3-23a, AND THIS CONTROL IS WHY THEY ARE DOCUMENTED ─────────────────────
-    //
-    // The count below was 5 and this fixture FAILED when they were added, which is the control
-    // doing its job: `docs/agent-authorization.md` §2 is about an allowlist creating its holes at
-    // exactly the special paths, and one of these mints a 30-day credential. So each is admitted
-    // deliberately, with what guards it INSTEAD of the boundary written down here.
-    //
-    //   `/api/v1/auth/device-claim` — the app has no session yet; getting one is the point. Its
-    //   guards are in the handler: the body must carry a single-use code, dead in sixty seconds and
-    //   stored only as a SHA-256, and `mayIssueDeviceToken` refuses any caller carrying
-    //   `Sec-Fetch-*` headers — so a browser cannot exchange a code even holding one.
-    //
-    //   `/link-device` — a page with no privilege of its own. It runs the passkey ceremony and can
-    //   mint nothing unless one succeeds.
-    for (const path of ['/api/v1/auth/device-claim', '/link-device']) {
-      const response = await proxy(requestFor(path));
-      expect({ path, through: letsThrough(response) }).toEqual({ path, through: true });
+    // THE PHONE APP'S PAIRING PATHS ARE GONE with `apps/mobile`. `/api/v1/auth/device-claim` and
+    // `/link-device` were admitted pre-auth by P3-23a; asserted absent so a revert of one without
+    // the other fails here rather than reopening a path whose handler no longer exists.
+    for (const path of ['/api/v1/auth/device-claim', '/link-device', '/api/v1/auth/device-handoff']) {
+      expect(PRE_AUTH_PATHS.has(path)).toBe(false);
+      expect({ path, through: letsThrough(await proxy(requestFor(path))) }).toEqual({ path, through: false });
     }
 
-    // AND THE HANDOFF MINTER IS NOT AMONG THEM. `/api/v1/auth/device-handoff` requires a signed-in
-    // BROWSER — it is the thing that turns a completed ceremony into a code, so admitting it
-    // pre-auth would let anyone mint one. It stays behind the boundary.
-    expect(letsThrough(await proxy(requestFor('/api/v1/auth/device-handoff')))).toBe(false);
-
-    // FOURTEEN AND NO MORE, and the count is asserted precisely so that growing it is a decision
-    // rather than a drift. It went from seven on 2026-09-22: five for the PWA's install assets — a
+    // TWELVE AND NO MORE, and the count is asserted precisely so that growing it is a decision
+    // rather than a drift. Fourteen until the phone app's two pairing paths left with it. It went
+    // from seven on 2026-09-22: five for the PWA's install assets — a
     // manifest and four icons, carrying an app name, a colour and a drawn square and nothing else —
     // then two more for the service worker and the offline page it falls back to. All of them are
     // the least privileged bytes the server holds, and all of them have to be reachable before auth
@@ -216,7 +201,7 @@ describe('the request boundary', () => {
     // paths rather than a prefix, and a prefix would have let it and every future endpoint under
     // `/api/v1/auth/` through by default. The five new entries are exact paths for the same reason:
     // `/icon-192.png` is admitted and `/icon-192.png/anything` is not.
-    expect(PRE_AUTH_PATHS.size).toBe(14);
+    expect(PRE_AUTH_PATHS.size).toBe(12);
 
     // THE NEW ONES CARRY NOTHING. Asserted rather than described, so a future edit that points one
     // of these at something privileged fails here.

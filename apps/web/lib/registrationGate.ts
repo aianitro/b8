@@ -50,12 +50,11 @@ export type EnrolCandidate = { kind: SessionKind; scope: SessionScope };
  *   NOT A PERSONAL TOKEN, even a full one. A personal token is minted over SSH for a script and is
  *   revocable by `scripts/tokens.ts` — a credential enrolled through one would survive that
  *   revocation, which makes revoking the token stop meaning what the owner thinks it means. A
- *   script has no passkey to enrol and no reason to; the two clients that do are the browser and
- *   the phone.
+ *   script has no passkey to enrol and no reason to; the one client that does is the browser.
  */
 export function sessionMayEnrol(session: EnrolCandidate | null): boolean {
   if (!session) return false;
-  return session.scope === 'full' && (session.kind === 'browser' || session.kind === 'device');
+  return session.scope === 'full' && session.kind === 'browser';
 }
 
 export function registrationDecision(facts: {

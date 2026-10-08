@@ -33,8 +33,7 @@ import type { ApiResponse } from '@b8/contracts/types';
  */
 export async function sessionFrom(request: NextRequest): Promise<ActiveSession | null> {
   // P1-12a: through the same function the boundary uses, so a bearer token that the boundary
-  // admitted is the session a handler sees — a phone app can sign out, and can enrol a second
-  // device, exactly as a browser can.
+  // admitted is the session a handler sees.
   return credentialFrom(request);
 }
 
@@ -65,21 +64,6 @@ export function ceremonyCompleted(sessionToken: string): NextResponse {
   const response = NextResponse.json({ success: true, data: null } satisfies ApiResponse<null>);
   response.cookies.set(sessionCookie(sessionToken));
   return response;
-}
-
-/**
- * A completed ceremony for a NATIVE client: the device token in the body, and no cookie.
- *
- * Only reachable after the handler has checked `mayIssueDeviceToken` — the caller carries no
- * `Sec-Fetch-*` headers, so it is not a browser. See DeviceSessionSchema for why that matters.
- * `Cache-Control: no-store` because the body is a credential and nothing between here and the app
- * should keep a copy.
- */
-export function deviceSessionIssued(session: { token: string; expiresAt: string }): NextResponse {
-  return NextResponse.json(
-    { success: true, data: session } satisfies ApiResponse<{ token: string; expiresAt: string }>,
-    { headers: { 'Cache-Control': 'no-store' } }
-  );
 }
 
 /** A completed logout: the same envelope, with the cookie removed from the browser. */

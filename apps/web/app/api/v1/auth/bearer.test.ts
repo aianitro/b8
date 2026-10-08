@@ -1,5 +1,6 @@
-// P1-12a against a scratch database: device tokens from a real passkey ceremony, and bearer tokens
-// through the real boundary.
+// P1-12a against a scratch database: bearer tokens through the real boundary, and — since the
+// phone app was retired — proof that a passkey ceremony no longer issues one and that a surviving
+// device session is refused.
 //
 // Helpers are written out here rather than imported from login/route.test.ts or proxy.test.ts,
 // because importing a test file from another test file re-registers its suites.
@@ -16,7 +17,6 @@ import {
 } from '@/lib/webauthnTestFixtures';
 import {
   AuthenticationCeremonyOptionsSchema,
-  DeviceSessionResponseSchema,
   RegistrationCeremonyOptionsSchema,
 } from '@b8/contracts/auth';
 import { createPersonalToken, listSessions, revokeByPrefix } from '@/lib/authSession';
@@ -29,7 +29,7 @@ import { POST as loginVerify } from './login/verify/route';
 
 const ORIGIN = 'http://localhost:3000';
 
-/** What a native app sends: the opt-in header, and none of the Sec-Fetch headers a browser adds. */
+/** What the retired phone app sent: its opt-in header, and none of the Sec-Fetch headers a browser adds. */
 const NATIVE = { 'x-b8-client': 'device' };
 /** What a browser page sends. It cannot remove these. */
 const BROWSER = { 'sec-fetch-mode': 'cors', 'sec-fetch-site': 'same-origin' };
@@ -84,59 +84,32 @@ afterAll(async () => {
   await db.end();
 });
 
-describe('device tokens from a passkey ceremony', () => {
-  it('a native sign-in returns a token in the body, sets no cookie, and the token opens the API', async () => {
+describe('a passkey ceremony no longer issues a device token', () => {
+  it('a sign-in carrying the old phone-app opt-in gets an ordinary browser session and nothing else', async () => {
     const authenticator = createTestAuthenticator();
     await enrol(authenticator);
 
     const response = await signIn(authenticator, NATIVE);
     expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('no-store');
-    expect(response.headers.getSetCookie().filter((c) => c.startsWith(SESSION_COOKIE_NAME))).toEqual([]);
-
-    const body = DeviceSessionResponseSchema.parse(await response.json());
-    if (!body.success) throw new Error('expected success');
-    expect((await row(body.data.token)).kind).toBe('device');
-
-    // Expiry is about thirty days out.
-    const days = (new Date(body.data.expiresAt).getTime() - Date.now()) / 86_400_000;
-    expect(days).toBeGreaterThan(29.9);
-    expect(days).toBeLessThan(30.1);
-
-    expect(letsThrough(await proxy(request('/api/v1/overview', { headers: bearer(body.data.token) })))).toBe(true);
+    expect((await response.json()).data).toBeNull();
+    expect(response.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`))).toBe(true);
+    expect((await listSessions()).map((s) => s.kind)).not.toContain('device');
   });
 
-  it('A BROWSER CAN NEVER OBTAIN ONE, even when it asks, and the refusal spends no passkey approval', async () => {
-    // Script injected into a page could otherwise turn one passkey prompt into a readable 30-day
-    // token sent anywhere. Sec-Fetch headers are forbidden headers: page script cannot drop them.
-    const authenticator = createTestAuthenticator();
-    await enrol(authenticator);
-    const before = (await listSessions()).length;
-
-    const response = await signIn(authenticator, { ...NATIVE, ...BROWSER });
-    expect(response.status).toBe(403);
-    expect((await response.json()).error.code).toBe('DEVICE_TOKEN_REFUSED');
-    expect((await listSessions()).length).toBe(before);
+  it('a registration carrying the opt-in opens no device session either', async () => {
+    const response = await enrol(createTestAuthenticator(), NATIVE);
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toBeNull();
+    expect((await listSessions()).map((s) => s.kind)).toEqual(['browser']);
   });
 
-  it('a browser sign-in without the opt-in still gets its cookie, exactly as before', async () => {
+  it('a browser sign-in still gets its cookie, exactly as before', async () => {
     const authenticator = createTestAuthenticator();
     await enrol(authenticator);
     const response = await signIn(authenticator, BROWSER);
     expect(response.status).toBe(200);
     expect((await response.json()).data).toBeNull();
     expect(response.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`))).toBe(true);
-  });
-
-  it('a native FIRST registration returns a device token and leaves no unheld browser session live', async () => {
-    const response = await enrol(createTestAuthenticator(), NATIVE);
-    expect(response.status).toBe(200);
-    const body = DeviceSessionResponseSchema.parse(await response.json());
-    if (!body.success) throw new Error('expected success');
-
-    // The browser session enrolment opens in its own transaction was revoked on the spot.
-    const live = await listSessions();
-    expect(live.map((s) => s.kind)).toEqual(['device']);
   });
 });
 
@@ -159,26 +132,31 @@ describe('bearer tokens at the boundary', () => {
     return token;
   }
 
-  it('reaches the API with a device or personal token', async () => {
-    for (const kind of ['device', 'personal'] as const) {
-      const token = await seed(kind);
-      expect(letsThrough(await proxy(request('/api/v1/transactions', { headers: bearer(token) })))).toBe(true);
-    }
+  it('reaches the API with a personal token', async () => {
+    const token = await seed('personal');
+    expect(letsThrough(await proxy(request('/api/v1/transactions', { headers: bearer(token) })))).toBe(true);
+  });
+
+  it('REFUSES A SURVIVING DEVICE SESSION on either carrier — the phone app that held them is gone', async () => {
+    // Live, unexpired, full scope: exactly what a phone still holding its token would present.
+    const device = await seed('device', { expiresIn: '20 days' });
+    expect((await proxy(request('/api/v1/overview', { headers: bearer(device) }))).status).toBe(401);
+    expect(letsThrough(await proxy(request('/api/v1/overview', { headers: cookie(device) })))).toBe(false);
   });
 
   it('never reaches a PAGE with a bearer token', async () => {
     // A leaked script token must not become a way to browse the app.
-    const token = await seed('device');
+    const token = await seed('personal');
     const response = await proxy(request('/dashboard', { headers: bearer(token) }));
     expect(letsThrough(response)).toBe(false);
   });
 
   it('keeps each credential to its own carrier', async () => {
     const browser = await seed('browser');
-    const device = await seed('device');
-    // A browser session lifted into a header, and a device token pasted into a cookie.
+    const personal = await seed('personal');
+    // A browser session lifted into a header, and a script token pasted into a cookie.
     expect(letsThrough(await proxy(request('/api/v1/overview', { headers: bearer(browser) })))).toBe(false);
-    expect(letsThrough(await proxy(request('/api/v1/overview', { headers: cookie(device) })))).toBe(false);
+    expect(letsThrough(await proxy(request('/api/v1/overview', { headers: cookie(personal) })))).toBe(false);
     // And the ordinary cases still work.
     expect(letsThrough(await proxy(request('/api/v1/overview', { headers: cookie(browser) })))).toBe(true);
   });
@@ -214,33 +192,29 @@ describe('bearer tokens at the boundary', () => {
     expect((await proxy(request('/api/v1/overview', { headers: bearer(revoked) }))).status).toBe(401);
 
     // Created a month ago and lapsed a minute ago — the schema refuses a session born expired.
-    const expired = await seed('device', { createdAgo: '31 days', expiresIn: '-1 minute' });
+    const expired = await seed('personal', { createdAgo: '31 days', expiresIn: '-1 minute' });
     expect((await proxy(request('/api/v1/overview', { headers: bearer(expired) }))).status).toBe(401);
   });
 
-  it('slides a device session forward on use, and only a device session', async () => {
-    const device = await seed('device', { expiresIn: '2 days' });
+  it('records use without extending any session — the sliding expiry went with the phone app', async () => {
     const personal = await seed('personal', { expiresIn: '2 days' });
-    for (const t of [device, personal]) await proxy(request('/api/v1/overview', { headers: bearer(t) }));
+    await proxy(request('/api/v1/overview', { headers: bearer(personal) }));
 
-    const d = await row(device);
     const p = await row(personal);
-    expect((d.expires_at.getTime() - Date.now()) / 86_400_000).toBeGreaterThan(29.9);
     expect((p.expires_at.getTime() - Date.now()) / 86_400_000).toBeLessThan(2.1);
-    expect(d.last_used_at).not.toBeNull();
     expect(p.last_used_at).not.toBeNull();
   });
 
   it('records use at most every five minutes, so polling does not become a write per request', async () => {
-    const token = await seed('device');
+    const token = await seed('personal');
     await proxy(request('/api/v1/overview', { headers: bearer(token) }));
     const first = (await row(token)).last_used_at;
     await proxy(request('/api/v1/overview', { headers: bearer(token) }));
     expect((await row(token)).last_used_at).toEqual(first);
   });
 
-  it('lets a phone app sign itself out', async () => {
-    const token = await seed('device');
+  it('lets a full personal token sign itself out', async () => {
+    const token = await seed('personal');
     const response = await logout(request('/api/v1/auth/logout', { method: 'POST', headers: bearer(token) }));
     expect(response.status).toBe(200);
     expect((await row(token)).revoked_at).not.toBeNull();
@@ -329,13 +303,14 @@ describe('a token cannot enrol a passkey', () => {
     });
   }
 
-  it('still lets a phone app enrol a second device — the thing the fix must not break', async () => {
+  it('still lets a signed-in browser enrol a second device — the thing the fix must not break', async () => {
     const authenticator = createTestAuthenticator();
     await enrol(authenticator);
-    const signedIn = DeviceSessionResponseSchema.parse(await (await signIn(authenticator, NATIVE)).json());
-    if (!signedIn.success) throw new Error('expected success');
+    const signedIn = await signIn(authenticator, BROWSER);
+    const sessionCookie = signedIn.headers.getSetCookie().find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
+    if (!sessionCookie) throw new Error('expected a session cookie');
 
-    const response = await enrol(createTestAuthenticator(), bearer(signedIn.data.token));
+    const response = await enrol(createTestAuthenticator(), { cookie: sessionCookie.split(';')[0] });
     expect(response.status).toBe(200);
     expect((await db.query('SELECT 1 FROM webauthn_credentials')).rowCount).toBe(2);
   });

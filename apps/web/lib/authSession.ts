@@ -22,7 +22,7 @@
 import type { PoolClient } from 'pg';
 import db from './db';
 import { SESSION_TTL_SECONDS, generateSessionToken, hashSessionToken } from './sessionToken';
-import { DEVICE_TTL_DAYS, personalTokenDays, type SessionKind, type SessionScope } from './bearerAuth';
+import { personalTokenDays, type SessionKind, type SessionScope } from './bearerAuth';
 import type { StoredCredential } from './webauthnVerify';
 
 /** A session that exists, is unrevoked, and has not expired — the only kind this module returns. */
@@ -78,29 +78,24 @@ export async function resolveSession(token: string | null | undefined): Promise<
  * produces a clean refusal in the ordinary case; the index is what covers the concurrent one.
  */
 /**
- * Record that a session was used, and slide a device session's expiry forward.
+ * Record that a session was used.
  *
- * THROTTLED TO ONCE EVERY FIVE MINUTES PER SESSION, in the WHERE clause, so a phone app polling the
+ * THROTTLED TO ONCE EVERY FIVE MINUTES PER SESSION, in the WHERE clause, so a client polling the
  * API does not turn every read into a write. The boundary and the handler both resolve the same
  * request; the second call finds the row already touched and does nothing.
  *
- * Sliding is `GREATEST`, never a plain assignment, so a touch can only ever extend a device session
- * — it cannot shorten one whose expiry was set further out by some other path.
- *
- * Browser and personal sessions are recorded but not extended. A browser session is 12 hours from
- * sign-in by design, and a personal token's lifetime is whatever the owner chose when minting it.
+ * Nothing is extended. A browser session is 12 hours from sign-in by design, and a personal token's
+ * lifetime is whatever the owner chose when minting it. The sliding expiry that lived here was the
+ * phone app's device session, retired with `apps/mobile`.
  */
 export async function touchSession(tokenHash: string): Promise<void> {
   await db.query(
     `UPDATE auth_sessions
-        SET last_used_at = NOW(),
-            expires_at = CASE WHEN kind = 'device'
-                              THEN GREATEST(expires_at, NOW() + make_interval(days => $2::int))
-                              ELSE expires_at END
+        SET last_used_at = NOW()
       WHERE token_hash = $1
         AND revoked_at IS NULL
         AND (last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '5 minutes')`,
-    [tokenHash, DEVICE_TTL_DAYS]
+    [tokenHash]
   );
 }
 
@@ -237,23 +232,6 @@ async function insertSession(client: PoolClient, credentialId: string): Promise<
 }
 
 /** Open a session outside an enrolment — the login path. Same statement, its own connection. */
-/**
- * A phone app's session, returned to the app as a token it keeps in its keychain.
- *
- * Only ever called after a verified passkey ceremony AND after `mayIssueDeviceToken` has confirmed
- * the caller is not a browser — see the login and register verify handlers.
- */
-export async function createDeviceSession(credentialId: string): Promise<{ token: string; expiresAt: string }> {
-  const token = generateSessionToken();
-  const result = await db.query<{ expires_at: string }>(
-    `INSERT INTO auth_sessions (token_hash, credential_id, kind, expires_at)
-     VALUES ($1, $2, 'device', NOW() + make_interval(days => $3::int))
-     RETURNING to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS expires_at`,
-    [hashSessionToken(token), credentialId, DEVICE_TTL_DAYS]
-  );
-  return { token, expiresAt: result.rows[0].expires_at };
-}
-
 /**
  * A personal token for a script — minted only by `scripts/tokens.ts`, run by the owner over SSH.
  *

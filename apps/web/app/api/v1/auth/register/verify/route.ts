@@ -10,28 +10,17 @@
 // session rather than from anything else, and SPEC.md's I2 is the fixture that holds it.
 
 import type { NextRequest } from 'next/server';
-import { countCredentials, createDeviceSession, enrolCredential, revokeSession } from '@/lib/authSession';
-import { mayIssueDeviceToken, wantsDeviceToken } from '@/lib/bearerAuth';
-import { hashSessionToken } from '@/lib/sessionToken';
+import { countCredentials, enrolCredential } from '@/lib/authSession';
 import { createLogger } from '@/lib/logger';
 import { registrationDecision } from '@/lib/registrationGate';
 import { consumeChallenge } from '@/lib/webauthnChallenge';
 import { verifyRegistrationCeremony } from '@/lib/webauthnVerify';
 import { RegistrationCeremonyResponseSchema } from '@b8/contracts/auth';
-import { authError, ceremonyCompleted, deviceSessionIssued, sessionFrom, withEnvelope } from '../../shared';
+import { authError, ceremonyCompleted, sessionFrom, withEnvelope } from '../../shared';
 
 const log = createLogger('auth');
 
 export const POST = withEnvelope(async (request: NextRequest) => {
-  // P1-12a: a native client may ask for a device token instead of a cookie. Decided BEFORE the
-  // ceremony, so a refused request never spends the user's passkey approval. A browser can never be
-  // given one — see mayIssueDeviceToken for why that is the property that matters.
-  const deviceMode = wantsDeviceToken(request.headers);
-  if (deviceMode && !mayIssueDeviceToken(request.headers)) {
-    log.warn('device token refused: the caller is a browser');
-    return authError('DEVICE_TOKEN_REFUSED', 'Device tokens are issued only to native apps.', 403);
-  }
-
   const session = await sessionFrom(request);
   const decision = registrationDecision({
     session,
@@ -100,16 +89,6 @@ export const POST = withEnvelope(async (request: NextRequest) => {
   }
 
   log.info('credential enrolled', { enrolledVia: decision.enrolledVia });
-
-  if (deviceMode) {
-    // Enrolment opens a browser session inside its own transaction, so the credential and its
-    // first session commit together. A native client never receives that cookie, so the session
-    // is revoked on the spot rather than left live and unheld, and a device session replaces it.
-    await revokeSession(hashSessionToken(enrolment.sessionToken));
-    const device = await createDeviceSession(verification.credential.credentialId);
-    log.info('device session opened');
-    return deviceSessionIssued(device);
-  }
 
   return ceremonyCompleted(enrolment.sessionToken);
 });

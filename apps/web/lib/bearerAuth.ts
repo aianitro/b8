@@ -6,8 +6,10 @@
  * `auth_sessions` table and resolved by the same lookup:
  *
  *   browser   — the existing cookie session. 12 hours, fixed.
- *   device    — a phone app signed in with a passkey. Sent as `Authorization: Bearer`. 30 days,
- *               SLIDING: every use pushes the expiry out, so an app in daily use never signs out.
+ *   device    — RETIRED with `apps/mobile`. The phone app signed in with a passkey and sent its
+ *               token as `Authorization: Bearer`. Nothing issues one any more; the kind stays in
+ *               this type only because `auth_sessions` rows of it may still exist, and
+ *               `kindAllowedFor` refuses them on every carrier.
  *   personal  — a token the owner mints over SSH for a script (Month 4's eval runner). Named,
  *               listed, revocable, optionally READ-ONLY, and with a fixed lifetime.
  *
@@ -28,9 +30,6 @@
 
 export type SessionKind = 'browser' | 'device' | 'personal';
 export type SessionScope = 'full' | 'read';
-
-/** A phone app's session lifetime, measured from its most recent use. */
-export const DEVICE_TTL_DAYS = 30;
 
 /** Personal-token lifetimes. A token that never expires is a credential nobody remembers minting. */
 export const PERSONAL_DEFAULT_DAYS = 90;
@@ -89,45 +88,17 @@ export function scopePermits(scope: SessionScope, method: string, pathname: stri
 /**
  * Which kinds each carrier may present.
  *
- * A cookie carries ONLY a browser session; a header carries only a device or personal session.
- * The separation is cheap and it closes two confusions: a long-lived device token pasted into a
- * cookie would get cookie protections it was never issued with, and a browser session lifted into
- * a header would outlive the tab it belonged to under a different set of assumptions.
+ * A cookie carries ONLY a browser session; a header carries only a personal token. The separation
+ * is cheap and it closes two confusions: a long-lived token pasted into a cookie would get cookie
+ * protections it was never issued with, and a browser session lifted into a header would outlive
+ * the tab it belonged to under a different set of assumptions.
+ *
+ * NAMED, NOT "ANYTHING BUT BROWSER". This read `kind !== 'browser'` while device sessions existed;
+ * with the phone app retired, that form would have kept every surviving device token working for
+ * up to thirty days after the code that issued them was deleted. An allowlist of one refuses them.
  */
 export function kindAllowedFor(carrier: 'cookie' | 'bearer', kind: SessionKind): boolean {
-  return carrier === 'cookie' ? kind === 'browser' : kind !== 'browser';
-}
-
-/**
- * Whether a sign-in request may be answered with a BEARER TOKEN IN THE BODY.
- *
- * ─── The escalation this prevents ─────────────────────────────────────────────────────────────
- *
- * A browser session lives in an `httpOnly` cookie: script on the page can USE it while the page is
- * open, but cannot READ it. A device token is returned in JSON, which script can read — and send
- * anywhere — and it lasts thirty days. So if a web page could ask for device mode, a script
- * injected into that page could turn one passkey prompt into a month of access from somewhere
- * else. That is strictly more than a cookie session gives it.
- *
- * So device tokens go only to callers that are not browsers, and the test is the `Sec-Fetch-*`
- * headers: every current browser sends them on every request, and page script cannot remove them
- * — they are forbidden headers under the Fetch standard. A native app's HTTP client does not send
- * them. A browser therefore cannot obtain a device token no matter what the page asks for.
- *
- * This is a check on what the CALLER is, not on who they are — the passkey ceremony still has to
- * verify. It cannot stop a non-browser program with the owner's passkey from getting a token, and
- * it is not meant to: that program is exactly who device tokens are for.
- */
-export function mayIssueDeviceToken(headers: { get(name: string): string | null }): boolean {
-  return headers.get('sec-fetch-mode') === null && headers.get('sec-fetch-site') === null;
-}
-
-/** The header a native client sets to ask for a device token instead of a cookie. */
-export const DEVICE_CLIENT_HEADER = 'x-b8-client';
-export const DEVICE_CLIENT_VALUE = 'device';
-
-export function wantsDeviceToken(headers: { get(name: string): string | null }): boolean {
-  return headers.get(DEVICE_CLIENT_HEADER)?.toLowerCase() === DEVICE_CLIENT_VALUE;
+  return carrier === 'cookie' ? kind === 'browser' : kind === 'personal';
 }
 
 /** A personal-token lifetime from a requested number of days: defaulted, bounded, whole. */

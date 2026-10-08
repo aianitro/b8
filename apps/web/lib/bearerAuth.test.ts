@@ -4,15 +4,11 @@ import {
   PERSONAL_MAX_DAYS,
   bearerMayReach,
   kindAllowedFor,
-  mayIssueDeviceToken,
   parseBearer,
   personalTokenDays,
   scopePermits,
-  wantsDeviceToken,
 } from './bearerAuth';
 import { generateSessionToken } from './sessionToken';
-
-const headers = (h: Record<string, string>) => new Headers(h);
 
 describe('parseBearer', () => {
   const token = generateSessionToken();
@@ -78,36 +74,16 @@ describe('scopePermits', () => {
 });
 
 describe('kindAllowedFor', () => {
-  it('keeps cookies for browsers and headers for everything else', () => {
+  it('keeps cookies for browsers and headers for personal tokens', () => {
     expect(kindAllowedFor('cookie', 'browser')).toBe(true);
-    expect(kindAllowedFor('cookie', 'device')).toBe(false);
     expect(kindAllowedFor('cookie', 'personal')).toBe(false);
     expect(kindAllowedFor('bearer', 'browser')).toBe(false);
-    expect(kindAllowedFor('bearer', 'device')).toBe(true);
     expect(kindAllowedFor('bearer', 'personal')).toBe(true);
   });
-});
 
-describe('mayIssueDeviceToken — a browser can never obtain a readable token', () => {
-  it('refuses any request carrying the Sec-Fetch headers every browser sends', () => {
-    // Page script cannot remove these: they are forbidden headers. So no web page — including one
-    // with injected script — can turn a passkey prompt into a 30-day token it can read and send away.
-    expect(mayIssueDeviceToken(headers({ 'sec-fetch-mode': 'cors' }))).toBe(false);
-    expect(mayIssueDeviceToken(headers({ 'sec-fetch-site': 'same-origin' }))).toBe(false);
-    expect(mayIssueDeviceToken(headers({ 'sec-fetch-mode': 'navigate', 'sec-fetch-site': 'none' }))).toBe(false);
-  });
-
-  it('allows a native client, whose HTTP stack sends neither', () => {
-    expect(mayIssueDeviceToken(headers({ 'x-b8-client': 'device', 'content-type': 'application/json' }))).toBe(true);
-  });
-});
-
-describe('wantsDeviceToken', () => {
-  it('is an explicit opt-in, not a default', () => {
-    expect(wantsDeviceToken(headers({ 'x-b8-client': 'device' }))).toBe(true);
-    expect(wantsDeviceToken(headers({ 'x-b8-client': 'DEVICE' }))).toBe(true);
-    expect(wantsDeviceToken(headers({}))).toBe(false);
-    expect(wantsDeviceToken(headers({ 'x-b8-client': 'browser' }))).toBe(false);
+  it('refuses a surviving device session on either carrier — the phone app is retired', () => {
+    expect(kindAllowedFor('cookie', 'device')).toBe(false);
+    expect(kindAllowedFor('bearer', 'device')).toBe(false);
   });
 });
 
