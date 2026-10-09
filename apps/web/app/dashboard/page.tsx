@@ -1,6 +1,5 @@
 export const dynamic = 'force-dynamic';
 
-import type { ReactNode } from 'react';
 import Link from 'next/link';
 import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
@@ -22,7 +21,7 @@ import NotificationBell from '@/components/NotificationBell';
 // it computes no adherence, no pacing and no headline of its own. BUILD.md §7.5's rule — no
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
 // this one replaces was already in tension with it.
-import { asOfFromDate, type OutlookCategory } from '@/lib/domain/monthOutlook';
+import { asOfFromDate } from '@/lib/domain/monthOutlook';
 import { loadMonthCategories, loadOffCycle, loadOverview } from '@/lib/overviewRead';
 import DashboardMonthNav from '@/components/DashboardMonthNav';
 import { dashboardFromWire } from '@/lib/overviewFromWire';
@@ -32,7 +31,7 @@ import { dashboardFromWire } from '@/lib/overviewFromWire';
 // cannot import a page's private function, and copying the queries would have put two definitions
 // of the same figures one directory apart. Nothing a reader sees changed — the queries moved
 // verbatim, and the page is touched here only by a deletion and this import.
-import { MONTHS, drillHref } from '@/lib/drilldown';
+import { MONTHS } from '@/lib/drilldown';
 // The calendar rule, imported rather than restated: `./pacing` exports it precisely so a caller
 // formatting "day 8 of 30" agrees with the module that computed the projection about how long
 // April is. A second leap-year rule here would drift on 2100.
@@ -44,8 +43,6 @@ import { loadCategoryOptions } from '@/lib/categoryOptionsRead';
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 
-const fmtCents = (n: number) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
 
 /** A fraction of budget as a percentage. `2.6625` reads "266%" — of budget, not over it. */
 const pct = (fraction: number) => `${Math.round(fraction * 100)}%`;
@@ -101,92 +98,6 @@ export interface RecentArrival {
  * `from=dashboard` so the breadcrumb over there points back to this page rather than to /budget.
  */
 
-
-/**
- * One category line. `elapsedDays` and `daysInMonth` travel with every projection: a projection
- * with no day attached is the roadmap's own sentence with its qualifier removed, and the pacing
- * module built those two fields to carry precisely so a renderer has no excuse.
- *
- * The whole line is the target, not the name alone: a verdict the owner disagrees with is only
- * answerable by the rows underneath it, and a row's own month is the only month worth opening —
- * `c.month` rather than the as-of month, because off-cycle records from earlier months name their own month.
- */
-/** The fields a row reads — shared by an outlook verdict and a raw pace record, so either renders. */
-type CategoryLineData = Pick<OutlookCategory, 'category' | 'month' | 'status' | 'elapsedDays' | 'daysInMonth' | 'actual'
-  | 'budgeted' | 'projected' | 'projectedVariance' | 'projectedRatio' | 'recurringExpected' | 'spentRatio'>;
-
-function CategoryLine({ c, note }: { c: CategoryLineData; note: string }) {
-  // THE FIGURE THE ROW LEADS WITH IS THE ONE THE ROW OPENS. `projected` is a forecast — Sport's
-  // $265 over eight elapsed days of thirty projects to $993.75 — and the drilldown under this row
-  // can only ever list the $265, because the other $728.75 has not been spent. Leading with the
-  // forecast made the row and its own transactions disagree by a factor of four, with nothing on
-  // screen saying they were different quantities. So `actual` leads, labelled, and the projection
-  // is demoted and named.
-  //
-  // `complete` projects to its own actual by arithmetic — its elapsed fraction is 1 — so it prints
-  // no forecast line: repeating the same dollars under the word "projected" would invent a
-  // prediction about a month that has already ended. `off-cycle`, `no-budget`, `too-early` and
-  // `future` carry no projection at all, and used to render an empty right column.
-  const forecast = c.status === 'projected' && c.projected !== null && c.projectedVariance !== null;
-  return (
-    <Link
-      href={drillHref([c.category], c.month)}
-      className="group -mx-2 px-2 rounded-lg flex items-baseline justify-between gap-3 py-2 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors"
-    >
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-800 truncate group-hover:underline">{c.category}</p>
-        <p className="text-xs text-slate-400">
-          {note} · day {c.elapsedDays} of {c.daysInMonth}
-        </p>
-      </div>
-      <div className="text-right shrink-0">
-        <p className="text-sm font-mono text-slate-800">
-          {fmtCents(c.actual)}
-          <span className="mx-1 font-sans text-[10px] font-medium uppercase tracking-wider text-slate-400">
-            spent of
-          </span>
-          <span className="text-slate-400">{fmtCents(c.budgeted)}</span>
-        </p>
-        {forecast ? (
-          <>
-            <p className={`text-xs font-mono ${c.projectedVariance! > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-              {fmtCents(c.projected!)}
-              <span className="ml-1 font-sans text-[10px] font-medium uppercase tracking-wider">projected</span>
-              {c.projectedRatio !== null && ` · ${pct(c.projectedRatio)}`}
-            </p>
-            {/* Said out loud wherever it moved the figure, because the projection is now two
-                claims of different kinds and the owner is entitled to know which is which. A gym
-                membership is a contract and the rest of a category is a decision; a reader who
-                cannot tell them apart cannot act on either. */}
-            {c.recurringExpected !== null && c.recurringExpected > 0 && (
-              <p className="text-[10px] text-slate-400">
-                incl. {fmtCents(c.recurringExpected)} recurring, not pro-rated
-              </p>
-            )}
-          </>
-        ) : c.spentRatio !== null ? (
-          // The share so far, and the day it is "so far" as of sits on the left of this same row —
-          // the qualifier `./pacing` built `elapsedDays`/`daysInMonth` to carry. A percentage means
-          // a different thing in each status, and this one is never printed without its day.
-          <p className={`text-xs font-mono ${c.actual > c.budgeted ? 'text-red-500' : 'text-emerald-500'}`}>
-            {pct(c.spentRatio)} of budget
-          </p>
-        ) : null}
-      </div>
-    </Link>
-  );
-}
-
-/** Static strings, because Tailwind reads this file rather than the value of an expression. */
-
-function Panel({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-      <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">{title}</p>
-      {children}
-    </div>
-  );
-}
 
 /**
  * A closed month of this year, looked back on: its tiles and what they add up to.
@@ -300,7 +211,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // Started before the overview and collected here, so the two reads overlap rather than queue.
   const categoryOptions = await categoryOptionsPromise;
   const valuationFindings = await valuationFindingsPromise;
-  const { thisMonth: offCycleThisMonth, earlier: offCycleEarlier } = await offCyclePromise;
+  const { thisMonth: offCycleThisMonth } = await offCyclePromise;
   // Suggested categories for the unfiled rows the Uncategorized panel lists.
   const suggestions = Object.fromEntries(await loadSuggestions(unfiled.map((t) => t.id)));
 
@@ -369,17 +280,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       {/* One panel where there were three, so the grid that sized itself to the survivors is gone
           with them — a single-column grid is a div, and the arithmetic behind it was machinery for
           a layout that no longer varies. */}
-      {/* OFF-CYCLE EARLIER THIS YEAR. This month's off-cycle categories are drawn in the month
-          picture below; a closed month's are not on screen anywhere else, so they keep a panel. */}
-      {offCycleEarlier.length > 0 && (
-        <div className="mb-6">
-          <Panel title="Off-cycle earlier this year">
-            {offCycleEarlier.map((c) => (
-              <CategoryLine key={`${c.categoryId}-${c.month}`} c={c} note={`${MONTHS[c.month]} drew outside its schedule`} />
-            ))}
-          </Panel>
-        </div>
-      )}
+      {/* NO EARLIER-MONTHS OFF-CYCLE PANEL, at the owner's request: the dashboard is this month.
+          This month's off-cycle categories are drawn in the month picture below. */}
 
       {/* The annual ceiling, kept as context rather than as a verdict. The year-pace bar that used
           to sit here counted the current month as fully elapsed — 33% of the year on 1 April
