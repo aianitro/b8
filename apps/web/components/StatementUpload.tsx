@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FileUp, Check, X } from 'lucide-react';
-import type { StatementReading } from '@/lib/domain/brokerageStatement';
+import type { StatementPreview } from '@/lib/domain/brokerageStatement';
 import type { ApiResponse } from '@b8/contracts/types';
 
 const fmt = (n: number) =>
@@ -23,12 +23,20 @@ function longDate(iso: string): string {
  *
  * Beside the pencil rather than instead of it — typing a figure stays the fallback for a statement
  * the reader does not recognise, and for the days between statements.
+ *
+ * THE PERIOD'S SHARES RECEIVED come with it: each "Transfer into Account" row, ticked unless the
+ * ledger already has it, recorded as an income transaction the way earlier vests were entered by
+ * hand. The statement does not say whether shares came from a vest or an ESPP purchase, so each
+ * row carries a switch; RSU is the default because vests are the common case.
  */
+type Kind = 'rsu' | 'espp';
 export default function StatementUpload({ accountId }: { accountId: string }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const [reading, setReading] = useState<StatementReading | null>(null);
+  const [reading, setReading] = useState<StatementPreview | null>(null);
+  // Per shares-received row, by index: whether to record it, and as what.
+  const [picks, setPicks] = useState<{ on: boolean; kind: Kind }[]>([]);
   const [message, setMessage] = useState<{ tone: 'error' | 'done'; text: string } | null>(null);
 
   async function onFile(file: File | undefined) {
@@ -40,8 +48,11 @@ export default function StatementUpload({ accountId }: { accountId: string }) {
     form.append('file', file);
     try {
       const res = await fetch(`/api/v1/accounts/${accountId}/statement`, { method: 'POST', body: form });
-      const body = (await res.json()) as ApiResponse<StatementReading>;
-      if (body.success) setReading(body.data);
+      const body = (await res.json()) as ApiResponse<StatementPreview>;
+      if (body.success) {
+        setReading(body.data);
+        setPicks(body.data.transfersIn.map((t) => ({ on: !t.recorded, kind: 'rsu' as Kind })));
+      }
       else setMessage({ tone: 'error', text: body.error.message });
     } catch {
       setMessage({ tone: 'error', text: 'Could not upload the statement.' });
@@ -66,9 +77,34 @@ export default function StatementUpload({ accountId }: { accountId: string }) {
         setMessage({ tone: 'error', text: body.error.message });
         return;
       }
+
+      // Then the ticked shares-received rows, if any. The value is already saved at this point, so
+      // a failure here says so rather than implying nothing was recorded.
+      const rows = reading.transfersIn
+        .map((t, i) => ({ t, p: picks[i] }))
+        .filter(({ t, p }) => p?.on && !t.recorded)
+        .map(({ t, p }) => ({ date: t.date, security: t.security, quantity: t.quantity, amount: t.amount, kind: p.kind }));
+      let added = 0;
+      if (rows.length > 0) {
+        const tr = await fetch(`/api/v1/accounts/${accountId}/statement/transfers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows }),
+        });
+        const tb = (await tr.json()) as ApiResponse<{ recorded: number; skipped: number }>;
+        if (!tb.success) {
+          setMessage({ tone: 'error', text: `Value saved, but the shares received were not: ${tb.error.message}` });
+          setReading(null);
+          router.refresh();
+          return;
+        }
+        added = tb.data.recorded;
+      }
+
+      const valueText = body.data.recorded ? `Recorded as of ${longDate(reading.asOf)}` : 'Value already recorded';
       setMessage({
         tone: 'done',
-        text: body.data.recorded ? `Recorded as of ${longDate(reading.asOf)}` : 'Already recorded',
+        text: added > 0 ? `${valueText} · ${added} ${added === 1 ? 'vest' : 'vests'} added` : valueText,
       });
       setReading(null);
       router.refresh();
@@ -115,6 +151,37 @@ export default function StatementUpload({ accountId }: { accountId: string }) {
               <X size={13} />
             </button>
           </div>
+          {reading.transfersIn.length > 0 && (
+            <div className="mt-1.5 pt-1.5 border-t border-slate-100 space-y-1">
+              <p className="text-[10px] text-slate-400">Shares received — add as income</p>
+              {reading.transfersIn.map((t, i) => (
+                <label key={i} className={`flex items-center justify-end gap-1.5 text-[11px] ${t.recorded ? 'text-slate-300' : 'text-slate-600'}`}>
+                  <span>{longDate(t.date).replace(/, \d{4}$/, '')} · {t.quantity} sh</span>
+                  <span className="font-mono">{fmt(t.amount)}</span>
+                  {t.recorded ? (
+                    <span className="text-[10px]">recorded</span>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); setPicks((ps) => ps.map((p, j) => (j === i ? { ...p, kind: p.kind === 'rsu' ? 'espp' : 'rsu' } : p))); }}
+                        title="Switch between RSU vest and ESPP purchase"
+                        className="px-1 rounded bg-slate-100 text-[10px] font-medium text-slate-600 hover:bg-slate-200"
+                      >
+                        {picks[i]?.kind === 'espp' ? 'ESPP' : 'RSU'}
+                      </button>
+                      <input
+                        type="checkbox"
+                        checked={picks[i]?.on ?? false}
+                        onChange={(e) => setPicks((ps) => ps.map((p, j) => (j === i ? { ...p, on: e.target.checked } : p)))}
+                        className="accent-emerald-600"
+                      />
+                    </>
+                  )}
+                </label>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

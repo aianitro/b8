@@ -13,7 +13,7 @@ import { NextRequest } from 'next/server';
 import { extractText, getDocumentProxy } from 'unpdf';
 import db from '@/lib/db';
 import { createLogger } from '@/lib/logger';
-import { parseBrokerageStatement, type StatementReading } from '@/lib/domain/brokerageStatement';
+import { parseBrokerageStatement, type StatementPreview } from '@/lib/domain/brokerageStatement';
 import type { ApiResponse } from '@b8/contracts/types';
 
 const log = createLogger('statement');
@@ -67,5 +67,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return refuse('UNRECOGNISED', `${parsed.reason} Type the value instead.`, 422);
   }
 
-  return Response.json({ success: true, data: parsed.reading } satisfies ApiResponse<StatementReading>);
+  // Which shares-received rows are already transactions on this account — the same date and the
+  // same money in — so re-uploading a statement offers only what is new. The import endpoint
+  // applies the same test, so a row pre-ticked here cannot become a duplicate there.
+  const existing = await db.query<{ date: string; amount: string }>(
+    `SELECT date::text AS date, amount::text FROM transactions WHERE account_id = $1 AND amount < 0`, [id]
+  );
+  // COUNTED, not a set: two grants can vest on one day for the same amount, and each is its own
+  // row. As many statement rows are marked recorded as the ledger already holds of that key.
+  const held = new Map<string, number>();
+  for (const r of existing.rows) {
+    const key = `${r.date}|${Math.abs(Number(r.amount)).toFixed(2)}`;
+    held.set(key, (held.get(key) ?? 0) + 1);
+  }
+  const preview: StatementPreview = {
+    ...parsed.reading,
+    transfersIn: parsed.reading.transfersIn.map((t) => {
+      const key = `${t.date}|${t.amount.toFixed(2)}`;
+      const left = held.get(key) ?? 0;
+      if (left > 0) held.set(key, left - 1);
+      return { ...t, recorded: left > 0 };
+    }),
+  };
+
+  return Response.json({ success: true, data: preview } satisfies ApiResponse<StatementPreview>);
 }
