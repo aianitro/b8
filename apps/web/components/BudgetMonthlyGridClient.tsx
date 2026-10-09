@@ -82,7 +82,12 @@ function Row({
             draggable={false}
             className="block hover:opacity-70 transition-opacity"
           >
-            <div className="text-xs font-medium text-slate-800 whitespace-nowrap standalone:whitespace-normal standalone:line-clamp-2 hover:text-blue-600 hover:underline">{row.category}</div>
+            <div className="text-xs font-medium text-slate-800 whitespace-nowrap standalone:whitespace-normal standalone:line-clamp-2 hover:text-blue-600 hover:underline">
+              {/* A break opportunity after each slash: "Utilities/Maintenance" has no space, so in
+                  the installed app's narrow column it clipped where "Property Taxes" wrapped. The
+                  zero-width space is invisible, and `whitespace-nowrap` keeps one line elsewhere. */}
+              {row.category.replace(/\//g, '/\u200B')}
+            </div>
             <div className="text-[9px] text-slate-400 font-mono mt-0.5 standalone:hidden">
               {budgetLabel(row)}
             </div>
