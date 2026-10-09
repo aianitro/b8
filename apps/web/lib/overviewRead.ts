@@ -943,6 +943,27 @@ export function monthCategoriesFrom(allPaces: CategoryPace[], asOf: AsOf) {
 }
 
 /**
+ * Off-cycle draws this year — spending in a budgeted category in a month its schedule gives
+ * nothing — for EVERY such category, whatever its control mode.
+ *
+ * Not the outlook's `sayingNo`/`offCycleElsewhere`, which come from the verdict and the verdict
+ * scores only DISCRETIONARY categories: a variable-necessary Health category drawing in a $0 month
+ * is off-cycle in its pace record and was on no list the dashboard drew. The pace record is where
+ * the status is decided for every tracked category, so the panel reads it there.
+ */
+export function offCycleFrom(allPaces: CategoryPace[], asOf: AsOf) {
+  const off = allPaces.filter((p) => p.status === 'off-cycle' && p.month <= asOf.month);
+  return {
+    thisMonth: off.filter((p) => p.month === asOf.month),
+    earlier: off.filter((p) => p.month < asOf.month).sort((a, b) => b.month - a.month || a.categoryId - b.categoryId),
+  };
+}
+
+export async function loadOffCycle(asOf: AsOf) {
+  return offCycleFrom((await loadMonthOutlook(asOf)).allPaces, asOf);
+}
+
+/**
  * The tiles for a month other than the current one — the dashboard's look back. Only the month
  * outlook is read: every other section of the overview describes the present (arrivals, alerts,
  * the watchlist, the year-end forecast) and has no honest value as of an earlier date.

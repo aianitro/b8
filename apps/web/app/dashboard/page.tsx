@@ -22,7 +22,7 @@ import NotificationBell from '@/components/NotificationBell';
 // surface computes a shared concept independently of `lib/domain/` — is the reason, and the page
 // this one replaces was already in tension with it.
 import { asOfFromDate, type OutlookCategory } from '@/lib/domain/monthOutlook';
-import { loadMonthCategories, loadOverview } from '@/lib/overviewRead';
+import { loadMonthCategories, loadOffCycle, loadOverview } from '@/lib/overviewRead';
 import DashboardMonthNav from '@/components/DashboardMonthNav';
 import { dashboardFromWire } from '@/lib/overviewFromWire';
 // The SQL behind that verdict now lives in `lib/`, shared with the daily job's breach alert, so the
@@ -108,9 +108,13 @@ export interface RecentArrival {
  *
  * The whole line is the target, not the name alone: a verdict the owner disagrees with is only
  * answerable by the rows underneath it, and a row's own month is the only month worth opening —
- * `c.month` rather than the as-of month, because `offCycleElsewhere` records name an earlier one.
+ * `c.month` rather than the as-of month, because off-cycle records from earlier months name their own month.
  */
-function CategoryLine({ c, note }: { c: OutlookCategory; note: string }) {
+/** The fields a row reads — shared by an outlook verdict and a raw pace record, so either renders. */
+type CategoryLineData = Pick<OutlookCategory, 'category' | 'month' | 'status' | 'elapsedDays' | 'daysInMonth' | 'actual'
+  | 'budgeted' | 'projected' | 'projectedVariance' | 'projectedRatio' | 'recurringExpected' | 'spentRatio'>;
+
+function CategoryLine({ c, note }: { c: CategoryLineData; note: string }) {
   // THE FIGURE THE ROW LEADS WITH IS THE ONE THE ROW OPENS. `projected` is a forecast — Sport's
   // $265 over eight elapsed days of thirty projects to $993.75 — and the drilldown under this row
   // can only ever list the $265, because the other $728.75 has not been spent. Leading with the
@@ -260,6 +264,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const categoryOptionsPromise = loadCategoryOptions();
   // Hand-valued accounts gone stale. Its own read rather than a field on /overview: it is a
   // reminder for this screen and the email, not a figure the payload's other consumers need.
+  // Off-cycle draws for every budgeted category, not only the discretionary ones the outlook
+  // scores — see `offCycleFrom`. Read beside the overview, like the two reads above.
+  const offCyclePromise = loadOffCycle(asOf);
   const valuationFindingsPromise = loadValuationFindings(
     `${asOf.year}-${String(asOf.month + 1).padStart(2, '0')}-${String(asOf.day).padStart(2, '0')}`);
 
@@ -277,12 +284,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     // and nothing else here. It is still on the payload, and `/profit-loss` reads it.
     stats,
     recentArrivals, recentArrivalsTotal, uncategorized: unfiled, watchlist, yearEnd,
-    offCycleElsewhere, offCycleThisMonth, monthCategories,
+    monthCategories,
     feedFindings, driftFindings, jobHealth, walletFindings,
   } = dashboardFromWire(await loadOverview(now));
   // Started before the overview and collected here, so the two reads overlap rather than queue.
   const categoryOptions = await categoryOptionsPromise;
   const valuationFindings = await valuationFindingsPromise;
+  const { thisMonth: offCycleThisMonth, earlier: offCycleEarlier } = await offCyclePromise;
 
   // EVERY operational spending category with an allocation this month, not the scored subset —
   // the bubbles are a map, not a judgement, and a map that omits groceries, fuel and utilities is
@@ -351,13 +359,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           month's lead, because they are the ones still happening; the earlier months follow. A
           category with no budget this month has no tile in the picture below, so without this
           panel a draw in the current month was nowhere on the page until the month after. */}
-      {(offCycleThisMonth.length > 0 || offCycleElsewhere.length > 0) && (
+      {(offCycleThisMonth.length > 0 || offCycleEarlier.length > 0) && (
         <div className="mb-6">
           <Panel title="Off-cycle spending">
             {offCycleThisMonth.map((c) => (
               <CategoryLine key={`now-${c.categoryId}`} c={c} note="No budget this month" />
             ))}
-            {offCycleElsewhere.map((c) => (
+            {offCycleEarlier.map((c) => (
               <CategoryLine key={`${c.categoryId}-${c.month}`} c={c} note={`${MONTHS[c.month]} drew outside its schedule`} />
             ))}
           </Panel>
