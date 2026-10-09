@@ -82,17 +82,23 @@ export async function POST(req: NextRequest) {
       // the EXISTING row's id (so transaction history stays attached), repoint it at the new
       // access_token, and drop the freshly-inserted duplicate. Only a match-free insert is
       // reported as newly linked below.
+      // An account this link already stored is never a duplicate of another one in it. Without
+      // that, a brokerage holding two accounts under one number — E*TRADE's "Individual Brokerage
+      // -2925" and "Stock Plan (ZS) -2925" — matched on mask and type, the second was taken for
+      // the first and deleted, and its whole value never reached net worth. The mask match also
+      // requires the same SUBTYPE now, so a re-link pairs each account with its own old row.
       const dup = await db.query<{ id: string }>(
         `SELECT id FROM accounts
          WHERE id != $4
+           AND access_token IS DISTINCT FROM $7
            AND (
              ($1::text IS NOT NULL AND persistent_account_id = $1)
-             OR ($2::text IS NOT NULL AND mask = $2 AND type = $3)
+             OR ($2::text IS NOT NULL AND mask = $2 AND type = $3 AND subtype IS NOT DISTINCT FROM $6)
              OR (name = $5 AND type = $3)
            )
          ORDER BY (persistent_account_id = $1) DESC, (mask = $2) DESC
          LIMIT 1`,
-        [a.persistent_account_id ?? null, a.mask ?? null, a.type, a.account_id, a.name]
+        [a.persistent_account_id ?? null, a.mask ?? null, a.type, a.account_id, a.name, a.subtype ?? null, access_token]
       );
 
       if (dup.rows.length > 0) {
