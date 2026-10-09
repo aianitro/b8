@@ -234,9 +234,16 @@ function Group({
                   <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium shrink-0">
                     {accountTypeLabel(a.type, a.subtype)}
                   </span>
+                  {/* "M" in the installed app, where the row is a phone's width and the word cost the
+                      name its room; the title says what it stands for. The browser keeps the word. */}
                   {a.is_manual && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium shrink-0">
-                      manual
+                    <span
+                      title="manual"
+                      aria-label="manual"
+                      className="text-xs px-2 standalone:px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium shrink-0"
+                    >
+                      <span className="standalone:hidden">manual</span>
+                      <span className="hidden standalone:inline" aria-hidden="true">M</span>
                     </span>
                   )}
                 </div>
