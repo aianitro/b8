@@ -31,7 +31,9 @@ export default function AccountsSummaryCards({ summary }: { summary: LandscapeSu
       color: current <= -0.5 ? 'text-red-500' : 'text-slate-900',
     },
     {
-      label: 'Beginning of Year',
+      // "Year Begin" in the installed app, where the longer label wrapped to two lines in a third
+      // of a phone's width; the browser keeps the full phrase.
+      label: (<><span className="standalone:hidden">Beginning of Year</span><span className="hidden standalone:inline">Year Begin</span></>),
       value: fmt(yearBegin),
       sub: noOpening > 0 ? `Jan 1 opening · ${noOpening} first valued later` : 'Jan 1 opening',
       color: 'text-slate-900',
@@ -46,8 +48,8 @@ export default function AccountsSummaryCards({ summary }: { summary: LandscapeSu
 
   return (
     <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-6">
-      {cards.map(({ label, value, sub, color }) => (
-        <div key={label} className="min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-6">
+      {cards.map(({ label, value, sub, color }, i) => (
+        <div key={i} className="min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-6">
           <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-normal sm:tracking-wider text-slate-400 mb-1 sm:mb-2">{label}</p>
           <p className={`${figureSize(value)} sm:text-3xl font-bold font-mono break-words ${color}`}>{value}</p>
           <p className="text-[10px] sm:text-xs text-slate-400 mt-1 sm:mt-1.5">{sub}</p>
