@@ -63,6 +63,23 @@ const INK = '#0e7490';   // cyan-700 — brand only, never a status
 const PAPER = '#f0dfae';   // champagne — the mark, at display size only
 
 /**
+ * THE MARK IS ABRIL FATFACE, the owner's pick from seven display faces tried on this tile (Fraunces,
+ * Playfair Display, Bodoni Moda, DM Serif Display, Cormorant Garamond and Italiana were the
+ * others). Upright and poster-heavy: it keeps Helvetica's legibility at Home Screen size and adds
+ * the contrast and ball terminals that make it a mark rather than a label.
+ *
+ * OUTLINES, NOT A FONT. "b8" is stored as the glyphs' paths, read once from the font with
+ * opentype.js, so rendering needs no installed font and cannot fall back to Helvetica on a machine
+ * that lacks it — the failure mode `font-family` in an SVG rendered by sharp always has. Font units
+ * (1000 per em), y down, baseline at 0; `BBOX` is the path's extent, for centring.
+ *
+ * Abril Fatface © 2011 TypeTogether (www.type-together.com), licensed under the SIL Open Font
+ * License 1.1, which permits embedding its outlines in this artwork.
+ */
+const MARK_PATH = 'M375-269Q375-372 365-407Q355-443 326-443Q297-443 274-407Q251-371 251-308L251-122Q251-79 269-49Q286-19 319-19Q351-19 363-63Q375-107 375-217L375-269M10-750L251-750L251-400Q289-486 381-486Q568-486 568-237Q568-110 517-50Q465 10 362 10Q310 10 283-6Q255-22 245-59L238 0L10 0L10-18L65-18L65-732L10-732L10-750M837-365L837-368Q740-373 686-416Q632-460 632-529Q632-613 699-662Q766-711 895-711Q1024-711 1090-665Q1156-619 1156-541Q1156-464 1105-419Q1054-375 958-368L958-365Q1174-347 1174-182Q1174-86 1107-38Q1039 10 896 10Q613 10 613-181Q613-350 837-365M983-182Q983-275 965-315Q947-355 896-355Q844-355 826-314Q808-274 808-181Q808-89 826-50Q843-11 896-11Q949-11 966-50Q983-90 983-182M896-690Q852-690 840-654Q827-619 827-558Q827-498 828-477Q829-457 833-435Q836-413 844-402Q861-378 899-378Q933-378 950-402Q963-421 964-458Q965-496 965-557Q965-619 953-654Q940-690 896-690';
+const BBOX = { x1: 10, y1: -750, x2: 1174, y2: 10 };
+
+/**
  * @param size   pixel square
  * @param inset  fraction of the size left blank around the tile, for maskable icons
  * @param radius corner radius as a fraction of the TILE (not the canvas)
@@ -71,16 +88,16 @@ function svg(size, { inset = 0, radius = 0.22 } = {}) {
   const pad = Math.round(size * inset);
   const tile = size - pad * 2;
   const r = Math.round(tile * radius);
-  // Optical centring: the cap height of "b8" sits above the geometric middle, so the text baseline
-  // is placed by `dominant-baseline` and then nudged. Without the nudge the mark reads as sitting
-  // slightly high, which is visible at 512 and unmistakable on a Home Screen.
-  const cy = pad + tile / 2 + tile * 0.015;
+  // The outline scaled to a fixed share of the tile's width and centred on its own extent — the
+  // drawn ink, not a text baseline, so no optical nudge is needed. 0.62 of the tile matches the
+  // visual weight the Helvetica mark had at 0.46 em.
+  const scale = (tile * 0.62) / (BBOX.x2 - BBOX.x1);
+  const tx = size / 2 - ((BBOX.x1 + BBOX.x2) / 2) * scale;
+  const ty = size / 2 - ((BBOX.y1 + BBOX.y2) / 2) * scale;
   return Buffer.from(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
       `<rect x="${pad}" y="${pad}" width="${tile}" height="${tile}" rx="${r}" ry="${r}" fill="${INK}"/>` +
-      `<text x="${size / 2}" y="${cy}" text-anchor="middle" dominant-baseline="central" ` +
-        `font-family="Helvetica,Arial,sans-serif" font-weight="700" font-size="${tile * 0.46}" ` +
-        `fill="${PAPER}" letter-spacing="${tile * 0.01}">b8</text>` +
+      `<path d="${MARK_PATH}" fill="${PAPER}" transform="translate(${tx} ${ty}) scale(${scale})"/>` +
     `</svg>`,
     'utf8'
   );
