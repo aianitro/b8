@@ -20,7 +20,7 @@ const SERIES_DAYS = 365;
 type AccountRow = {
   name: string; landscape: string; bank: string | null; mask: string | null;
   type: string; subtype: string | null; countable: boolean;
-  valuation_mode: 'ledger' | 'valuation'; is_liability: boolean; linked: boolean;
+  valuation_mode: 'ledger' | 'valuation'; is_liability: boolean; linked: boolean; track_transactions: boolean;
 };
 
 type TxRow = {
@@ -43,7 +43,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
 
   const [accountRes, balanceRes, txRes, valuationRes, categoriesRes] = await Promise.all([
     db.query<AccountRow>(
-      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability, countable, access_token IS NOT NULL AS linked FROM accounts WHERE id = $1',
+      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability, countable, track_transactions, access_token IS NOT NULL AS linked FROM accounts WHERE id = $1',
       [id]
     ),
     db.query<{ beginning_balance: string }>(
@@ -135,6 +135,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
         landscape={landscape}
         valuationMode={account.valuation_mode}
         isLiability={account.is_liability}
+        tracked={account.track_transactions}
       />
 
       <AccountBalanceChart

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Pencil } from 'lucide-react';
+import { ArrowLeft, EyeOff, Pencil } from 'lucide-react';
 import { ACCOUNT_TYPES, CASH_TYPE, accountTypeLabel } from '@/lib/accountTypes';
 
 type Landscape = 'operational' | 'capital';
@@ -32,6 +32,8 @@ interface Props {
   landscape: Landscape;
   valuationMode: 'ledger' | 'valuation';
   isLiability: boolean;
+  /** Whether this account's transactions count in budgets and dashboard totals. */
+  tracked: boolean;
 }
 
 const LANDSCAPE_BADGE: Record<Landscape, string> = {
@@ -53,20 +55,20 @@ const typeKey = (type: string, subtype: string | null) => subtype ?? type;
  * row there, revealed by a pencil that appears on hover — which a phone never does, so on the PWA
  * they were invisible controls. They are settings of one account, and this is that account's page.
  */
-export default function AccountHeader({ id, name, type, subtype, bank, mask, landscape, valuationMode, isLiability }: Props) {
+export default function AccountHeader({ id, name, type, subtype, bank, mask, landscape, valuationMode, isLiability, tracked }: Props) {
   const source = toSource(valuationMode, isLiability);
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ name, bank: bank ?? '', type: typeKey(type, subtype), landscape, source });
+  const [form, setForm] = useState({ name, bank: bank ?? '', type: typeKey(type, subtype), landscape, source, tracked });
 
   // A Plaid-synced subtype ("ira", "money market") is not one of the canonical choices. It is
   // offered as itself, so opening the form and saving something else does not quietly rewrite it.
   const typeKnown = ACCOUNT_TYPES.some((t) => typeKey(t.type, t.subtype) === typeKey(type, subtype));
 
   function open() {
-    setForm({ name, bank: bank ?? '', type: typeKey(type, subtype), landscape, source });
+    setForm({ name, bank: bank ?? '', type: typeKey(type, subtype), landscape, source, tracked });
     setError(null);
     setEditing(true);
   }
@@ -84,6 +86,7 @@ export default function AccountHeader({ id, name, type, subtype, bank, mask, lan
     const nextBank = form.type === CASH_TYPE ? '' : form.bank.trim();
     if (nextBank !== (bank ?? '')) body.bank = nextBank || null;
     if (form.landscape !== landscape) body.landscape = form.landscape;
+    if (form.tracked !== tracked) body.track_transactions = form.tracked;
     if (form.type !== typeKey(type, subtype)) {
       const chosen = ACCOUNT_TYPES.find((t) => typeKey(t.type, t.subtype) === form.type);
       if (chosen) { body.type = chosen.type; body.subtype = chosen.subtype; }
@@ -131,6 +134,12 @@ export default function AccountHeader({ id, name, type, subtype, bank, mask, lan
             }`}>
               {SOURCE_LABEL[source]}
             </span>
+            {/* Said only when off — the state that changes what the totals mean. */}
+            {!tracked && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium bg-slate-100 text-slate-500">
+                <EyeOff size={11} /> hidden from budgets
+              </span>
+            )}
           </div>
         </div>
         {!editing && (
@@ -181,6 +190,21 @@ export default function AccountHeader({ id, name, type, subtype, bank, mask, lan
                 </select>
               </label>
             )}
+            {/* MOVED HERE FROM THE LIST'S EYE on a phone, where the list now only marks a hidden
+                account — the same reason the other settings moved: a setting of one account
+                belongs on that account's page. The desktop list keeps its toggle. */}
+            <label className="flex items-start gap-3 sm:col-span-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.tracked}
+                onChange={(e) => setForm({ ...form, tracked: e.target.checked })}
+                className="mt-0.5 accent-slate-800"
+              />
+              <span>
+                <span className="block text-sm font-medium text-slate-700">Count in budgets and totals</span>
+                <span className="block text-xs text-slate-400">Off hides this account&apos;s transactions from budgets and dashboard totals.</span>
+              </span>
+            </label>
           </div>
           {error && <p className="text-red-500 text-sm mt-3">{error}</p>}
           <div className="flex justify-end gap-2 mt-5">

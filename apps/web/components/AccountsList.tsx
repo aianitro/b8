@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { GripVertical } from 'lucide-react';
+import { EyeOff, GripVertical } from 'lucide-react';
 import AccountTrackingToggle from './AccountTrackingToggle';
 import AccountValuationEdit from './AccountValuationEdit';
 import AccountDeleteButton, { ConfirmRemoveAccount } from './AccountDeleteButton';
@@ -324,8 +324,18 @@ function Group({
               {/* On a phone the two controls share the row's second line, under the balance; from
                   `sm:` the wrapper dissolves (`contents`) and each is its own grid track again. */}
               <div className="col-start-3 row-start-2 justify-self-end flex items-center gap-3 sm:contents">
+                {/* ON A PHONE ONLY A HIDDEN ACCOUNT IS MARKED, and the mark is not a control: a row
+                    of open eyes said nothing, and the setting lives on the account's own page.
+                    The desktop column keeps the toggle. */}
                 <div className="order-2 sm:order-none">
-                  <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
+                  {!a.track_transactions && (
+                    <span className="sm:hidden flex items-center justify-center w-7 h-7 text-slate-300" title="Hidden from budgets" aria-label="Hidden from budgets">
+                      <EyeOff size={14} />
+                    </span>
+                  )}
+                  <div className="hidden sm:block">
+                    <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
+                  </div>
                 </div>
                 {/* Desktop only: a phone removes by swiping the row. */}
                 <div className="hidden sm:block">
