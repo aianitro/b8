@@ -36,7 +36,7 @@ type Section = 'operational' | 'capital';
 const fmtBalance = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
 
-const ROW_GRID = 'grid grid-cols-[4px_minmax(0,1fr)_auto] gap-x-3 gap-y-2 items-center '
+const ROW_GRID = 'grid grid-cols-[4px_minmax(0,1fr)_auto] gap-x-3 gap-y-1 items-center '
   + 'sm:grid-cols-[14px_4px_minmax(0,1fr)_112px_44px_24px] sm:gap-3';
 
 interface Props {
@@ -202,7 +202,7 @@ function Group({
               onDragOver={(e) => onDragOver(e, a.id)}
               onDrop={() => onDrop(section, a.id)}
               onDragEnd={onDragEnd}
-              className={`${ROW_GRID} px-4 py-3 sm:px-6 cursor-grab active:cursor-grabbing transition-colors ${
+              className={`${ROW_GRID} px-4 py-2.5 sm:py-3 sm:px-6 cursor-grab active:cursor-grabbing transition-colors ${
                 i < items.length - 1 ? 'border-b border-slate-50' : ''
               } hover:bg-slate-50/50 ${isDragOver ? 'border-t-2 border-t-blue-400' : ''}`}
             >
@@ -214,14 +214,19 @@ function Group({
               {/* min-w-0 lets this cell shrink, but every child must then truncate or clip on
                   its own — without that the text overflowed its box and painted over the
                   controls to its right, which is what made the row look broken. */}
-              <div className="min-w-0 col-start-2 row-start-1 sm:col-auto sm:row-auto">
+              {/* TWO LINES ON A PHONE: the name, then everything about it on one truncating line —
+                  chips, bank, count, last sync — with the balance and the two controls in the
+                  column beside them. It used to be four: the chips wrapped under a long name, and
+                  the eye and the bin took a line of their own. `row-span-2` lets this cell sit
+                  beside both the balance and the controls. */}
+              <div className="min-w-0 col-start-2 row-start-1 row-span-2 self-center sm:col-auto sm:row-auto sm:row-span-1">
                 {/* WRAPS. `min-w-0` lets this cell shrink but does nothing for children that
                     refuse to: the type and `manual` chips are `shrink-0` by design, so at 361px
                     they walked straight out of the column and off the card, and the valuation
                     figure in the next column was painted on top of them. A second line inside the
                     cell is the only place for them to go. Above `sm:` the column is 362px and
                     this never wraps. */}
-                <div className="flex flex-wrap items-center gap-2 mb-0.5 min-w-0">
+                <div className="flex sm:flex-wrap items-center gap-2 mb-0.5 min-w-0">
                   {/* READ-ONLY HERE. Name, type, bank and landscape are edited on the account's
                       own page — the hover pencils they had in this list never showed on a phone. */}
                   <a
@@ -231,7 +236,7 @@ function Group({
                   >
                     {a.name}
                   </a>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium shrink-0">
+                  <span className="hidden sm:inline text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium shrink-0">
                     {accountTypeLabel(a.type, a.subtype)}
                   </span>
                   {/* "M" in the installed app, where the row is a phone's width and the word cost the
@@ -240,15 +245,25 @@ function Group({
                     <span
                       title="manual"
                       aria-label="manual"
-                      className="text-xs px-2 standalone:px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium shrink-0"
+                      className="hidden sm:inline text-xs px-2 standalone:px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 font-medium shrink-0"
                     >
                       <span className="standalone:hidden">manual</span>
                       <span className="hidden standalone:inline" aria-hidden="true">M</span>
                     </span>
                   )}
                 </div>
-                <div className="flex flex-wrap items-center gap-2 min-w-0 text-xs text-slate-400">
-                  {a.bank && <span className="shrink-0 font-medium text-slate-500">{a.bank}</span>}
+                {/* One line on a phone, clipped rather than wrapped; wraps from `sm:` as before. */}
+                <div className="flex flex-nowrap sm:flex-wrap items-center gap-1.5 sm:gap-2 min-w-0 overflow-hidden whitespace-nowrap text-xs text-slate-400">
+                  {/* The chips, on a phone, lead this line instead of crowding the name. */}
+                  <span className="sm:hidden text-[10px] px-1.5 py-px rounded-full bg-slate-100 text-slate-500 font-medium shrink-0">
+                    {accountTypeLabel(a.type, a.subtype)}
+                  </span>
+                  {a.is_manual && (
+                    <span title="manual" aria-label="manual" className="sm:hidden text-[10px] px-1.5 py-px rounded-full bg-amber-50 text-amber-600 font-medium shrink-0">
+                      M
+                    </span>
+                  )}
+                  {a.bank && <span className="min-w-0 truncate sm:shrink-0 font-medium text-slate-500">{a.bank}</span>}
                   {(txnCounts[a.id] ?? 0) > 0 && (
                     <>
                       {a.bank && <span className="shrink-0">·</span>}
@@ -296,11 +311,15 @@ function Group({
               {/* Each wrapped so it can be PLACED on the phone grid — these two are components
                   and carry no className of their own. On a desktop the wrapper is the grid item
                   the component used to be, in the same track, which changes nothing there. */}
-              <div className="col-start-3 row-start-2 justify-self-end sm:col-auto sm:row-auto sm:justify-self-auto">
-                <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
-              </div>
-              <div className="col-start-2 row-start-2 justify-self-end sm:col-auto sm:row-auto sm:justify-self-auto">
-                <AccountDeleteButton accountId={a.id} accountName={a.name} />
+              {/* On a phone the two controls share the row's second line, under the balance; from
+                  `sm:` the wrapper dissolves (`contents`) and each is its own grid track again. */}
+              <div className="col-start-3 row-start-2 justify-self-end flex items-center gap-3 sm:contents">
+                <div className="order-2 sm:order-none">
+                  <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
+                </div>
+                <div className="order-1 sm:order-none">
+                  <AccountDeleteButton accountId={a.id} accountName={a.name} />
+                </div>
               </div>
             </div>
           );
