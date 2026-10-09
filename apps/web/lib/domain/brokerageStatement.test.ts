@@ -12,7 +12,7 @@ describe('parseBrokerageStatement', () => {
   it('reads the ending value, its as-of date, and the account ending', () => {
     expect(parseBrokerageStatement(page1())).toEqual({
       ok: true,
-      reading: { asOf: '2026-09-30', value: 12345.67, accountEnding: '444', transfersIn: [] },
+      reading: { institution: 'E*TRADE', asOf: '2026-09-30', value: 12345.67, accountEnding: '444', portfolio: null, transfersIn: [] },
     });
   });
 
@@ -42,7 +42,7 @@ describe('parseBrokerageStatement', () => {
 
   it('reads a statement with no account number printed', () => {
     const r = parseBrokerageStatement('Ending Total Value (as of 12/31/25) $0.00');
-    expect(r).toEqual({ ok: true, reading: { asOf: '2025-12-31', value: 0, accountEnding: null, transfersIn: [] } });
+    expect(r).toEqual({ ok: true, reading: { institution: 'E*TRADE', asOf: '2025-12-31', value: 0, accountEnding: null, portfolio: null, transfersIn: [] } });
   });
 });
 
@@ -80,5 +80,34 @@ describe('companyName', () => {
     expect(companyName('ZSCALER, INC')).toBe('Zscaler');
     expect(companyName('ACME HOLDINGS')).toBe('Acme');
     expect(companyName('Widget Co.')).toBe('Widget');
+  });
+});
+
+describe('parseBrokerageStatement — Wealthfront', () => {
+  // Fabricated, in the extractor's layout of a Wealthfront monthly statement's first page.
+  const wf = 'ACCOUNT NUMBERS Wealthfront: 1AB234CD Monthly Statement for September 1 - 30, 2026 ' +
+    'FABRICATED OWNER | Fabricated Index portfolio | September 1 - 30, 2026 ' +
+    'Fabricated portfolio I. Holdings September 1, 2026 Starting Balance $9,000.00 II. Account Activity ' +
+    'September 30, 2026 Ending Balance $9,876.54 ';
+
+  it('reads the ending balance, its date and the account ending', () => {
+    expect(parseBrokerageStatement(wf)).toEqual({
+      ok: true,
+      reading: { institution: 'Wealthfront', asOf: '2026-09-30', value: 9876.54, accountEnding: '34CD', portfolio: 'Fabricated Index portfolio', transfersIn: [] },
+    });
+  });
+
+  it('takes the ENDING balance, never the starting one', () => {
+    const r = parseBrokerageStatement(wf);
+    expect(r.ok && r.reading.value).toBe(9876.54);
+  });
+
+  it('refuses a document matching both layouts', () => {
+    expect(parseBrokerageStatement(wf + page1()).ok).toBe(false);
+  });
+
+  it('names both supported layouts when it reads neither', () => {
+    const r = parseBrokerageStatement('Closing balance $1.00');
+    expect(!r.ok && r.reason).toMatch(/E\*TRADE and Wealthfront/);
   });
 });

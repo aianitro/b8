@@ -139,7 +139,7 @@ export default function StatementUpload({ accountId }: { accountId: string }) {
       {reading && (
         <div className="rounded-lg border border-slate-200 bg-white shadow-sm px-2.5 py-1.5 text-right">
           <p className="text-[10px] text-slate-400">
-            {longDate(reading.asOf)}{reading.accountEnding ? ` · account …${reading.accountEnding}` : ''}
+            {reading.portfolio ?? reading.institution} · {longDate(reading.asOf)}{reading.accountEnding ? ` · …${reading.accountEnding}` : ''}
           </p>
           <div className="flex items-center justify-end gap-1">
             <span className="text-xs font-mono font-semibold text-slate-800">{fmt(reading.value)}</span>
