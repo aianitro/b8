@@ -21,7 +21,15 @@ const fmtSigned = (n: number) => (Math.abs(n) < 0.5 ? fmt(0) : (n > 0 ? '+' : 'â
 export default function AccountsSummaryCards({ summary }: { summary: LandscapeSummary }) {
   const month = MONTHS[new Date().getMonth()];
   const { yearBegin, change, current, counted, noOpening } = summary;
+  // Current balance leads, at the owner's request: it is the figure the tab is opened for; the
+  // year's opening and its change are context for it.
   const cards = [
+    {
+      label: 'Current Balance',
+      value: fmt(current),
+      sub: `${counted} account${counted !== 1 ? 's' : ''}`,
+      color: current <= -0.5 ? 'text-red-500' : 'text-slate-900',
+    },
     {
       label: 'Beginning of Year',
       value: fmt(yearBegin),
@@ -33,12 +41,6 @@ export default function AccountsSummaryCards({ summary }: { summary: LandscapeSu
       value: fmtSigned(change),
       sub: `through ${month}`,
       color: change <= -0.5 ? 'text-red-500' : 'text-emerald-600',
-    },
-    {
-      label: 'Current Balance',
-      value: fmt(current),
-      sub: `${counted} account${counted !== 1 ? 's' : ''}`,
-      color: current <= -0.5 ? 'text-red-500' : 'text-slate-900',
     },
   ];
 
