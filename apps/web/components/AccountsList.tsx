@@ -4,7 +4,8 @@ import { useRef, useState } from 'react';
 import { GripVertical } from 'lucide-react';
 import AccountTrackingToggle from './AccountTrackingToggle';
 import AccountValuationEdit from './AccountValuationEdit';
-import AccountDeleteButton from './AccountDeleteButton';
+import AccountDeleteButton, { ConfirmRemoveAccount } from './AccountDeleteButton';
+import SwipeReveal from './SwipeReveal';
 import RelativeTime from './RelativeTime';
 import type { Account } from '@b8/contracts/types';
 import { accountTypeLabel } from '@/lib/accountTypes';
@@ -170,6 +171,8 @@ function Group({
   onDrop: (section: Section, targetId: string) => void;
   onDragEnd: () => void;
 }) {
+  // The account a phone swipe asked to remove; its confirmation is rendered once, for the group.
+  const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null);
   if (items.length === 0) {
     return (
       <div className="mb-8 bg-white rounded-2xl border border-slate-100 shadow-sm p-12 text-center">
@@ -195,13 +198,20 @@ function Group({
         {items.map((a, i) => {
           const isDragOver = dragOver === a.id;
           return (
-            <div
+            // REMOVAL IS A SWIPE LEFT ON A PHONE, at the owner's request, and the trash column
+            // from `sm` up — the same reveal-then-confirm the statement's transaction rows use.
+            <SwipeReveal
               key={a.id}
-              draggable
-              onDragStart={() => onDragStart(section, a.id)}
-              onDragOver={(e) => onDragOver(e, a.id)}
-              onDrop={() => onDrop(section, a.id)}
-              onDragEnd={onDragEnd}
+              rowKey={`account:${a.id}`}
+              actionLabel="Remove"
+              onAction={() => setRemoving({ id: a.id, name: a.name })}
+              rowProps={{
+                draggable: true,
+                onDragStart: () => onDragStart(section, a.id),
+                onDragOver: (e) => onDragOver(e, a.id),
+                onDrop: () => onDrop(section, a.id),
+                onDragEnd,
+              }}
               className={`${ROW_GRID} px-4 py-2.5 sm:py-3 sm:px-6 cursor-grab active:cursor-grabbing transition-colors ${
                 i < items.length - 1 ? 'border-b border-slate-50' : ''
               } hover:bg-slate-50/50 ${isDragOver ? 'border-t-2 border-t-blue-400' : ''}`}
@@ -317,14 +327,18 @@ function Group({
                 <div className="order-2 sm:order-none">
                   <AccountTrackingToggle accountId={a.id} current={a.track_transactions} />
                 </div>
-                <div className="order-1 sm:order-none">
+                {/* Desktop only: a phone removes by swiping the row. */}
+                <div className="hidden sm:block">
                   <AccountDeleteButton accountId={a.id} accountName={a.name} />
                 </div>
               </div>
-            </div>
+            </SwipeReveal>
           );
         })}
       </div>
+      {removing && (
+        <ConfirmRemoveAccount accountId={removing.id} accountName={removing.name} onClose={() => setRemoving(null)} />
+      )}
     </div>
   );
 }
