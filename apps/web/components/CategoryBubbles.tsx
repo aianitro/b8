@@ -16,7 +16,7 @@ import { packCircles } from '@/lib/domain/bubblePack';
 import { STATUS_HEX } from '@/lib/chartColors';
 import { bubbleColor, NEUTRAL_HEX } from '@/lib/domain/bubbleStatus';
 import { drillHref } from '@/lib/drilldown';
-import type { MonthCategoryView } from './WhereTheMonthSits';
+import { isOffCycle, pictureWeight, type MonthCategoryView } from './WhereTheMonthSits';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -71,7 +71,7 @@ export default function CategoryBubbles({ categories, month }: {
 
   const circles = useMemo(
     () => packCircles(
-      categories.map((c) => ({ key: c.category, weight: c.budgeted })),
+      categories.map((c) => ({ key: c.category, weight: pictureWeight(c) })),
       WIDTH, HEIGHT,
       // Looser than the default: at 0.62 the circles crowded the box edge to edge and the picture
       // read as a solid mass rather than as distinct amounts.
@@ -109,8 +109,10 @@ export default function CategoryBubbles({ categories, month }: {
         {active ? (
           <>
             <span className="font-medium text-slate-700">{active.category}</span>
-            {' · '}{fmt(active.actual)} of {fmt(active.budgeted)}
-            {active.actual > active.budgeted && (
+            {isOffCycle(active)
+              ? <>{' · '}{fmt(active.actual)} spent <span className="text-red-600 font-medium">· no budget this month</span></>
+              : <>{' · '}{fmt(active.actual)} of {fmt(active.budgeted)}</>}
+            {!isOffCycle(active) && active.actual > active.budgeted && (
               <span className="text-red-600 font-medium">
                 {` · ${fmt(active.actual - active.budgeted)} over already`}
               </span>
@@ -134,7 +136,7 @@ export default function CategoryBubbles({ categories, month }: {
           // fills its circle rather than bursting it.
           const spentRatio = cat.budgeted > 0
             ? Math.min(1, Math.max(0, cat.actual / cat.budgeted))
-            : 0;
+            : isOffCycle(cat) ? 1 : 0;
           const dim = hover !== null && hover !== c.key;
           // A label only where it fits. Cramming 10px text into a 14px circle produces a smear
           // that is neither readable nor decorative; those categories are reached by hover.
@@ -160,7 +162,7 @@ export default function CategoryBubbles({ categories, month }: {
           // breached bubble it is the whole reason the reader stopped.
           const overBy = cat.actual - cat.budgeted;
           const over = overBy > 0;
-          const secondLine = over ? `+${fmt(overBy)} over` : fmt(cat.budgeted);
+          const secondLine = isOffCycle(cat) ? `${fmt(cat.actual)} off-cycle` : over ? `+${fmt(overBy)} over` : fmt(cat.budgeted);
           const showAmount = inside !== null
             && c.r >= (over ? 34 : 46)
             && fitLabel(secondLine, c.r, 11) === secondLine;

@@ -50,7 +50,7 @@ import {
   HEATMAP_LEGEND as LEGEND,
 } from '@b8/contracts/heatmapPalette';
 import { drillHref } from '@/lib/drilldown';
-import type { MonthCategoryView } from './WhereTheMonthSits';
+import { isOffCycle, pictureWeight, type MonthCategoryView } from './WhereTheMonthSits';
 
 
 const fmt = (n: number) =>
@@ -168,7 +168,7 @@ export default function CategoryHeatmap({ categories, month }: {
 
   // A 100x100 box: the output is percentages, so nothing here depends on the rendered width.
   const tiles = useMemo(
-    () => layoutTreemap(categories.map((c) => ({ key: c.category, weight: c.budgeted })), 100, 100),
+    () => layoutTreemap(categories.map((c) => ({ key: c.category, weight: pictureWeight(c) })), 100, 100),
     [categories]
   );
   const byKey = useMemo(() => new Map(categories.map((c) => [c.category, c])), [categories]);
@@ -214,8 +214,10 @@ export default function CategoryHeatmap({ categories, month }: {
           >
             <span className="mr-1.5">{categoryIcon(active.category)}</span>
             <span className="font-medium text-slate-700">{active.category}</span>
-            {' · '}{fmt(active.actual)} of {fmt(active.budgeted)}
-            {active.actual > active.budgeted && (
+            {isOffCycle(active)
+              ? <>{' · '}{fmt(active.actual)} spent <span className="text-red-600 font-medium">· no budget this month</span></>
+              : <>{' · '}{fmt(active.actual)} of {fmt(active.budgeted)}</>}
+            {!isOffCycle(active) && active.actual > active.budgeted && (
               <span className="text-red-600 font-medium">
                 {` · ${fmt(active.actual - active.budgeted)} over already`}
               </span>
@@ -270,7 +272,9 @@ export default function CategoryHeatmap({ categories, month }: {
               onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActiveKey(t.key); }}
               onFocus={() => setActiveKey(t.key)}
               onClick={() => (isActive ? router.push(drillHref([t.key], month)) : setActiveKey(t.key))}
-              aria-label={`${cat.category}, ${fmt(cat.actual)} of ${fmt(cat.budgeted)}, ${LABEL[state]}`}
+              aria-label={isOffCycle(cat)
+                ? `${cat.category}, ${fmt(cat.actual)} spent with no budget this month`
+                : `${cat.category}, ${fmt(cat.actual)} of ${fmt(cat.budgeted)}, ${LABEL[state]}`}
               className="absolute rounded-[3px] overflow-hidden cursor-pointer focus:outline-none"
               style={{
                 left: `calc(${t.x}% + ${GAP}px)`,

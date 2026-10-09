@@ -46,6 +46,17 @@ export interface MonthCategoryView {
 }
 
 /**
+ * OFF-CYCLE CATEGORIES ARE IN THE PICTURE TOO — spending in a category whose schedule gives it
+ * nothing this month (`budgeted` 0, `actual` above it). They used to be absent, because area was
+ * the budget and a zero budget has no area; the owner wanted them on the map rather than in a panel
+ * of their own. So a category is SIZED by the larger of its budget and its spend: a budgeted one is
+ * unchanged, an off-cycle one is as large as what it drew. The colour rule already reads it as
+ * over — anything spent past a zero line is — so no new state is needed.
+ */
+export const pictureWeight = (c: MonthCategoryView) => Math.max(c.budgeted, c.actual);
+export const isOffCycle = (c: MonthCategoryView) => c.budgeted === 0 && c.actual > 0;
+
+/**
  * @param month 0-based, as every month index in this app is. Both pictures link out with it rather
  *              than reading a clock of their own — the figures come from the page's as-of, and a
  *              second clock read could name a different month than the one they were computed for.

@@ -196,9 +196,16 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
  * forecast — and dated to an earlier month would be wrong rather than merely old, so it is not
  * shown here at all.
  */
+/** An off-cycle pace record as the month picture draws it: no budget, sized by what it spent. */
+const offCycleView = (p: { category: string; actual: number }): MonthCategoryView =>
+  ({ category: p.category, budgeted: 0, actual: p.actual, projectedRatio: null, tooEarly: false });
+
 async function PastMonth({ year, month, current }: { year: number; month: number; current: number }) {
   const monthLength = daysInMonth(year, month);
-  const categories: MonthCategoryView[] = await loadMonthCategories({ year, month, day: monthLength });
+  const asOfPast = { year, month, day: monthLength };
+  const [categories, offCycle] = await Promise.all([
+    loadMonthCategories(asOfPast) as Promise<MonthCategoryView[]>, loadOffCycle(asOfPast),
+  ]);
   const budget = categories.reduce((s, c) => s + c.budgeted, 0);
   const spent = categories.reduce((s, c) => s + c.actual, 0);
   const left = budget - spent;
@@ -230,7 +237,9 @@ async function PastMonth({ year, month, current }: { year: number; month: number
         />
       </div>
 
-      <WhereTheMonthSits categories={categories} month={month} />
+      {/* The month's off-cycle categories join the picture; the three figures above stay the
+          budgeted categories' alone, so "of N budgeted" keeps meaning that. */}
+      <WhereTheMonthSits categories={[...categories, ...offCycle.thisMonth.map(offCycleView)]} month={month} />
 
       <p className="mt-6 text-xs text-slate-400">
         Budgeted operational categories only, as the tiles show them. Alerts, new arrivals and what
@@ -299,7 +308,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // the bubbles are a map, not a judgement, and a map that omits groceries, fuel and utilities is
   // the wrong shape. Scoping and shaping now happen in `lib/overviewRead.ts`, once, for this page
   // and the mobile client alike.
-  const monthShape: MonthCategoryView[] = monthCategories;
+  // This month's off-cycle categories are drawn in the picture rather than listed in a panel —
+  // see `pictureWeight` in WhereTheMonthSits for how a zero budget gets an area.
+  const monthShape: MonthCategoryView[] = [...monthCategories, ...offCycleThisMonth.map(offCycleView)];
 
   // `p-4` on a phone, the original `p-8` from `sm:` up. 32px of padding each side costs 64px of a
   // 390px screen — a sixth of it — spent on whitespace beside figures that need the room.
@@ -358,16 +369,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       {/* One panel where there were three, so the grid that sized itself to the survivors is gone
           with them — a single-column grid is a div, and the arithmetic behind it was machinery for
           a layout that no longer varies. */}
-      {/* OFF-CYCLE: spending in a category whose schedule gives it nothing that month. This
-          month's lead, because they are the ones still happening; the earlier months follow. A
-          category with no budget this month has no tile in the picture below, so without this
-          panel a draw in the current month was nowhere on the page until the month after. */}
-      {(offCycleThisMonth.length > 0 || offCycleEarlier.length > 0) && (
+      {/* OFF-CYCLE EARLIER THIS YEAR. This month's off-cycle categories are drawn in the month
+          picture below; a closed month's are not on screen anywhere else, so they keep a panel. */}
+      {offCycleEarlier.length > 0 && (
         <div className="mb-6">
-          <Panel title="Off-cycle spending">
-            {offCycleThisMonth.map((c) => (
-              <CategoryLine key={`now-${c.categoryId}`} c={c} note="No budget this month" />
-            ))}
+          <Panel title="Off-cycle earlier this year">
             {offCycleEarlier.map((c) => (
               <CategoryLine key={`${c.categoryId}-${c.month}`} c={c} note={`${MONTHS[c.month]} drew outside its schedule`} />
             ))}
