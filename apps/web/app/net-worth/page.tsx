@@ -5,6 +5,8 @@ import { AlertTriangle } from 'lucide-react';
 import db from '@/lib/db';
 import { computeCurrentNetWorth } from '@/lib/netWorth';
 import NetWorthTrendChart, { type NetWorthTrendPoint } from '@/components/charts/NetWorthTrendChart';
+import ValuationStalenessCard from '@/components/ValuationStalenessCard';
+import { loadValuationFindings } from '@/lib/valuationStalenessRead';
 import NetWorthBreakdown, { type BreakdownComponent } from '@/components/NetWorthBreakdown';
 // The delta is the domain function's, bound locally as `ytdDelta` for readability at the call
 // site, and never recomputed on this page.
@@ -71,8 +73,10 @@ async function getLabels() {
 }
 
 export default async function NetWorthPage() {
-  const [netWorth, snapshots, labels] = await Promise.all([
-    computeCurrentNetWorth(), getSnapshots(), getLabels(),
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const [netWorth, snapshots, labels, valuationFindings] = await Promise.all([
+    computeCurrentNetWorth(), getSnapshots(), getLabels(), loadValuationFindings(today),
   ]);
 
   // The year-to-date movement, measured within ONE definition of the figure it moves. NITS N2 lived
@@ -182,6 +186,12 @@ export default async function NetWorthPage() {
           Ledger balances, recorded valuations, and real-estate equity — the parts below sum to this exactly.
         </p>
       </div>
+
+      {/* A stale hand-entered value is part of the total above, so the page that shows the total
+          says so — the dashboard's bell is not the only place it should be found. */}
+      {valuationFindings.length > 0 && (
+        <div className="mb-6"><ValuationStalenessCard findings={valuationFindings} /></div>
+      )}
 
       {unvaluedNames.length > 0 && (
         <div className="flex items-start gap-2.5 border border-amber-200 bg-amber-50 rounded-2xl p-4 mb-6">

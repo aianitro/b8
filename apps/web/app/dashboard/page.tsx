@@ -7,6 +7,8 @@ import FeedHealthCard from '@/components/FeedHealthCard';
 import JobHealthCard from '@/components/JobHealthCard';
 import AlertBell from '@/components/AlertBell';
 import CashStalenessCard from '@/components/CashStalenessCard';
+import ValuationStalenessCard from '@/components/ValuationStalenessCard';
+import { loadValuationFindings } from '@/lib/valuationStalenessRead';
 import WhereTheMonthSits, { type MonthCategoryView } from '@/components/WhereTheMonthSits';
 import RecentArrivals from '@/components/RecentArrivals';
 import UncategorizedCard from '@/components/UncategorizedCard';
@@ -256,6 +258,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // — see the note on the reader. Awaited beside the overview rather than after it, so the page
   // still issues one round of I/O.
   const categoryOptionsPromise = loadCategoryOptions();
+  // Hand-valued accounts gone stale. Its own read rather than a field on /overview: it is a
+  // reminder for this screen and the email, not a figure the payload's other consumers need.
+  const valuationFindingsPromise = loadValuationFindings(
+    `${asOf.year}-${String(asOf.month + 1).padStart(2, '0')}-${String(asOf.day).padStart(2, '0')}`);
 
   // P1-11a: EVERYTHING BELOW IS READ FROM THE /overview PAYLOAD — the same object the mobile client
   // will consume, produced by the same function the API handler wraps. The page used to run ten
@@ -276,6 +282,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   } = dashboardFromWire(await loadOverview(now));
   // Started before the overview and collected here, so the two reads overlap rather than queue.
   const categoryOptions = await categoryOptionsPromise;
+  const valuationFindings = await valuationFindingsPromise;
 
   // EVERY operational spending category with an allocation this month, not the scored subset —
   // the bubbles are a map, not a judgement, and a map that omits groceries, fuel and utilities is
@@ -306,7 +313,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             feed, and five drifting accounts is one message about the ledger. The number is how
             many things there are to read, which is the only sense in which a reader counts them. */}
         <AlertBell count={(feedFindings.length > 0 ? 1 : 0) + (driftFindings.length > 0 ? 1 : 0)
-          + (jobHealth.status !== 'fresh' ? 1 : 0) + (walletFindings.length > 0 ? 1 : 0)}>
+          + (jobHealth.status !== 'fresh' ? 1 : 0) + (walletFindings.length > 0 ? 1 : 0)
+          + (valuationFindings.length > 0 ? 1 : 0)}>
           {/* First in the bell, because it outranks the other two: they each say a figure may be
               wrong, this says every figure may be old and the backups are missing as well. */}
           <JobHealthCard health={jobHealth} />
@@ -317,6 +325,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               they chose to check it. It is also the only one whose cure the reader can apply today,
               which is why it is the only card here carrying an action. */}
           <CashStalenessCard findings={walletFindings} />
+          {/* Cash's sibling, for the same reason last: a figure as old as the last time the owner
+              refreshed it, with the action that refreshes it. */}
+          <ValuationStalenessCard findings={valuationFindings} />
         </AlertBell>
         {/* The installed app's notification switch, in the app bar after the warning sign. It
             portals there, so its place in this markup only decides that it comes second. */}

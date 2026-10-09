@@ -92,6 +92,13 @@ export interface DigestData {
    */
   jobGap: string | null;
 
+  /**
+   * Hand-valued investment accounts whose figure has gone stale, one sentence each — already
+   * written by `valuationFindingText`, so the email and the dashboard say the same words. Empty
+   * says nothing: a reminder is only worth a line on the day it applies.
+   */
+  staleValuations: string[];
+
   uncategorized: {
     /** The rows actually shown, largest first. May be shorter than `totalCount`. */
     rows: DigestTxn[];
@@ -852,6 +859,15 @@ export function renderDigest(
         `<tr><td style="padding:14px 18px;font-family:${FONT};font-size:13px;color:${AMBER_INK};line-height:1.5">` +
         `${esc(data.jobGap)}</td></tr></table>`
       : '') +
+    // Below the job banner and above the counters, in the same amber: a figure in the totals is
+    // out of date, which is milder than the job having stopped and worth more than a footnote.
+    (data.staleValuations.length > 0
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" ` +
+        `style="background-color:${AMBER_BG};border:1px solid ${AMBER_RULE};border-radius:10px;margin:0 0 16px">` +
+        `<tr><td style="padding:12px 18px;font-family:${FONT};font-size:13px;color:${AMBER_INK};line-height:1.5">` +
+        data.staleValuations.map(esc).join('<br>') +
+        `</td></tr></table>`
+      : '') +
     counters(data, links) +
     uncategorizedWidget(data.uncategorized, links.unfiled) +
     watchlistWidget(data.watchlist, links.watchlist) +
@@ -866,6 +882,7 @@ export function renderDigest(
     `b8`,
     '',
     ...(data.jobGap ? [`  ${data.jobGap}`, ''] : []),
+    ...(data.staleValuations.length > 0 ? [...data.staleValuations.map((l) => `  ${l}`), ''] : []),
     `  ${u.totalCount} ${u.totalCount === 1 ? 'record needs' : 'records need'} a category`,
     `  ${a.rows.length} new transaction${a.rows.length === 1 ? '' : 's'}`,
     '',

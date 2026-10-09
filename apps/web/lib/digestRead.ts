@@ -3,6 +3,8 @@ import { loadYearEnd } from './yearEndRead';
 import { loadMonthOutlook } from './monthOutlookRead';
 import { loadWatchlist } from './watchlistRead';
 import { loadJobHealth } from './jobHealthRead';
+import { loadValuationFindings } from './valuationStalenessRead';
+import { valuationFindingText } from './domain/valuationStaleness';
 import { asOfFromDate } from './domain/monthOutlook';
 import { arrivalsSince } from './domain/digestWindow';
 import type { DigestData, DigestTxn } from './domain/digest';
@@ -89,7 +91,7 @@ export async function loadDigest(now: Date): Promise<DigestData> {
   const lastDeliveredRaw = lastSend.rows[0]?.attempted_at ?? null;
   const since = arrivalsSince(lastDeliveredRaw ? new Date(lastDeliveredRaw) : null, now);
 
-  const [unfiled, unfiledTotals, posted, watching, health, monthRead, yearEnd] = await Promise.all([
+  const [unfiled, unfiledTotals, posted, watching, health, monthRead, yearEnd, staleValues] = await Promise.all([
     // Largest first — filing the biggest row moves every other figure in the email the most.
     // `ABS`, because a large uncategorized DEPOSIT distorts the year-end projection exactly as
     // hard as a large uncategorized payment does, and 2026-09-11 is the entry in this repo's
@@ -143,6 +145,9 @@ export async function loadDigest(now: Date): Promise<DigestData> {
     // Operational, matching the dashboard's own headline. Capital is a different question with a
     // different cadence and it is not what a daily digest is for.
     loadYearEnd('operational', { year, month }),
+
+    // The same read the dashboard's reminder uses, so the two name the same accounts.
+    loadValuationFindings(`${year}-${String(month + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`),
   ]);
 
   const totals = unfiledTotals.rows[0];
@@ -153,6 +158,8 @@ export async function loadDigest(now: Date): Promise<DigestData> {
 
     // `fresh` says nothing: a message the job just sent does not need to announce that the job ran.
     jobGap: health.status === 'fresh' ? null : health.message,
+
+    staleValuations: staleValues.map(valuationFindingText),
 
     uncategorized: {
       rows: unfiled.rows.map(toTxn),

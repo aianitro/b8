@@ -10,6 +10,7 @@ function data(overrides: Partial<DigestData> = {}): DigestData {
   return {
     asOf: { year: 2026, month: 9, day: 14 },
     jobGap: null,
+    staleValuations: [],
     uncategorized: {
       rows: [
         { date: '2026-09-09', label: 'Manual CR-Bkrg', amount: -16238.17, category: null },
@@ -588,6 +589,15 @@ describe('the missed-job banner', () => {
     for (const surface of [html, text]) expect(surface).toContain('has not run for 5 days');
     // Above the counters, or it is a footnote about the thing that broke everything below it.
     expect(html.indexOf('has not run for 5 days')).toBeLessThan(html.indexOf('need a category'));
+  });
+
+  it('names a stale hand-valued account below the job banner and above the counters', () => {
+    const d = data();
+    d.staleValuations = ['Fabricated Brokerage was last valued 120 days ago — upload its latest statement.'];
+    const { html, text } = renderDigest(d, CHART_SRC, BUBBLES_SRC);
+    for (const surface of [html, text]) expect(surface).toContain('last valued 120 days ago');
+    expect(html.indexOf('last valued 120 days ago')).toBeLessThan(html.indexOf('need a category'));
+    expect(renderDigest(data(), CHART_SRC, BUBBLES_SRC).html).not.toContain('last valued');
   });
 
   it('escapes the banner, which is rendered text like any other', () => {
