@@ -20,7 +20,7 @@ const SERIES_DAYS = 365;
 type AccountRow = {
   name: string; landscape: string; bank: string | null; mask: string | null;
   type: string; subtype: string | null; countable: boolean;
-  valuation_mode: 'ledger' | 'valuation'; is_liability: boolean;
+  valuation_mode: 'ledger' | 'valuation'; is_liability: boolean; linked: boolean;
 };
 
 type TxRow = {
@@ -43,7 +43,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
 
   const [accountRes, balanceRes, txRes, valuationRes, categoriesRes] = await Promise.all([
     db.query<AccountRow>(
-      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability, countable FROM accounts WHERE id = $1',
+      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability, countable, access_token IS NOT NULL AS linked FROM accounts WHERE id = $1',
       [id]
     ),
     db.query<{ beginning_balance: string }>(
@@ -144,8 +144,9 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
       />
 
       {/* A hand-valued investment account is refreshed from its statement, here on its own page:
-          the value, and the period's shares received. Never for a loan. */}
-      {isValuation && !account.is_liability && (
+          the value, and the period's shares received. Never for a loan, and never for an account
+          Plaid links — its balance arrives with every sync, and a typed-in figure would compete. */}
+      {isValuation && !account.is_liability && !account.linked && (
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-5 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-slate-900">Update from a statement</p>

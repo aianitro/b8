@@ -42,11 +42,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return refuse('rows must be a non-empty list of { date, security, quantity, amount, kind }');
   }
 
-  const account = await db.query<{ valuation_mode: string; is_liability: boolean }>(
-    'SELECT valuation_mode, is_liability FROM accounts WHERE id = $1', [id]
+  const account = await db.query<{ valuation_mode: string; is_liability: boolean; linked: boolean }>(
+    'SELECT valuation_mode, is_liability, access_token IS NOT NULL AS linked FROM accounts WHERE id = $1', [id]
   );
   if (account.rows.length === 0) return refuse('Account not found', 404);
-  if (account.rows[0].valuation_mode !== 'valuation' || account.rows[0].is_liability) {
+  if (account.rows[0].valuation_mode !== 'valuation' || account.rows[0].is_liability || account.rows[0].linked) {
     return refuse('Statement activity can be recorded only on an investment account valued by hand.');
   }
 
