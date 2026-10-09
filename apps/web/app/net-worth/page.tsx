@@ -7,6 +7,7 @@ import { computeCurrentNetWorth } from '@/lib/netWorth';
 import NetWorthTrendChart, { type NetWorthTrendPoint } from '@/components/charts/NetWorthTrendChart';
 import ValuationStalenessCard from '@/components/ValuationStalenessCard';
 import { loadValuationFindings } from '@/lib/valuationStalenessRead';
+import { figureSize } from '@/lib/figureSize';
 import NetWorthBreakdown, { type BreakdownComponent } from '@/components/NetWorthBreakdown';
 // The delta is the domain function's, bound locally as `ytdDelta` for readability at the call
 // site, and never recomputed on this page.
@@ -206,36 +207,38 @@ export default async function NetWorthPage() {
         </div>
       )}
 
-      {/* STACKED ON A PHONE, the accounts page's summary-card shape: one line per part, label and
-          hint left, figure right. Four columns at every width gave each card about 80px at 390,
-          and a six-figure balance overflowed it while the hint wrapped a word per line. Two across
-          from `sm:`, four from `lg:`, where the original layout fits. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4 mb-6">
-        {COMPONENTS.map((c) => {
-          const amount = amountOf(c.key);
-          const lines = byComponent.get(c.key) ?? [];
-          if (c.key === 'liabilities' && amount === 0 && lines.length === 0) return null;
-          return (
-            <Link
-              key={c.key}
-              href={c.href}
-              className="bg-white rounded-2xl border border-slate-100 shadow-sm px-4 py-3 sm:p-5 flex items-center justify-between gap-3 sm:block hover:border-slate-200 hover:shadow transition-all"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 sm:mb-2">
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.accent}`} />
-                  <p className="text-[10px] uppercase tracking-wide text-slate-400">{c.label}</p>
-                </div>
-                <p className="text-xs text-slate-400 mt-0.5 sm:hidden">{c.hint}</p>
-              </div>
-              <p className={`text-lg sm:text-xl font-mono font-semibold shrink-0 ${amount < 0 ? 'text-red-600' : 'text-slate-800'}`}>
-                {signed(amount)}
-              </p>
-              <p className="hidden sm:block text-[10px] text-slate-400 mt-1.5">{c.hint}</p>
-            </Link>
-          );
-        })}
-      </div>
+      {/* THREE ACROSS AT EVERY WIDTH, as the accounts page's summary cards are — the owner's call,
+          after a phone version that stacked them as one-line rows. The phone gets the same small-card
+          sizing and the same length-stepped figure (`figureSize`). Other debt, when there is any,
+          makes a fourth card, and four do not fit a phone's width: then it is two by two there. */}
+      {(() => {
+        const shown = COMPONENTS.filter((c) =>
+          !(c.key === 'liabilities' && amountOf(c.key) === 0 && (byComponent.get(c.key) ?? []).length === 0));
+        return (
+          <div className={`grid gap-2 sm:gap-4 mb-6 ${shown.length === 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+            {shown.map((c) => {
+              const amount = amountOf(c.key);
+              const value = signed(amount);
+              return (
+                <Link
+                  key={c.key}
+                  href={c.href}
+                  className="min-w-0 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 sm:p-5 hover:border-slate-200 hover:shadow transition-all"
+                >
+                  <div className="flex items-center gap-1.5 sm:gap-2 mb-1 sm:mb-2">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.accent}`} />
+                    <p className="text-[9px] sm:text-[10px] uppercase tracking-normal sm:tracking-wide text-slate-400">{c.label}</p>
+                  </div>
+                  <p className={`${figureSize(value)} sm:text-xl font-mono font-semibold break-words ${amount < 0 ? 'text-red-600' : 'text-slate-800'}`}>
+                    {value}
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-1 sm:mt-1.5">{c.hint}</p>
+                </Link>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       <div className="mb-6">
         <NetWorthTrendChart data={snapshots.points} />

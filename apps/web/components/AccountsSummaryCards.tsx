@@ -1,4 +1,5 @@
 import type { LandscapeSummary } from '@/lib/domain/accountsSummary';
+import { figureSize } from '@/lib/figureSize';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -17,12 +18,6 @@ const fmtSigned = (n: number) => (Math.abs(n) < 0.5 ? fmt(0) : (n > 0 ? '+' : 'â
  * may wrap. A seven-figure balance does not fit at `text-base`, so `figureSize` steps it down by
  * length rather than letting it break mid-number; `break-words` stays as the last backstop.
  */
-function figureSize(value: string): string {
-  if (value.length <= 9) return 'text-base';
-  if (value.length <= 10) return 'text-sm';
-  return 'text-[13px]';
-}
-
 export default function AccountsSummaryCards({ summary }: { summary: LandscapeSummary }) {
   const month = MONTHS[new Date().getMonth()];
   const { yearBegin, change, current, counted, noOpening } = summary;
