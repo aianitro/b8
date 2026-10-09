@@ -128,12 +128,18 @@ function parseCSV(text: string): ParsedRow[] {
   throw new Error('Unrecognised CSV format — expected Chase, Discover, or JP Morgan columns');
 }
 
-interface Props { accounts: Account[] }
+interface Props {
+  accounts: Account[];
+  /** Pre-selected when opened from an account's own page; still changeable here. */
+  initialAccountId?: string;
+}
 
-export default function CsvImporter({ accounts }: Props) {
+export default function CsvImporter({ accounts, initialAccountId }: Props) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [accountId, setAccountId] = useState('');
+  const [accountId, setAccountId] = useState(
+    initialAccountId && accounts.some((a) => a.id === initialAccountId) ? initialAccountId : ''
+  );
   const [parsed, setParsed] = useState<ParseState>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

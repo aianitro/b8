@@ -449,14 +449,17 @@ export default async function TransactionsPage({
           </p>
         </div>
         {/* HERE RATHER THAN IN THE SIDEBAR. An import is something done to this ledger, so the way
-            in sits beside the rows it adds to instead of taking a line in the nav for every page. */}
-        <Link
+            in sits beside the rows it adds to instead of taking a line in the nav for every page.
+            NOT ON A DRILLDOWN, at the owner's request: opened from the dashboard to check one
+            category's month, the page is a reading of figures, and an import has nothing to do
+            with it. The account's own page carries the same button, with that account chosen. */}
+        {!isDrilldown && <Link
           href="/import"
           className="shrink-0 inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
         >
           <Upload size={16} className="shrink-0" />
           Import CSV
-        </Link>
+        </Link>}
       </div>
 
       {isDrilldown && drillBudget && (

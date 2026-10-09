@@ -13,8 +13,10 @@ async function getAccounts() {
   return res.rows;
 }
 
-export default async function ImportPage() {
-  const accounts = await getAccounts();
+export default async function ImportPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const [accounts, params] = await Promise.all([getAccounts(), searchParams]);
+  // `?account=` arrives from an account's own page, so the importer opens with it chosen.
+  const initialAccountId = typeof params.account === 'string' ? params.account : undefined;
 
   return (
     <div className="p-4 sm:p-8 max-w-3xl mx-auto">
@@ -22,7 +24,7 @@ export default async function ImportPage() {
         <h1 className="text-2xl font-bold text-slate-900">Import CSV</h1>
         <p className="text-sm text-slate-500 mt-1">Import transactions from a Chase CSV export</p>
       </div>
-      <CsvImporter accounts={accounts} />
+      <CsvImporter accounts={accounts} initialAccountId={initialAccountId} />
     </div>
   );
 }

@@ -1,5 +1,7 @@
 export const dynamic = 'force-dynamic';
 
+import Link from 'next/link';
+import { Upload } from 'lucide-react';
 import db from '@/lib/db';
 import AccountBalanceEdit from '@/components/AccountBalanceEdit';
 import AccountHeader from '@/components/AccountHeader';
@@ -192,6 +194,17 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
               {yearRows.length.toLocaleString()} transaction{yearRows.length === 1 ? '' : 's'}
             </p>
           </div>
+          {/* Importing into this ledger starts here, with this account chosen in the importer. Not
+              for a wallet (cash is counted, not exported) nor a valued account (no ledger rows). */}
+          {!isValuation && !account.countable && (
+            <Link
+              href={`/import?account=${encodeURIComponent(id)}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              <Upload size={14} className="shrink-0" />
+              Import CSV
+            </Link>
+          )}
           {/* The figure the running balance starts from. Valuation-mode accounts have no running
               balance, so the control that sets its start would edit nothing visible. */}
           {!isValuation && (
