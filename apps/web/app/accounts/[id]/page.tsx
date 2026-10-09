@@ -4,6 +4,7 @@ import db from '@/lib/db';
 import AccountBalanceEdit from '@/components/AccountBalanceEdit';
 import AccountHeader from '@/components/AccountHeader';
 import CashManagementCard from '@/components/CashManagementCard';
+import StatementUpload from '@/components/StatementUpload';
 import { walletStatuses } from '@/lib/cashCountStore';
 import AccountStatementList, { type StatementMonth } from '@/components/AccountStatementList';
 import AccountBalanceChart from '@/components/charts/AccountBalanceChart';
@@ -141,6 +142,20 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
         landscape={landscape}
         title={isValuation ? (account.is_liability ? 'Amount owed' : 'Current value') : 'Balance'}
       />
+
+      {/* A hand-valued investment account is refreshed from its statement, here on its own page:
+          the value, and the period's shares received. Never for a loan. */}
+      {isValuation && !account.is_liability && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-5 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-900">Update from a statement</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Upload the PDF to record its ending value and any shares received.
+            </p>
+          </div>
+          <StatementUpload accountId={id} />
+        </div>
+      )}
 
       {/* ONE CARD, NOT THREE. Three side by side leave a 390px phone about 90px per figure, and a
           five-figure amount in a monospace face does not fit in that — it truncates, which on a

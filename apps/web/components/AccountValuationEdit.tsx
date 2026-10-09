@@ -3,7 +3,6 @@
 import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Pencil, Check, X } from 'lucide-react';
-import StatementUpload from './StatementUpload';
 
 interface Props {
   accountId: string;
@@ -102,8 +101,6 @@ export default function AccountValuationEdit({ accountId, current, isLiability }
         <Pencil size={11} className="text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
       </button>
       {error && <p className="text-[10px] text-red-500">{error}</p>}
-      {/* An asset only: statements are read for investment accounts, never for a loan. */}
-      {!isLiability && <StatementUpload accountId={accountId} />}
     </div>
   );
 }

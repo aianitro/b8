@@ -7,8 +7,8 @@ import { valuationFindingText, type ValuationFinding } from '@/lib/domain/valuat
  *
  * Amber and one line, for the cash card's reasons: this says "a figure in your total is old", not
  * "something is wrong". And like it, it carries an action, because like cash nothing will clear it
- * on its own — a person has to upload the statement. The link goes to the Capital tab of the
- * accounts page, where the account's value and its Statement button sit.
+ * on its own — a person has to upload the statement. The link goes to the account's own page,
+ * where its statement upload sits.
  *
  * Silent when every hand-valued account is current.
  */
@@ -32,7 +32,7 @@ export default function ValuationStalenessCard({ findings }: { findings: Valuati
           </p>
         </div>
         <Link
-          href="/accounts?landscape=capital"
+          href={`/accounts/${worst.id}`}
           className="shrink-0 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-amber-100 text-amber-900 hover:bg-amber-200 transition-colors"
         >
           Update

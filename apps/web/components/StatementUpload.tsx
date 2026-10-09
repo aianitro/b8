@@ -21,8 +21,9 @@ function longDate(iso: string): string {
  * save. The server reads the PDF and replies with a preview; nothing is recorded until the owner
  * presses the tick, and the value is dated to the statement rather than to today.
  *
- * Beside the pencil rather than instead of it — typing a figure stays the fallback for a statement
- * the reader does not recognise, and for the days between statements.
+ * ON THE ACCOUNT'S OWN PAGE, not in the accounts list — the owner's call: uploading a statement is
+ * a visit to one account, and the list's rows are for scanning. The list keeps its pencil, so
+ * typing a figure stays the fallback for a statement the reader does not recognise.
  *
  * THE PERIOD'S SHARES RECEIVED come with it: each "Transfer into Account" row, ticked unless the
  * ledger already has it, recorded as an income transaction the way earlier vests were entered by
@@ -129,10 +130,10 @@ export default function StatementUpload({ accountId }: { accountId: string }) {
         onClick={() => inputRef.current?.click()}
         disabled={busy}
         title="Upload a statement"
-        className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-blue-600 disabled:opacity-50 transition-colors"
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
       >
-        <FileUp size={11} />
-        {busy && !reading ? 'Reading…' : 'Statement'}
+        <FileUp size={14} />
+        {busy && !reading ? 'Reading…' : 'Upload statement'}
       </button>
 
       {reading && (
