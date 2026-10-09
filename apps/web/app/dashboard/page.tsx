@@ -9,6 +9,7 @@ import AlertBell from '@/components/AlertBell';
 import CashStalenessCard from '@/components/CashStalenessCard';
 import ValuationStalenessCard from '@/components/ValuationStalenessCard';
 import { loadValuationFindings } from '@/lib/valuationStalenessRead';
+import { loadSuggestions } from '@/lib/categorySuggester';
 import WhereTheMonthSits, { type MonthCategoryView } from '@/components/WhereTheMonthSits';
 import RecentArrivals from '@/components/RecentArrivals';
 import UncategorizedCard from '@/components/UncategorizedCard';
@@ -291,6 +292,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const categoryOptions = await categoryOptionsPromise;
   const valuationFindings = await valuationFindingsPromise;
   const { thisMonth: offCycleThisMonth, earlier: offCycleEarlier } = await offCyclePromise;
+  // Suggested categories for the unfiled rows the Uncategorized panel lists.
+  const suggestions = Object.fromEntries(await loadSuggestions(unfiled.map((t) => t.id)));
 
   // EVERY operational spending category with an allocation this month, not the scored subset —
   // the bubbles are a map, not a judgement, and a map that omits groceries, fuel and utilities is
@@ -432,7 +435,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <ExpandableKpiCards
           unfiledCount={stats.uncategorized}
           unfiledPanel={
-            <UncategorizedCard items={unfiled} total={stats.uncategorized} categories={categoryOptions} />
+            <UncategorizedCard items={unfiled} total={stats.uncategorized} categories={categoryOptions} suggestions={suggestions} />
           }
           watchCount={watchlist.length}
           watchOldest={watchlist[0]?.daysOpen ?? 0}

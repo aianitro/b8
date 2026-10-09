@@ -4,6 +4,7 @@ import { useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Trash2, Eye, EyeOff, Copy, Flag } from 'lucide-react';
 import CategorySelect from './CategorySelect';
+import SuggestionChip, { type CategorySuggestionView } from './SuggestionChip';
 import MerchantMark from './MerchantMark';
 import { TransactionDetailButton } from './TransactionDetailSheet';
 import TransferLinkButton from './TransferLinkButton';
@@ -53,6 +54,8 @@ interface Props {
   categories: CategoryOption[];
   accounts: AccountOption[];
   properties: PropertyOption[];
+  /** Pending category suggestions for unfiled rows, by transaction id. */
+  suggestions?: Record<number, CategorySuggestionView>;
 }
 
 const fmt = (n: number) =>
@@ -445,7 +448,7 @@ const LANDSCAPE_BADGE: Record<string, string> = {
   capital: 'bg-violet-50 text-violet-600',
 };
 
-export default function TransactionTable({ transactions, categories, accounts, properties }: Props) {
+export default function TransactionTable({ transactions, categories, accounts, properties, suggestions = {} }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkCategory, setBulkCategory] = useState('');
@@ -767,6 +770,9 @@ export default function TransactionTable({ transactions, categories, accounts, p
                       categories={categories}
                       description={t.name ?? t.merchant_name}
                     />
+                    {t.mapped_category === null && suggestions[t.id] && (
+                      <div className="mt-1"><SuggestionChip suggestion={suggestions[t.id]} /></div>
+                    )}
                   </td>
                   <td className="col-start-2 col-span-2 row-start-5 empty:hidden min-w-0 sm:table-cell sm:px-6 sm:py-3.5">
                     <TransferLinkButton

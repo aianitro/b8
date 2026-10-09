@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import { loadSuggestions } from '@/lib/categorySuggester';
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { Upload } from 'lucide-react';
@@ -301,6 +302,10 @@ export default async function TransactionsPage({
     transferGroupValue !== null && !isNaN(transferGroupValue) ? transferGroupValue : null,
     merchantValue,
   );
+  // Pending category suggestions for the unfiled rows on screen — see lib/categorySuggester.ts.
+  const suggestions = Object.fromEntries(
+    await loadSuggestions(transactions.filter((t) => t.mapped_category === null).map((t) => t.id))
+  );
 
   const isDrilldown = drillCategories.length > 0 && Boolean(drillMonth);
   const drillBudget = isDrilldown ? await getDrilldownBudget(drillCategories, drillMonth as number) : null;
@@ -540,7 +545,7 @@ export default async function TransactionsPage({
           </p>
         </div>
       ) : (
-        <TransactionTable transactions={transactions} categories={categories} accounts={accounts} properties={properties} />
+        <TransactionTable transactions={transactions} categories={categories} accounts={accounts} properties={properties} suggestions={suggestions} />
       )}
     </div>
   );

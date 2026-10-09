@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Tag } from 'lucide-react';
 import TransactionEditButton from './TransactionEditButton';
+import SuggestionChip, { type CategorySuggestionView } from './SuggestionChip';
 import { TransactionDetailButton } from './TransactionDetailSheet';
 import type { CategoryOption } from '@/lib/transactionEdits';
 import type { UnfiledTransaction } from '@/app/dashboard/page';
@@ -33,11 +34,13 @@ const dayLabel = (iso: string) => {
  * the same predicate, so a backlog of forty shows twelve rows under a card reading forty. The line
  * at the foot says which twelve, rather than leaving the reader to wonder where the rest went.
  */
-export default function UncategorizedCard({ items, total, categories }: {
+export default function UncategorizedCard({ items, total, categories, suggestions = {} }: {
   items: UnfiledTransaction[];
   /** `stats.uncategorized` — the real count, which may exceed what is listed. */
   total: number;
   categories: CategoryOption[];
+  /** Pending category suggestions, by transaction id — a one-tap filing beside the editor. */
+  suggestions?: Record<number, CategorySuggestionView>;
 }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-6">
@@ -68,6 +71,13 @@ export default function UncategorizedCard({ items, total, categories }: {
                   <TransactionDetailButton transactionId={t.id} className="flex-1 truncate">
                     <span className="detail-title text-sm text-slate-700">{t.label}</span>
                   </TransactionDetailButton>
+                  {/* On a phone the suggestion takes the row's last line, under the label, so the
+                      merchant keeps its width; from `sm:` it sits inline before the figure. */}
+                  {suggestions[t.id] && (
+                    <div className="order-last basis-full pl-14 sm:order-none sm:basis-auto sm:pl-0">
+                      <SuggestionChip suggestion={suggestions[t.id]} />
+                    </div>
+                  )}
                   <span className={`text-xs font-mono shrink-0 w-20 text-right ${inbound ? 'text-emerald-600' : 'text-slate-700'}`}>
                     {inbound ? `+${fmt(t.amount)}` : fmt(t.amount)}
                   </span>

@@ -118,6 +118,12 @@ export async function createProposal(args: {
   rationale: string | null;
   proposedBy: string | null;
   now: Date;
+  /**
+   * How long the proposal stays confirmable. Defaults to the chat's short window (PROPOSAL_TTL_MS),
+   * which exists because a chat proposal is made mid-conversation and should be decided in it. The
+   * category suggester passes days instead: its proposals wait for the owner to next open the app.
+   */
+  ttlMs?: number;
 }): Promise<CreateResult> {
   const id = generateProposalId();
   const r = await db.query(
@@ -132,7 +138,7 @@ export async function createProposal(args: {
       JSON.stringify(args.proposed),
       JSON.stringify(args.observed),
       args.rationale,
-      expiryFrom(args.now).toISOString(),
+      (args.ttlMs === undefined ? expiryFrom(args.now) : new Date(args.now.getTime() + args.ttlMs)).toISOString(),
       args.proposedBy,
     ]
   );

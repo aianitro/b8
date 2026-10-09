@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { runSync } from '@/lib/sync';
+import { suggestCategories } from '@/lib/categorySuggester';
 import type { ApiResponse } from '@b8/contracts/types';
 import { createLogger } from '@/lib/logger';
 
@@ -12,6 +13,12 @@ export async function POST(req: NextRequest) {
     const force: boolean = body?.force === true;
 
     const result = await runSync({ accountId, force });
+
+    // Category suggestions for whatever just arrived, NOT AWAITED: the model call takes seconds,
+    // and the Sync button should not wait on a convenience. This is a long-lived Node server, so
+    // the promise finishes after the response; `suggestCategories` never rejects. Not `after()`,
+    // which throws outside a live request scope — every route test calls this handler directly.
+    void suggestCategories();
 
     if (result.errors.length > 0 && result.synced === 0) {
       return Response.json(

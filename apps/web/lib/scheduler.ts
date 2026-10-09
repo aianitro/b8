@@ -1,6 +1,7 @@
 import { runSync } from './sync';
 import { runDailyDigest } from './dailyDigest';
 import { sendWebPushIfDelivered } from './webPush';
+import { suggestCategories } from './categorySuggester';
 import { writeNetWorthSnapshot } from './netWorth';
 import { createLogger } from './logger';
 
@@ -47,6 +48,10 @@ export async function runDailyJob() {
   } catch (err) {
     log.error('net worth snapshot failed', { error: err instanceof Error ? err.message : String(err) });
   }
+
+  // Category suggestions for the rows this run pulled, before the digest, so the morning's
+  // unfiled rows already carry one when the owner opens the app. Resolves rather than rejects.
+  await suggestCategories();
 
   // Last, and after the syncs, so the outlook it reads is computed over the transactions this run
   // just pulled rather than yesterday's — an alert about a month the job has not finished loading
