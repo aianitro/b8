@@ -277,7 +277,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     // and nothing else here. It is still on the payload, and `/profit-loss` reads it.
     stats,
     recentArrivals, recentArrivalsTotal, uncategorized: unfiled, watchlist, yearEnd,
-    offCycleElsewhere, monthCategories,
+    offCycleElsewhere, offCycleThisMonth, monthCategories,
     feedFindings, driftFindings, jobHealth, walletFindings,
   } = dashboardFromWire(await loadOverview(now));
   // Started before the overview and collected here, so the two reads overlap rather than queue.
@@ -347,9 +347,16 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       {/* One panel where there were three, so the grid that sized itself to the survivors is gone
           with them — a single-column grid is a div, and the arithmetic behind it was machinery for
           a layout that no longer varies. */}
-      {offCycleElsewhere.length > 0 && (
+      {/* OFF-CYCLE: spending in a category whose schedule gives it nothing that month. This
+          month's lead, because they are the ones still happening; the earlier months follow. A
+          category with no budget this month has no tile in the picture below, so without this
+          panel a draw in the current month was nowhere on the page until the month after. */}
+      {(offCycleThisMonth.length > 0 || offCycleElsewhere.length > 0) && (
         <div className="mb-6">
-          <Panel title="Off-cycle earlier this year">
+          <Panel title="Off-cycle spending">
+            {offCycleThisMonth.map((c) => (
+              <CategoryLine key={`now-${c.categoryId}`} c={c} note="No budget this month" />
+            ))}
             {offCycleElsewhere.map((c) => (
               <CategoryLine key={`${c.categoryId}-${c.month}`} c={c} note={`${MONTHS[c.month]} drew outside its schedule`} />
             ))}

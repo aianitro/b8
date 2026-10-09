@@ -119,6 +119,10 @@ export function dashboardFromWire(data: OverviewData) {
       spent: money(b.spent),
     })),
     offCycleElsewhere: data.monthOutlook.offCycleElsewhere.map(outlookCategoryFromWire),
+    // THIS month's off-cycle draws: spending in a category whose schedule gives it nothing this
+    // month. The verdict was always on the payload, in `sayingNo`; the dashboard only ever showed
+    // the earlier-months list, so a draw in the current month was invisible until the month after.
+    offCycleThisMonth: data.monthOutlook.sayingNo.filter((c) => c.reason === 'off-cycle').map(outlookCategoryFromWire),
     monthCategories: data.monthCategories.map((c) => ({
       category: c.category,
       budgeted: money(c.budgeted),
