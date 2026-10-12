@@ -98,11 +98,16 @@ export const isTransferCategory = (name: string | null): boolean =>
  * derived boolean puts the rule at the call site, where two call sites eventually disagree about
  * what a payment looks like. The pattern lives here now and both pickers share it.
  */
-export function groupCategories(categories: CategoryOption[], description?: string | null) {
+export function groupCategories(categories: CategoryOption[], description?: string | null, aiSuggested?: string | null) {
   const sorted = categories.slice().sort((a, b) => a.name.localeCompare(b.name));
-  const suggested = TRANSFERISH.test(description ?? '')
-    ? sorted.filter((c) => TRANSFERISH.test(c.name))
+  // The category suggester's pick (history or model — lib/categorySuggester.ts) leads the group,
+  // ahead of the transfer heuristic: it was made for THIS row, the heuristic only for its wording.
+  // Only a category that exists, matched case-insensitively; anything else is ignored.
+  const ai = aiSuggested ? sorted.find((c) => c.name.toLowerCase() === aiSuggested.toLowerCase()) : undefined;
+  const transferish = TRANSFERISH.test(description ?? '')
+    ? sorted.filter((c) => TRANSFERISH.test(c.name) && c !== ai)
     : [];
+  const suggested = ai ? [ai, ...transferish] : transferish;
   const promoted = new Set(suggested.map((c) => c.name));
   const rest = sorted.filter((c) => !promoted.has(c.name));
   const operational = rest.filter((c) => !c.exclude_from_budget && c.landscape === 'operational');

@@ -81,9 +81,11 @@ const UNDO_WINDOW_MS = 5000;
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Math.abs(n));
 
-export default function TransactionEditButton({ row, categories }: {
+export default function TransactionEditButton({ row, categories, suggested }: {
   row: EditableRow;
   categories: CategoryOption[];
+  /** The suggester's category for this row, shown first in "Suggested" and marked ✨. */
+  suggested?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -196,7 +198,7 @@ export default function TransactionEditButton({ row, categories }: {
     setOpen(true);
   }
 
-  const groups = groupCategories(categories, row.label);
+  const groups = groupCategories(categories, row.label, row.category ? null : suggested);
   const owesAPair = isTransferCategory(category) && !paired;
   /** The warning waits for the lookup: until it answers, whether a pair is owed is unknown. */
   const showsPairWarning = owesAPair && counterparts !== null;
@@ -293,7 +295,11 @@ export default function TransactionEditButton({ row, categories }: {
               {(['suggested', 'operational', 'capital', 'excluded'] as const).map((key) =>
                 groups[key].length > 0 ? (
                   <optgroup key={key} label={GROUP_LABELS[key]}>
-                    {groups[key].map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    {groups[key].map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {key === 'suggested' && !row.category && suggested && c.name.toLowerCase() === suggested.toLowerCase() ? `✨ ${c.name}` : c.name}
+                      </option>
+                    ))}
                   </optgroup>
                 ) : null
               )}

@@ -10,11 +10,13 @@ interface Props {
   current: string | null;
   categories: Pick<BudgetCategory, 'name' | 'landscape' | 'exclude_from_budget'>[];
   description?: string | null;
+  /** The suggester's category for this row, shown first in "Suggested" and marked ✨. */
+  suggested?: string | null;
 }
 
 const UNDO_WINDOW_MS = 5000;
 
-export default function CategorySelect({ transactionId, current, categories, description }: Props) {
+export default function CategorySelect({ transactionId, current, categories, description, suggested }: Props) {
   const router = useRouter();
   const [value, setValue] = useState(current ?? '');
   const [saving, setSaving] = useState(false);
@@ -39,7 +41,7 @@ export default function CategorySelect({ transactionId, current, categories, des
 
   // The grouping moved to `lib/transactionEdits.ts` when the dashboard's row editor needed the
   // same three optgroups in the same order. One list, sorted once.
-  const groups = groupCategories(categories, description);
+  const groups = groupCategories(categories, description, current ? null : suggested);
 
   async function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const prev = value;
@@ -81,7 +83,9 @@ export default function CategorySelect({ transactionId, current, categories, des
           groups[key].length > 0 ? (
             <optgroup key={key} label={GROUP_LABELS[key]}>
               {groups[key].map((c) => (
-                <option key={c.name} value={c.name}>{c.name}</option>
+                <option key={c.name} value={c.name}>
+                  {key === 'suggested' && !current && suggested && c.name.toLowerCase() === suggested.toLowerCase() ? `✨ ${c.name}` : c.name}
+                </option>
               ))}
             </optgroup>
           ) : null

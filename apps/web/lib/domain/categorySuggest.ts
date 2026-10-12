@@ -30,6 +30,13 @@ export interface FiledExample {
   category: string;
 }
 
+/** A pending suggestion as the pages carry it to a picker: which proposal, which category, why. */
+export interface CategorySuggestionView {
+  proposalId: string;
+  category: string;
+  rationale: string | null;
+}
+
 export interface Suggestion {
   transactionId: number;
   category: string;

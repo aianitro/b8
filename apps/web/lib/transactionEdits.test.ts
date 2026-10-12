@@ -102,3 +102,26 @@ describe('isTransferCategory', () => {
     expect(isTransferCategory(null)).toBe(false);
   });
 });
+
+describe('groupCategories with a suggester pick', () => {
+  const cats = [
+    { name: 'Dining Out', landscape: 'operational', exclude_from_budget: false },
+    { name: 'Groceries', landscape: 'operational', exclude_from_budget: false },
+    { name: 'Transfers', landscape: 'operational', exclude_from_budget: true },
+  ];
+
+  it('leads "Suggested" with the pick and takes it out of its own group', () => {
+    const g = groupCategories(cats, 'FABRICATED MARKET', 'groceries');
+    expect(g.suggested.map((c) => c.name)).toEqual(['Groceries']);
+    expect(g.operational.map((c) => c.name)).toEqual(['Dining Out']);
+  });
+
+  it('puts the pick ahead of the transfer heuristic without repeating either', () => {
+    const g = groupCategories(cats, 'ONLINE TRANSFER TO SAVINGS', 'Transfers');
+    expect(g.suggested.map((c) => c.name)).toEqual(['Transfers']);
+  });
+
+  it('ignores a pick that is not a category', () => {
+    expect(groupCategories(cats, 'FABRICATED', 'Rocket Fuel').suggested).toEqual([]);
+  });
+});

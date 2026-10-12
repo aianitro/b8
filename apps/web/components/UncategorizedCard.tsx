@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Tag } from 'lucide-react';
 import TransactionEditButton from './TransactionEditButton';
-import SuggestionChip, { type CategorySuggestionView } from './SuggestionChip';
+import type { CategorySuggestionView } from '@/lib/domain/categorySuggest';
 import { TransactionDetailButton } from './TransactionDetailSheet';
 import type { CategoryOption } from '@/lib/transactionEdits';
 import type { UnfiledTransaction } from '@/app/dashboard/page';
@@ -39,7 +39,7 @@ export default function UncategorizedCard({ items, total, categories, suggestion
   /** `stats.uncategorized` — the real count, which may exceed what is listed. */
   total: number;
   categories: CategoryOption[];
-  /** Pending category suggestions, by transaction id — a one-tap filing beside the editor. */
+  /** Pending category suggestions, by transaction id — the editor's picker lists each one first. */
   suggestions?: Record<number, CategorySuggestionView>;
 }) {
   return (
@@ -71,19 +71,12 @@ export default function UncategorizedCard({ items, total, categories, suggestion
                   <TransactionDetailButton transactionId={t.id} className="flex-1 truncate">
                     <span className="detail-title text-sm text-slate-700">{t.label}</span>
                   </TransactionDetailButton>
-                  {/* On a phone the suggestion takes the row's last line, under the label, so the
-                      merchant keeps its width; from `sm:` it sits inline before the figure. */}
-                  {suggestions[t.id] && (
-                    <div className="order-last basis-full pl-14 sm:order-none sm:basis-auto sm:pl-0">
-                      <SuggestionChip suggestion={suggestions[t.id]} />
-                    </div>
-                  )}
                   <span className={`text-xs font-mono shrink-0 w-20 text-right ${inbound ? 'text-emerald-600' : 'text-slate-700'}`}>
                     {inbound ? `+${fmt(t.amount)}` : fmt(t.amount)}
                   </span>
                   {/* The verb this panel exists for. Opens on Category, which is the field every
                       row here is missing by definition. */}
-                  <TransactionEditButton categories={categories} row={t} />
+                  <TransactionEditButton categories={categories} row={t} suggested={suggestions[t.id]?.category} />
                 </div>
               );
             })}

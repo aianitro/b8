@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Trash2, Eye, EyeOff, Copy, Flag } from 'lucide-react';
 import CategorySelect from './CategorySelect';
-import SuggestionChip, { type CategorySuggestionView } from './SuggestionChip';
+import type { CategorySuggestionView } from '@/lib/domain/categorySuggest';
 import MerchantMark from './MerchantMark';
 import { TransactionDetailButton } from './TransactionDetailSheet';
 import TransferLinkButton from './TransferLinkButton';
@@ -769,10 +769,8 @@ export default function TransactionTable({ transactions, categories, accounts, p
                       current={t.mapped_category}
                       categories={categories}
                       description={t.name ?? t.merchant_name}
+                      suggested={suggestions[t.id]?.category}
                     />
-                    {t.mapped_category === null && suggestions[t.id] && (
-                      <div className="mt-1"><SuggestionChip suggestion={suggestions[t.id]} /></div>
-                    )}
                   </td>
                   <td className="col-start-2 col-span-2 row-start-5 empty:hidden min-w-0 sm:table-cell sm:px-6 sm:py-3.5">
                     <TransferLinkButton
