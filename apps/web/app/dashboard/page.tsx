@@ -10,6 +10,8 @@ import ValuationStalenessCard from '@/components/ValuationStalenessCard';
 import { loadValuationFindings } from '@/lib/valuationStalenessRead';
 import { loadSuggestions } from '@/lib/categorySuggester';
 import { loadBuckets } from '@/lib/unspentStore';
+import { loadOverdrafts } from '@/lib/overdraftWatch';
+import OverdraftCard from '@/components/OverdraftCard';
 import { PiggyBank } from 'lucide-react';
 import WhereTheMonthSits, { type MonthCategoryView } from '@/components/WhereTheMonthSits';
 import RecentArrivals from '@/components/RecentArrivals';
@@ -191,6 +193,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // scores — see `offCycleFrom`. Read beside the overview, like the two reads above.
   const offCyclePromise = loadOffCycle(asOf);
   const bucketsPromise = loadBuckets();
+  // Cash accounts below their cushion, from the last sync — the bell's first card.
+  const overdraftsPromise = loadOverdrafts();
   const valuationFindingsPromise = loadValuationFindings(
     `${asOf.year}-${String(asOf.month + 1).padStart(2, '0')}-${String(asOf.day).padStart(2, '0')}`);
 
@@ -216,6 +220,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const valuationFindings = await valuationFindingsPromise;
   const { thisMonth: offCycleThisMonth } = await offCyclePromise;
   // Unspent budget from closed months still waiting to be allocated, across both landscapes.
+  const overdrafts = await overdraftsPromise;
   const unspentWaiting = (await bucketsPromise).reduce((s, b) => s + Math.max(0, b.balance), 0);
   // Suggested categories for the unfiled rows the Uncategorized panel lists.
   const suggestions = Object.fromEntries(await loadSuggestions(unfiled.map((t) => t.id)));
@@ -250,10 +255,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {/* Counted by CARD, not by finding: two institutions behind is one message about the
             feed, and five drifting accounts is one message about the ledger. The number is how
             many things there are to read, which is the only sense in which a reader counts them. */}
-        <AlertBell count={(feedFindings.length > 0 ? 1 : 0) + (driftFindings.length > 0 ? 1 : 0)
+        <AlertBell count={(overdrafts.length > 0 ? 1 : 0) + (feedFindings.length > 0 ? 1 : 0) + (driftFindings.length > 0 ? 1 : 0)
           + (jobHealth.status !== 'fresh' ? 1 : 0) + (walletFindings.length > 0 ? 1 : 0)
           + (valuationFindings.length > 0 ? 1 : 0)}>
-          {/* First in the bell, because it outranks the other two: they each say a figure may be
+          {/* Ahead of everything: the others say a figure may be wrong or old, this says a fee is
+              coming, and it is the one with a deadline. */}
+          <OverdraftCard findings={overdrafts} />
+          {/* First of the freshness cards, because it outranks the other two: they each say a figure may be
               wrong, this says every figure may be old and the backups are missing as well. */}
           <JobHealthCard health={jobHealth} />
           <FeedHealthCard findings={feedFindings} />

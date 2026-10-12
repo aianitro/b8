@@ -41,6 +41,15 @@ CREATE TABLE IF NOT EXISTS accounts (
   -- Plaid's own last_status_change, not when this app read it: "degraded since Thursday" is useful,
   -- "we noticed at 6am" is about us.
   item_institution_status_at TIMESTAMPTZ,
+  -- Overdraft watch (migration 1792000000000; table overdraft_episodes below). Both INERT on any
+  -- account that is not a Plaid-fed depository account: the watcher never reads them there.
+  -- overdraft_watch is the per-account opt-out (e.g. overdraft protection drawing on savings),
+  -- TRUE by default so existing accounts are watched from the first sync. overdraft_cushion is the
+  -- line below which (strictly) the account is in an episode; zero means "warn when overdrawn" and
+  -- is a chosen threshold, not a missing value. Never negative.
+  overdraft_watch     BOOLEAN NOT NULL DEFAULT TRUE,
+  overdraft_cushion   NUMERIC(12, 2) NOT NULL DEFAULT 0
+    CONSTRAINT accounts_overdraft_cushion_nonnegative CHECK (overdraft_cushion >= 0),
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -428,6 +437,57 @@ CREATE TABLE IF NOT EXISTS alert_sends (
 -- Serves `WHERE fingerprint = $1 AND delivered`. Not partial on delivered, so the diagnostic read
 -- is served too. No attempted_at index unlike sync_log: this table grows by about one row a day.
 CREATE INDEX IF NOT EXISTS idx_alert_sends_fingerprint ON alert_sends(fingerprint);
+
+-- Overdraft watch (migration 1792000000000): one row per stretch a watched account spends below
+-- its cushion (accounts.overdraft_watch, accounts.overdraft_cushion).
+--
+-- The watched balance is, for a Plaid-fed depository account at sync time, the LOWER of Plaid's
+-- `available` and `current`, so neither pending holds nor pending deposits can hide a shortfall.
+-- It is stored nowhere else, which is why the episode is a stored record (the net_worth_snapshots
+-- exception): the readings cannot be reconstructed later. A sync where Plaid reported neither
+-- figure made no observation and must not open, extend or close anything.
+--
+-- Lifecycle per observed account, judged against the CURRENT accounts.overdraft_cushion:
+-- below with no open episode = INSERT; below with one open = UPDATE last_balance, last_seen_at,
+-- low_balance = LEAST(low_balance, reading); at or above with one open = set closed_at and nothing
+-- else, so last_balance stays the last BELOW-cushion reading. An account not observed (feed down,
+-- watch turned off) keeps its episode OPEN: closing it would claim a recovery nobody saw, and the
+-- ageing last_seen_at is how a reader tells "still below" from "not looked at since".
+--
+-- Holds figures, so it is never read into a push payload: the PWA push stays content-free
+-- (web_push_subscriptions below, and plan/tasks/P3-25-push-ping/DECISION.md).
+CREATE TABLE IF NOT EXISTS overdraft_episodes (
+  id            SERIAL PRIMARY KEY,
+  -- ON UPDATE CASCADE like every accounts(id) reference (reconciliation remaps ids in place).
+  -- ON DELETE CASCADE unlike most: alert state means nothing without its account, and NO ACTION
+  -- would break any account-delete path the first time the account had ever been low.
+  account_id    TEXT NOT NULL REFERENCES accounts(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  opened_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  closed_at     TIMESTAMPTZ,                       -- NULL = open, not "unknown"
+  cushion       NUMERIC(12, 2) NOT NULL CHECK (cushion >= 0),  -- the cushion the episode OPENED against; accounts.overdraft_cushion keeps no history
+  low_balance   NUMERIC(14, 2) NOT NULL,           -- signed (negative = overdrawn), lowest reading in the episode
+  last_balance  NUMERIC(14, 2) NOT NULL,           -- signed, most recent BELOW-cushion reading; never the balance "now"
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- when last_balance was read
+  -- Accepted by at least one live web push subscription. NULL while open = retry next sync; NULL on
+  -- a closed row = never delivered, and never pushed late, since by then it would be false.
+  pushed_at     TIMESTAMPTZ,
+  CONSTRAINT overdraft_episodes_closed_after_opened
+    CHECK (closed_at IS NULL OR closed_at >= opened_at),
+  CONSTRAINT overdraft_episodes_seen_in_episode
+    CHECK (last_seen_at >= opened_at AND (closed_at IS NULL OR last_seen_at <= closed_at)),
+  CONSTRAINT overdraft_episodes_pushed_after_opened
+    CHECK (pushed_at IS NULL OR pushed_at >= opened_at),
+  CONSTRAINT overdraft_episodes_low_is_lowest
+    CHECK (low_balance <= last_balance),
+  -- The opening reading was strictly below the opening cushion and the low only falls; a magnitude
+  -- stored for an overdrawn balance fails here instead of reading as healthy.
+  CONSTRAINT overdraft_episodes_low_below_cushion
+    CHECK (low_balance < cushion)
+);
+
+-- At most one open episode per account, so overlapping syncs cannot open two and push twice.
+CREATE UNIQUE INDEX IF NOT EXISTS overdraft_episodes_one_open
+  ON overdraft_episodes (account_id) WHERE closed_at IS NULL;
 
 -- Editable beginning balance for a whole landscape's budget in a given year — distinct from
 -- account_balances (per-account) and category_balances (per-category); this is the top-level

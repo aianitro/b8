@@ -9,6 +9,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     landscape?: Landscape; track_transactions?: boolean; bank?: string; name?: string;
     type?: string; subtype?: string | null;
     valuation_mode?: ValuationMode; is_liability?: boolean; property_id?: number | null;
+    overdraft_watch?: boolean; overdraft_cushion?: number;
   } = await req.json();
 
   if ('landscape' in body) {
@@ -104,6 +105,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // places to keep in sync.
   if ('property_id' in body) {
     await db.query('UPDATE accounts SET property_id = $1 WHERE id = $2', [body.property_id ?? null, id]);
+  }
+
+  // The overdraft watch's two settings (lib/overdraftWatch.ts): whether to watch, and the balance
+  // to warn under. Validated BEFORE either is written, so a bad cushion cannot land half a change.
+  if ('overdraft_cushion' in body) {
+    const c = body.overdraft_cushion;
+    if (typeof c !== 'number' || !Number.isFinite(c) || c < 0) {
+      return Response.json(
+        { success: false, error: { code: 'INVALID_INPUT', message: 'The cushion must be zero or more' } } satisfies ApiResponse<never>,
+        { status: 400 }
+      );
+    }
+    await db.query('UPDATE accounts SET overdraft_cushion = $1 WHERE id = $2', [Math.round(c * 100) / 100, id]);
+  }
+  if ('overdraft_watch' in body) {
+    await db.query('UPDATE accounts SET overdraft_watch = $1 WHERE id = $2', [body.overdraft_watch === true, id]);
   }
 
   return Response.json({ success: true, data: null } satisfies ApiResponse<null>);

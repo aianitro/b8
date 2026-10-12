@@ -1,3 +1,4 @@
+import type { CashObservation } from './domain/overdraft';
 import { plaidClient } from './plaid';
 import db from './db';
 import { matchAccounts, type DbAccountRow } from './plaidMatch';
@@ -30,6 +31,8 @@ export interface ReconcileResult {
   unmatchedLive: { id: string; name: string; mask: string | null }[];
   unmatchedDb: { id: string; name: string; mask: string | null }[];
   liveBalances: ObservedBalance[];
+  /** Cash accounts' current AND available balances, for the overdraft watch (lib/overdraftWatch.ts). */
+  liveCash: CashObservation[];
 }
 
 export async function reconcileAccountIds(accessToken: string): Promise<ReconcileResult> {
@@ -88,5 +91,10 @@ export async function reconcileAccountIds(accessToken: string): Promise<Reconcil
     unmatchedLive,
     unmatchedDb,
     liveBalances,
+    // Depository only: a credit card is negative by construction, and its `available` is remaining
+    // credit, not money. By TYPE, never by sign.
+    liveCash: live.data.accounts
+      .filter((a) => a.type === 'depository')
+      .map((a) => ({ accountId: a.account_id, current: a.balances.current, available: a.balances.available ?? null })),
   };
 }

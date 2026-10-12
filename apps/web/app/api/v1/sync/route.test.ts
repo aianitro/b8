@@ -59,7 +59,7 @@ vi.mock('@/lib/plaid', () => ({
 }));
 
 vi.mock('@/lib/plaidReconcile', () => ({
-  reconcileAccountIds: async () => ({ remapped: [], unmatchedLive: [], unmatchedDb: [], liveBalances: [] }),
+  reconcileAccountIds: async () => ({ remapped: [], unmatchedLive: [], unmatchedDb: [], liveBalances: [], liveCash: [] }),
 }));
 
 vi.mock('@/lib/plaidBalances', () => ({

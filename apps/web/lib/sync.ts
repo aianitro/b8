@@ -2,6 +2,8 @@ import { CountryCode, TransactionsUpdateStatus, type TransactionsSyncResponse } 
 import { plaidClient } from './plaid';
 import { reconcileAccountIds } from './plaidReconcile';
 import { recordPlaidBalances } from './plaidBalances';
+import { checkOverdraft } from './overdraftWatch';
+import type { CashObservation } from './domain/overdraft';
 import db from './db';
 import { createLogger } from './logger';
 import { matchReissuedTransactions } from './domain/txnMatch';
@@ -620,6 +622,7 @@ async function runSyncInner({
     'SELECT DISTINCT access_token FROM accounts WHERE access_token IS NOT NULL'
   );
   const reconciled: string[] = [];
+  const cash: CashObservation[] = [];
   for (const { access_token } of tokenRows) {
     try {
       const result = await reconcileAccountIds(access_token);
@@ -633,10 +636,15 @@ async function runSyncInner({
       } catch (err) {
         log.error('recording plaid balances failed', { error: err instanceof Error ? err.message : String(err) });
       }
+      cash.push(...result.liveCash);
     } catch (err) {
       log.error('reconcile failed for token', { error: err instanceof Error ? err.message : String(err) });
     }
   }
+
+  // On this sync's balances, before the transaction pass: a shortfall is news now, and the pass
+  // below can take a while. Resolves always (lib/overdraftWatch.ts).
+  await checkOverdraft(cash);
 
   const accounts = await db.query<{ id: string; access_token: string; cursor: string | null }>(
     'SELECT id, access_token, cursor FROM accounts WHERE access_token IS NOT NULL'

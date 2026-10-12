@@ -90,22 +90,34 @@ export function classifyStatus(status: number): 'delivered' | 'gone' | 'rejected
 }
 
 export async function sendWebPushIfDelivered(deliveredKinds: readonly AlertKind[]): Promise<void> {
-  try {
-    // THE SAME PREDICATE THE EXPO PATH USES, imported rather than restated. Newsworthiness is
-    // decided once, in `breachAlert`, recorded in `alert_sends`, and read here — a second notion of
-    // it on this path would be a second definition of the same thing.
-    if (!shouldPing(deliveredKinds)) return;
+  // THE SAME PREDICATE THE EXPO PATH USES, imported rather than restated. Newsworthiness is
+  // decided once, in `breachAlert`, recorded in `alert_sends`, and read here — a second notion of
+  // it on this path would be a second definition of the same thing.
+  if (!shouldPing(deliveredKinds)) return;
+  await sendWebPush('normal');
+}
 
+/**
+ * The ping itself, to every live subscription. Resolves to how many devices accepted it — zero when
+ * nothing was configured, nothing was registered, or every attempt failed — so a caller that must
+ * retry until a device has it (the overdraft watch) can tell.
+ *
+ * `urgency` is `high` only for an alarm with a deadline: an account below its cushion, where the
+ * fix is a transfer before the fee. The daily ping stays `normal`.
+ */
+export async function sendWebPush(urgency: 'normal' | 'high'): Promise<number> {
+  let delivered = 0;
+  try {
     const vapid = vapidFrom(process.env);
     if (vapid === null) {
       log.info('no VAPID keys on this machine, nothing attempted');
-      return;
+      return 0;
     }
 
     const endpoints = await liveSubscriptions();
     if (endpoints.length === 0) {
       log.info('no web push subscriptions registered');
-      return;
+      return 0;
     }
 
     // One request per subscription, sequential. There is no batch endpoint in Web Push — unlike
@@ -123,9 +135,9 @@ export async function sendWebPushIfDelivered(deliveredKinds: readonly AlertKind[
             TTL: String(TTL_SECONDS),
             // Apple refuses a push with no `Content-Length`, and an empty body needs it stated.
             'Content-Length': '0',
-            // What the notification is FOR. `Urgency: normal` is the default and is right: this is
-            // a once-a-day ping, not an alarm, and `high` costs battery for no benefit.
-            Urgency: 'normal',
+            // What the notification is FOR. `normal` for the once-a-day ping, where `high` costs
+            // battery for no benefit; `high` only for an alarm with a deadline.
+            Urgency: urgency,
           },
         });
         outcome = classifyStatus(response.status);
@@ -145,6 +157,7 @@ export async function sendWebPushIfDelivered(deliveredKinds: readonly AlertKind[
       }
 
       if (outcome === 'delivered') {
+        delivered++;
         await db.query('UPDATE web_push_subscriptions SET last_sent_at = NOW(), last_error = NULL WHERE endpoint = $1', [endpoint]);
       } else {
         // A DEAD SUBSCRIPTION REVOKES ITSELF. 404/410 is the push service saying this device will
@@ -165,6 +178,7 @@ export async function sendWebPushIfDelivered(deliveredKinds: readonly AlertKind[
     // inside the daily job that also runs the sync, the snapshot and the mail.
     log.error('web push failed', { error: err instanceof Error ? err.message : String(err) });
   }
+  return delivered;
 }
 
 /** Register or re-register a subscription. Re-subscribing the same device must not duplicate it. */

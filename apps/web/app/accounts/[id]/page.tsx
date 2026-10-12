@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import OverdraftSettings from '@/components/OverdraftSettings';
 import Link from 'next/link';
 import { Upload } from 'lucide-react';
 import db from '@/lib/db';
@@ -23,6 +24,7 @@ type AccountRow = {
   name: string; landscape: string; bank: string | null; mask: string | null;
   type: string; subtype: string | null; countable: boolean;
   valuation_mode: 'ledger' | 'valuation'; is_liability: boolean; linked: boolean; track_transactions: boolean;
+  overdraft_watch: boolean; overdraft_cushion: string;
 };
 
 type TxRow = {
@@ -45,7 +47,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
 
   const [accountRes, balanceRes, txRes, valuationRes, categoriesRes] = await Promise.all([
     db.query<AccountRow>(
-      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability, countable, track_transactions, access_token IS NOT NULL AS linked FROM accounts WHERE id = $1',
+      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability, countable, track_transactions, access_token IS NOT NULL AS linked, overdraft_watch, overdraft_cushion::text FROM accounts WHERE id = $1',
       [id]
     ),
     db.query<{ beginning_balance: string }>(
@@ -159,6 +161,12 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
           </div>
           <StatementUpload accountId={id} />
         </div>
+      )}
+
+      {/* Only a linked cash account: the watch reads the balance Plaid reports at each sync, which a
+          hand-kept or credit account does not have in the sense that matters. */}
+      {account.linked && account.type === 'depository' && (
+        <OverdraftSettings accountId={id} watch={account.overdraft_watch} cushion={Number(account.overdraft_cushion)} />
       )}
 
       {/* ONE CARD, NOT THREE. Three side by side leave a 390px phone about 90px per figure, and a
