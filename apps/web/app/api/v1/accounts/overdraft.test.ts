@@ -12,7 +12,7 @@ vi.mock('@/lib/webPush', () => ({
 }));
 
 import db from '@/lib/db';
-import { checkOverdraft, loadOverdrafts } from '@/lib/overdraftWatch';
+import { checkOverdraft, loadForecasts, loadOverdrafts } from '@/lib/overdraftWatch';
 import { PATCH } from './[id]/route';
 
 const P = 'overdraft-test';
@@ -29,6 +29,8 @@ const see = (current: number | null, available: number | null) => checkOverdraft
 
 async function cleanup() {
   await db.query('DELETE FROM overdraft_episodes WHERE account_id LIKE $1', [`${P}-%`]);
+  await db.query('DELETE FROM overdraft_forecasts WHERE account_id LIKE $1', [`${P}-%`]);
+  await db.query('DELETE FROM transactions WHERE plaid_transaction_id LIKE $1', [`${P}-%`]);
   await db.query('DELETE FROM accounts WHERE id LIKE $1', [`${P}-%`]);
 }
 
@@ -85,5 +87,41 @@ describe('overdraft watch', () => {
     expect((await episodes())[0].closed).toBe(false);
     expect((await loadOverdrafts()).find((f) => f.accountId === CHECKING)).toBeUndefined();
     expect(sent.calls).toEqual(['high']);
+  });
+});
+
+describe('overdraft forecast', () => {
+  // A fortnightly charge of 50 whose last instalment was 11 days ago: the next lands in 3 days.
+  beforeEach(async () => {
+    for (let i = 0; i < 4; i++) {
+      await db.query(
+        `INSERT INTO transactions (plaid_transaction_id, account_id, date, amount, name) VALUES ($1, $2, CURRENT_DATE - $3::int, 50, 'FABRICATED RENT')`,
+        [`${P}-rent${i}`, CHECKING, 11 + 14 * i]);
+    }
+  });
+  const forecasts = async () => (await db.query<{ closed: string | null; low: string; pushed: boolean }>(
+    `SELECT closed_reason AS closed, projected_low::text AS low, pushed_at IS NOT NULL AS pushed FROM overdraft_forecasts WHERE account_id = $1 ORDER BY id`, [CHECKING])).rows;
+
+  it('opens when the coming charge would overdraw, pushes at normal urgency once, and clears', async () => {
+    await see(30, 30);
+    expect(await forecasts()).toEqual([{ closed: null, low: '-20.00', pushed: true }]);
+    expect(sent.calls).toEqual(['normal']);
+    const f = (await loadForecasts()).find((x) => x.accountId === CHECKING);
+    expect(f?.charges).toEqual([expect.objectContaining({ label: 'FABRICATED RENT', amount: 50 })]);
+
+    await see(35, 35); // refreshed, not pushed again
+    expect(await forecasts()).toEqual([{ closed: null, low: '-15.00', pushed: true }]);
+    expect(sent.calls).toEqual(['normal']);
+
+    await see(100, 100);
+    expect(await forecasts()).toEqual([{ closed: 'cleared', low: '-15.00', pushed: true }]);
+  });
+
+  it('gives way to an episode when the forecast comes true', async () => {
+    await see(30, 30);
+    await see(-5, -5);
+    expect((await forecasts())[0].closed).toBe('episode');
+    expect((await episodes()).length).toBe(1);
+    expect(sent.calls).toEqual(['normal', 'high']);
   });
 });

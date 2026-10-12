@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stepEpisodes, watchedBalance } from './overdraft';
+import { stepEpisodes, stepForecasts, watchedBalance } from './overdraft';
 
 const on = (cushion = 0) => ({ watch: true, cushion });
 
@@ -48,5 +48,33 @@ describe('stepEpisodes', () => {
       { accountId: 'a', current: null, available: null },
     ], new Map([['a', on()]]), new Set(['a']));
     expect(steps).toEqual([]);
+  });
+});
+
+describe('stepForecasts', () => {
+  const p = (low: number) => ({ low, lowOn: '2026-10-15', charges: [{ label: 'Rent', amount: 50, on: '2026-10-15' }] });
+  const settings = new Map([['a', on()], ['b', on()], ['c', on()], ['d', on()], ['e', on()]]);
+  const seen = (id: string, bal = 30) => ({ accountId: id, current: bal, available: bal });
+
+  it('opens below the cushion, refreshes, clears, and yields to an episode', () => {
+    const steps = stepForecasts(
+      [seen('a'), seen('b'), seen('c'), seen('d', -5), seen('e')],
+      settings,
+      new Set(['d']),               // d is overdrawn now
+      new Set(['b', 'c', 'd']),
+      new Map([['a', p(-20)], ['b', p(-10)], ['c', p(5)], ['e', p(0)]]),
+    );
+    expect(steps.map((s) => [s.kind, s.accountId, 'reason' in s ? s.reason : null])).toEqual([
+      ['open', 'a', null],
+      ['refresh', 'b', null],
+      ['close', 'c', 'cleared'],
+      ['close', 'd', 'episode'],
+      // e: a low exactly at the cushion opens nothing.
+    ]);
+  });
+
+  it('clears an open forecast when the account has no projection at all', () => {
+    expect(stepForecasts([seen('a')], settings, new Set(), new Set(['a']), new Map()))
+      .toEqual([{ kind: 'close', accountId: 'a', reason: 'cleared' }]);
   });
 });

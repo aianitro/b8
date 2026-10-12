@@ -489,6 +489,74 @@ CREATE TABLE IF NOT EXISTS overdraft_episodes (
 CREATE UNIQUE INDEX IF NOT EXISTS overdraft_episodes_one_open
   ON overdraft_episodes (account_id) WHERE closed_at IS NULL;
 
+-- Overdraft forecast (migration 1792100000000): one row per stretch during which a watched account's
+-- 7-day projection goes STRICTLY below its cushion while the account is not yet in an episode.
+--
+-- The projection starts from the same watched balance as episodes (min of Plaid available/current at
+-- sync time) and applies recurring series detected from the account's own history: outflows on their
+-- due day, inflows only from the day after they land. It is derived and moves every sync, so it is
+-- not a column anywhere; it is stored here only because its starting reading is recorded nowhere
+-- else and the row is the push's idempotency record. The projection columns are a SNAPSHOT of the
+-- latest projection that went below, never "the forecast now"; readers show projected_at's age.
+--
+-- Lifecycle per observed watched account, against the CURRENT accounts.overdraft_cushion: open or
+-- opening episode = close any open forecast as 'episode' and open none; projected low below with
+-- none open = INSERT; below with one open = UPDATE all six projection columns together (cushion,
+-- balance, projected_low, low_on, charges, projected_at), never a subset; at or above with one open
+-- = set closed_at and closed_reason = 'cleared' and nothing else. Observed with no recurring series
+-- = a flat projection, which clears. Not observed (feed down, no balances, watch off) = leave as is.
+--
+-- Holds figures and merchant labels, so it is never read into a push payload (content-free push,
+-- plan/tasks/P3-25-push-ping/DECISION.md).
+CREATE TABLE IF NOT EXISTS overdraft_forecasts (
+  id             SERIAL PRIMARY KEY,
+  -- Same FK actions as overdraft_episodes.account_id, for the same reasons.
+  account_id     TEXT NOT NULL REFERENCES accounts(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  opened_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  closed_at      TIMESTAMPTZ,                       -- NULL = open, not "unknown"
+  -- 'cleared' = a later projection no longer went below (not "recovered": the account was never
+  -- below); 'episode' = the account opened an overdraft_episodes row (not "overdrawn": below the
+  -- cushion is overdrawn only when the cushion is zero). NULL exactly when open.
+  closed_reason  TEXT CHECK (closed_reason IN ('cleared', 'episode')),
+  -- The cushion the LATEST stored projection was judged against, refreshed with it; unlike episodes,
+  -- whose readings accumulate, a forecast's projection is replaced wholesale and must stay
+  -- self-consistent. accounts.overdraft_cushion keeps no history.
+  cushion        NUMERIC(12, 2) NOT NULL CHECK (cushion >= 0),
+  balance        NUMERIC(14, 2) NOT NULL,           -- signed (negative = overdrawn), the reading the latest stored projection started from
+  projected_low  NUMERIC(14, 2) NOT NULL,           -- signed, lowest balance in that projection's 7-day window
+  low_on         DATE NOT NULL,                     -- first local calendar day projected_low is reached, within 7 days of projected_at
+  -- [{"label": text, "amount": number, "on": "YYYY-MM-DD"}, ...]: every projected outflow due on or
+  -- before low_on, date order, amount a POSITIVE magnitude rounded to cents. Display only, never
+  -- summed back into money math; projected_low is authoritative. Never empty, and no DEFAULT, so an
+  -- INSERT that forgot it fails instead of recording a forecast with no cause.
+  charges        JSONB NOT NULL
+    CONSTRAINT overdraft_forecasts_charges_nonempty_array
+      CHECK (jsonb_typeof(charges) = 'array' AND jsonb_array_length(charges) >= 1),
+  projected_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- when the latest stored projection was computed
+  -- Accepted by at least one live web push subscription. NULL while open = retry next sync; NULL on
+  -- a closed row = never delivered, and never pushed late.
+  pushed_at      TIMESTAMPTZ,
+  CONSTRAINT overdraft_forecasts_closed_reason_iff_closed
+    CHECK ((closed_at IS NULL) = (closed_reason IS NULL)),
+  CONSTRAINT overdraft_forecasts_closed_after_opened
+    CHECK (closed_at IS NULL OR closed_at >= opened_at),
+  CONSTRAINT overdraft_forecasts_projected_in_forecast
+    CHECK (projected_at >= opened_at AND (closed_at IS NULL OR projected_at <= closed_at)),
+  CONSTRAINT overdraft_forecasts_pushed_while_open
+    CHECK (pushed_at IS NULL OR (pushed_at >= opened_at AND (closed_at IS NULL OR pushed_at <= closed_at))),
+  -- A start below the cushion is an episode, never a forecast. Safe only because cushion is
+  -- refreshed with balance.
+  CONSTRAINT overdraft_forecasts_start_at_or_above_cushion
+    CHECK (balance >= cushion),
+  -- Why the row exists; a magnitude stored for a negative projected balance fails here.
+  CONSTRAINT overdraft_forecasts_low_below_cushion
+    CHECK (projected_low < cushion)
+);
+
+-- At most one open forecast per account, so overlapping syncs cannot open two and push twice.
+CREATE UNIQUE INDEX IF NOT EXISTS overdraft_forecasts_one_open
+  ON overdraft_forecasts (account_id) WHERE closed_at IS NULL;
+
 -- Editable beginning balance for a whole landscape's budget in a given year — distinct from
 -- account_balances (per-account) and category_balances (per-category); this is the top-level
 -- number the annual budget page nets everything else against. See app/api/budget/settings/route.ts,

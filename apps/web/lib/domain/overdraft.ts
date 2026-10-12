@@ -74,3 +74,54 @@ export function stepEpisodes(
   }
   return steps;
 }
+
+/** One sync's projection for an account, as `./cashForecast`'s `projectBalance` returns it. */
+export interface ForecastInput {
+  low: number;
+  lowOn: string;
+  charges: { label: string; amount: number; on: string }[];
+}
+
+export type ForecastStep =
+  | { kind: 'open' | 'refresh'; accountId: string; cushion: number; balance: number; projection: ForecastInput }
+  | { kind: 'close'; accountId: string; reason: 'cleared' | 'episode' };
+
+/**
+ * What this sync's projections do to the forecasts (migrations/1792100000000_overdraft-forecast.sql).
+ *
+ * - an episode is open after this sync's steps → CLOSE any open forecast as `episode` and open
+ *   none: the account is already below, and the episode carries it from here;
+ * - projected low strictly below the cushion → OPEN one, or REFRESH the open one whole;
+ * - at or above, one open → CLOSE it as `cleared`. An account with no projection (no steady series)
+ *   is flat, which clears.
+ *
+ * As with episodes, an account not observed, with the watch off, or with no balance is left alone.
+ */
+export function stepForecasts(
+  observations: readonly CashObservation[],
+  settings: ReadonlyMap<string, WatchSettings>,
+  episodeOpen: ReadonlySet<string>,
+  forecastOpen: ReadonlySet<string>,
+  projections: ReadonlyMap<string, ForecastInput>,
+): ForecastStep[] {
+  const steps: ForecastStep[] = [];
+  const cents = (n: number) => Math.round(n * 100);
+  for (const o of observations) {
+    const s = settings.get(o.accountId);
+    if (!s || !s.watch) continue;
+    const balance = watchedBalance(o);
+    if (balance === null) continue;
+    const isOpen = forecastOpen.has(o.accountId);
+    if (episodeOpen.has(o.accountId)) {
+      if (isOpen) steps.push({ kind: 'close', accountId: o.accountId, reason: 'episode' });
+      continue;
+    }
+    const p = projections.get(o.accountId);
+    if (p && cents(p.low) < cents(s.cushion) && p.charges.length > 0) {
+      steps.push({ kind: isOpen ? 'refresh' : 'open', accountId: o.accountId, cushion: s.cushion, balance, projection: p });
+    } else if (isOpen) {
+      steps.push({ kind: 'close', accountId: o.accountId, reason: 'cleared' });
+    }
+  }
+  return steps;
+}
