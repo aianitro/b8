@@ -39,7 +39,9 @@ type DbRow = {
 
 async function getGridData(landscape: Landscape, currentMonth: number): Promise<GridRow[]> {
   const result = await db.query<DbRow>(`
-    SELECT bc.id, bc.name, bc.landscape, bc.annual_budget::text, bc.monthly_amounts, bc.is_income, bc.sort_order,
+    -- The month cells read effective_budget()'s schedule, so unspent money carried into a month
+    -- raises that month's plan; the annual figure stays the stored one (see lib/unspentStore.ts).
+    SELECT bc.id, bc.name, bc.landscape, bc.annual_budget::text, eb.monthly_amounts::text[] AS monthly_amounts, bc.is_income, bc.sort_order,
            m.month::int AS month,
            CASE
              WHEN bc.is_income THEN
@@ -48,6 +50,7 @@ async function getGridData(landscape: Landscape, currentMonth: number): Promise<
                COALESCE(SUM(t.amount), 0)
            END::text AS amount
     FROM budget_categories bc
+    JOIN effective_budget(EXTRACT(YEAR FROM CURRENT_DATE)::int) eb ON eb.category_id = bc.id
     CROSS JOIN generate_series(1, 12) AS m(month)
     LEFT JOIN transactions t
       ON t.mapped_category = bc.name
@@ -58,7 +61,7 @@ async function getGridData(landscape: Landscape, currentMonth: number): Promise<
     WHERE bc.exclude_from_budget = FALSE
       AND bc.landscape = $1
       AND (t.id IS NULL OR a.id IS NOT NULL)
-    GROUP BY bc.id, bc.name, bc.landscape, bc.annual_budget, bc.monthly_amounts, bc.is_income, bc.sort_order, m.month
+    GROUP BY bc.id, bc.name, bc.landscape, bc.annual_budget, eb.monthly_amounts, bc.is_income, bc.sort_order, m.month
     ORDER BY bc.is_income DESC, bc.sort_order, bc.name, m.month
   `, [landscape]);
 

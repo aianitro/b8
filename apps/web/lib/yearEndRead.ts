@@ -50,7 +50,8 @@ export async function loadYearEnd(
       is_income: boolean; annual_budget: string; monthly_amounts: string[] | null;
       closed_months: string; current_month: string; ytd: string; monthly_actuals: string[] | null;
     }>(`
-      SELECT bc.is_income, bc.annual_budget::text, bc.monthly_amounts,
+      -- The monthly plan from effective_budget(), which adds unspent money carried into this year.
+      SELECT bc.is_income, eb.annual_budget::text AS annual_budget, eb.monthly_amounts::text[] AS monthly_amounts,
              COALESCE(SUM(t.amount) FILTER (WHERE EXTRACT(MONTH FROM t.date) < $3), 0)::text AS closed_months,
              COALESCE(SUM(t.amount) FILTER (WHERE EXTRACT(MONTH FROM t.date) = $3), 0)::text AS current_month,
              COALESCE(SUM(t.amount), 0)::text AS ytd,
@@ -67,13 +68,14 @@ export async function loadYearEnd(
                    AND t2.account_id IN (SELECT id FROM accounts WHERE track_transactions = TRUE)
                  GROUP BY g.m ORDER BY g.m))::text[] AS monthly_actuals
         FROM budget_categories bc
+        JOIN effective_budget($1) eb ON eb.category_id = bc.id
         LEFT JOIN transactions t ON t.mapped_category = bc.name
           AND EXTRACT(YEAR FROM t.date) = $1 AND t.hidden = FALSE
         LEFT JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
        WHERE bc.exclude_from_budget = FALSE
          AND bc.landscape = $2
          AND (t.id IS NULL OR a.id IS NOT NULL)
-       GROUP BY bc.id, bc.is_income, bc.annual_budget, bc.monthly_amounts
+       GROUP BY bc.id, bc.is_income, eb.annual_budget, eb.monthly_amounts
     `, [asOf.year, landscape, asOf.month + 1]),
 
     // Unfiled rows, scoped by the ACCOUNT's landscape because they have no category to carry one.

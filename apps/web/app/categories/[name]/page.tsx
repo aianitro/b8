@@ -52,8 +52,11 @@ export default async function CategoryStatementPage({
 
   const [categoryRes, balanceRes, txRes, categoriesRes] = await Promise.all([
     db.query<Pick<BudgetCategory, 'id' | 'name' | 'landscape' | 'annual_budget' | 'exclude_from_budget' | 'monthly_amounts' | 'is_income'>>(
-      'SELECT id, name, landscape, annual_budget, exclude_from_budget, monthly_amounts, is_income FROM budget_categories WHERE name = $1 ORDER BY id LIMIT 1',
-      [name]
+      // The schedule from effective_budget() for this year, so carried unspent money shows.
+      `SELECT bc.id, bc.name, bc.landscape, bc.annual_budget, bc.exclude_from_budget, eb.monthly_amounts, bc.is_income
+         FROM budget_categories bc JOIN effective_budget($2) eb ON eb.category_id = bc.id
+        WHERE bc.name = $1 ORDER BY bc.id LIMIT 1`,
+      [name, year]
     ),
     db.query<{ beginning_balance: string }>(
       'SELECT beginning_balance FROM category_balances WHERE category_name = $1 AND year = $2',

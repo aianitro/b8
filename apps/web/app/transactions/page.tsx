@@ -242,10 +242,12 @@ type DrillBudgetRow = {
  */
 async function getDrilldownBudget(categories: string[], month: number) {
   const { rows } = await db.query<DrillBudgetRow>(
-    `SELECT name, is_income, annual_budget::text, monthly_amounts
-       FROM budget_categories
-      WHERE name = ANY($1) AND exclude_from_budget = FALSE`,
-    [categories]
+    // The month's plan from effective_budget(), so a carry of unspent money into it counts.
+    `SELECT bc.name, bc.is_income, bc.annual_budget::text, eb.monthly_amounts::text[] AS monthly_amounts
+       FROM budget_categories bc
+       JOIN effective_budget($2) eb ON eb.category_id = bc.id
+      WHERE bc.name = ANY($1) AND bc.exclude_from_budget = FALSE`,
+    [categories, new Date().getFullYear()]
   );
   if (rows.length === 0) return null;
   const budget = rows.reduce((sum, r) => {

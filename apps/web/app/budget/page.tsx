@@ -11,6 +11,8 @@ import BudgetViewToggle from '@/components/BudgetViewToggle';
 import BudgetTabsToggle from '@/components/BudgetTabsToggle';
 import BeginningBalanceEdit from '@/components/BeginningBalanceEdit';
 import KpiCard from '@/components/KpiCard';
+import UnspentBuckets from '@/components/UnspentBuckets';
+import { loadBuckets } from '@/lib/unspentStore';
 
 type SummaryRow = BudgetSummary & { landscape: Landscape; is_income: boolean; monthly_amounts: string[] | null; closed_months: string; current_month: string };
 interface UncategorizedRow { landscape: Landscape; count: string; total_out: string; total_in: string; }
@@ -22,7 +24,10 @@ const pct = (spent: number, budget: number) =>
 
 async function getBudgetSummary(): Promise<SummaryRow[]> {
   const result = await db.query<SummaryRow>(`
-    SELECT bc.name AS category, bc.landscape, bc.is_income, bc.annual_budget, bc.monthly_amounts,
+    -- The schedule from effective_budget(): the "expected so far" behind the pace pill counts any
+    -- unspent money carried into a month. The annual figure and "remaining" stay the stored ones —
+    -- they already count an earlier month's leftover as remaining (lib/unspentStore.ts).
+    SELECT bc.name AS category, bc.landscape, bc.is_income, bc.annual_budget, eb.monthly_amounts,
            -- Net of refunds, NOT gross outflow. Filtering to amount > 0 counted money leaving
            -- and ignored money coming back, so Travel read 23,373 here against the monthly
            -- grid's 19,274 for the same year -- one page calling a cancelled booking spending
@@ -43,13 +48,14 @@ async function getBudgetSummary(): Promise<SummaryRow[]> {
              WHERE EXTRACT(MONTH FROM t.date) = EXTRACT(MONTH FROM CURRENT_DATE)), 0) AS current_month,
            ROUND(bc.annual_budget / 12, 2)                                            AS monthly_reference
     FROM budget_categories bc
+    JOIN effective_budget(EXTRACT(YEAR FROM CURRENT_DATE)::int) eb ON eb.category_id = bc.id
     LEFT JOIN transactions t ON t.mapped_category = bc.name
       AND EXTRACT(YEAR FROM t.date) = EXTRACT(YEAR FROM CURRENT_DATE)
       AND t.hidden = FALSE
     LEFT JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
     WHERE bc.exclude_from_budget = FALSE
       AND (t.id IS NULL OR a.id IS NOT NULL)
-    GROUP BY bc.name, bc.landscape, bc.is_income, bc.annual_budget, bc.monthly_amounts ORDER BY bc.name
+    GROUP BY bc.name, bc.landscape, bc.is_income, bc.annual_budget, eb.monthly_amounts ORDER BY bc.name
   `);
   return result.rows;
 }
@@ -205,7 +211,7 @@ export default async function BudgetPage({ searchParams }: PageProps) {
 
   const year = new Date().getFullYear();
 
-  const [summary, uncategorized, settingsRow, yearEnd] = await Promise.all([
+  const [summary, uncategorized, settingsRow, yearEnd, buckets, destinations] = await Promise.all([
     getBudgetSummary(),
     getUncategorized(landscape),
     db.query<{ beginning_balance: string }>(
@@ -213,6 +219,11 @@ export default async function BudgetPage({ searchParams }: PageProps) {
       [year, landscape]
     ),
     loadYearEnd(landscape, { year, month: new Date().getMonth() }),
+    loadBuckets(),
+    // Where a carry may land: spending categories, both landscapes.
+    db.query<{ id: number; name: string }>(
+      'SELECT id, name FROM budget_categories WHERE is_income = FALSE AND exclude_from_budget = FALSE ORDER BY name'
+    ).then((r) => r.rows),
   ]);
 
   const beginningBalance = Number(settingsRow.rows[0]?.beginning_balance ?? 0);
@@ -303,6 +314,13 @@ export default async function BudgetPage({ searchParams }: PageProps) {
               sub={`${fmt(totalSpent)} spent of ${fmt(totalBudget)}`}
             />
           </div>
+
+          {/* This tab's categories' unspent leftovers from closed months, waiting to be allocated. */}
+          <UnspentBuckets
+            buckets={buckets.filter((b) => b.landscape === landscape)}
+            destinations={destinations}
+            today={{ year, month: new Date().getMonth() + 1 }}
+          />
 
           {view === 'monthly' ? (
             <>

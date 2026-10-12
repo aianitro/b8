@@ -9,6 +9,8 @@ import CashStalenessCard from '@/components/CashStalenessCard';
 import ValuationStalenessCard from '@/components/ValuationStalenessCard';
 import { loadValuationFindings } from '@/lib/valuationStalenessRead';
 import { loadSuggestions } from '@/lib/categorySuggester';
+import { loadBuckets } from '@/lib/unspentStore';
+import { PiggyBank } from 'lucide-react';
 import WhereTheMonthSits, { type MonthCategoryView } from '@/components/WhereTheMonthSits';
 import RecentArrivals from '@/components/RecentArrivals';
 import UncategorizedCard from '@/components/UncategorizedCard';
@@ -188,6 +190,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // Off-cycle draws for every budgeted category, not only the discretionary ones the outlook
   // scores — see `offCycleFrom`. Read beside the overview, like the two reads above.
   const offCyclePromise = loadOffCycle(asOf);
+  const bucketsPromise = loadBuckets();
   const valuationFindingsPromise = loadValuationFindings(
     `${asOf.year}-${String(asOf.month + 1).padStart(2, '0')}-${String(asOf.day).padStart(2, '0')}`);
 
@@ -212,6 +215,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const categoryOptions = await categoryOptionsPromise;
   const valuationFindings = await valuationFindingsPromise;
   const { thisMonth: offCycleThisMonth } = await offCyclePromise;
+  // Unspent budget from closed months still waiting to be allocated, across both landscapes.
+  const unspentWaiting = (await bucketsPromise).reduce((s, b) => s + Math.max(0, b.balance), 0);
   // Suggested categories for the unfiled rows the Uncategorized panel lists.
   const suggestions = Object.fromEntries(await loadSuggestions(unfiled.map((t) => t.id)));
 
@@ -369,6 +374,15 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           request — this dashboard is mostly read in the PWA now, and circle packing spends a third
           of a phone-width box on the gaps between circles. `asOf.month` rather than the component's
           own clock: the tiles and the link out of them should name one month. */}
+      {/* A reminder, not a figure to steer by: leftovers from closed months the owner has not yet
+          carried or released. One line, only when there is something waiting. */}
+      {unspentWaiting > 0 && (
+        <Link href="/budget" className="mb-3 sm:mb-4 flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800 hover:bg-emerald-100 transition-colors">
+          <PiggyBank size={16} className="shrink-0" />
+          <span><span className="font-mono font-semibold">{fmt(unspentWaiting)}</span> unspent to allocate</span>
+          <span className="ml-auto text-emerald-600">→</span>
+        </Link>
+      )}
       <WhereTheMonthSits categories={monthShape} month={asOf.month} />
 
       {/* Charts. THE PROFIT & LOSS CHART MOVED to `/profit-loss` on 2026-10-01 at the owner's

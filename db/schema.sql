@@ -440,6 +440,95 @@ CREATE TABLE IF NOT EXISTS budget_settings (
   PRIMARY KEY (year, landscape)
 );
 
+-- The "Unspent" bucket per spending category (migration 1791900000000). When a month closes, a
+-- spending category's leftover (that month's plan minus what it actually spent, when positive) goes
+-- into its bucket; an overspent month adds and takes nothing. Nothing carries automatically: the
+-- owner CARRIES an amount into a month (same category or another, current month or later), raising
+-- that month's plan, or RELEASES it to savings. Unallocated leftover counts as saved, so no figure
+-- may assume it will be spent. Operational and capital spending categories only, never income or
+-- excluded ones, from the September 2026 close onward: enforced by the job and the allocation
+-- endpoint, not here.
+--
+-- Balance = SUM(budget_unspent.amount) - SUM(budget_unspent_moves.amount) per category_id,
+-- computed on read. No stored balance column: it would be a "current value" that goes stale.
+--
+-- budget_unspent is a recorded snapshot, the same narrow exception as net_worth_snapshots: the
+-- leftover could be recomputed from transactions, but a late Plaid backfill would then shrink a
+-- bucket the owner had already allocated from. One row per spending category with a plan above zero
+-- per CLOSED month, written once (a re-run must not refresh it), INCLUDING a zero row when the
+-- category spent its plan or more. The zero rows record "closed" exactly once per category-month, so
+-- a late refund can never insert a row afterwards; they add nothing to the balance. Months close only
+-- from the 4th of the following month, so pending transactions have posted before actual is frozen.
+CREATE TABLE IF NOT EXISTS budget_unspent (
+  id           SERIAL PRIMARY KEY,
+  category_id  INT NOT NULL REFERENCES budget_categories(id) ON DELETE CASCADE,
+  year         INT NOT NULL,
+  month        INT NOT NULL CHECK (month BETWEEN 1 AND 12),  -- 1-based, like the calendar; not JavaScript's 0-based month
+  amount       NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),  -- max(0, planned - actual) from the rounded planned; 0 = spent the plan or more
+  planned      NUMERIC(12, 2) NOT NULL,                      -- the month's plan as the job saw it, carries into that month included (effective_budget), rounded to cents
+  actual       NUMERIC(12, 2) NOT NULL,                      -- spend at close, frozen; later ledger edits do not reach it
+  recorded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (category_id, year, month)
+);
+
+-- Each allocation out of a bucket, append-only. 'carry' raises the plan of (to_category_id,
+-- to_year, to_month); 'release' gives the amount up to savings and has no destination. The
+-- destination NULLs mean "no destination", not "unknown", hence the constraint tying them to the
+-- action. "Current month or later" depends on today's date and is enforced by the endpoint.
+-- Deleting the destination category cascades the carry away and returns the amount to the source
+-- bucket's balance.
+CREATE TABLE IF NOT EXISTS budget_unspent_moves (
+  id              SERIAL PRIMARY KEY,
+  category_id     INT NOT NULL REFERENCES budget_categories(id) ON DELETE CASCADE,  -- the bucket drawn FROM
+  amount          NUMERIC(12, 2) NOT NULL CHECK (amount > 0),                        -- positive magnitude; direction is never a sign
+  action          TEXT NOT NULL CHECK (action IN ('carry', 'release')),
+  to_category_id  INT REFERENCES budget_categories(id) ON DELETE CASCADE,
+  to_year         INT,
+  to_month        INT CHECK (to_month BETWEEN 1 AND 12),                             -- 1-based, like budget_unspent.month
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT budget_unspent_moves_destination
+    CHECK ((action = 'carry') = (to_category_id IS NOT NULL AND to_year IS NOT NULL AND to_month IS NOT NULL))
+);
+
+-- Serves effective_budget(y). Partial: a release has no destination and is never read this way.
+CREATE INDEX IF NOT EXISTS budget_unspent_moves_into
+  ON budget_unspent_moves (to_year, to_category_id) WHERE action = 'carry';
+
+-- Every category's plan for year y with carries into that year overlaid. A function, not a write
+-- into budget_categories, because monthly_amounts is a YEAR-LESS repeating schedule: a carry into
+-- one year's March has no cell of its own there. Readers of a year's plan JOIN this function; the
+-- raw columns are the plan WITHOUT the owner's carries.
+--   * No carries into y: EXACTLY the stored annual_budget and monthly_amounts (NULL stays NULL).
+--   * Carries into y: annual_budget + their sum, and an explicit 12-element schedule, January
+--     first, of COALESCE(monthly_amounts[g], annual_budget / 12) + carries into month g.
+--   * annual_budget / 12 is NOT rounded here; readers round, as they already must for an even spread.
+-- Returns every category, income and excluded included; filtering stays with the caller.
+CREATE OR REPLACE FUNCTION effective_budget(y INT)
+RETURNS TABLE (category_id INT, annual_budget NUMERIC, monthly_amounts NUMERIC[])
+LANGUAGE sql STABLE
+AS $$
+  WITH carried AS (
+    SELECT to_category_id AS cid, to_month AS m, SUM(amount) AS amt
+      FROM budget_unspent_moves
+     WHERE action = 'carry' AND to_year = y
+     GROUP BY 1, 2
+  ),
+  touched AS (SELECT DISTINCT cid FROM carried)
+  SELECT bc.id,
+         CASE WHEN t.cid IS NULL THEN bc.annual_budget
+              ELSE bc.annual_budget + (SELECT COALESCE(SUM(c.amt), 0) FROM carried c WHERE c.cid = bc.id)
+         END,
+         CASE WHEN t.cid IS NULL THEN bc.monthly_amounts
+              ELSE ARRAY(
+                SELECT COALESCE(bc.monthly_amounts[g], bc.annual_budget / 12)
+                       + COALESCE((SELECT c.amt FROM carried c WHERE c.cid = bc.id AND c.m = g), 0)
+                  FROM generate_series(1, 12) g
+                 ORDER BY g)
+         END
+    FROM budget_categories bc
+    LEFT JOIN touched t ON t.cid = bc.id
+$$;
+
 -- Net worth over time. Unlike account_valuations/property_valuations, which record observations
 -- of a single thing, this stores the *computed* statement at a point in time. Stored rather than
 -- recomputed because it can't be reconstructed later: the calculation depends on which accounts

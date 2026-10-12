@@ -67,13 +67,19 @@ interface CategoryRow {
   monthly_amounts: string[] | null;
 }
 
-async function getBudgetCategories(): Promise<CategoryRow[]> {
+/**
+ * The categories with their plan FOR THIS YEAR — `effective_budget` adds any unspent money the
+ * owner carried into a month (migrations/1791900000000_budget-unspent.sql). A category with no
+ * carries comes back exactly as stored, so for most rows this is the raw table.
+ */
+async function getBudgetCategories(year: number): Promise<CategoryRow[]> {
   const result = await db.query<CategoryRow>(`
     SELECT bc.id, bc.name, bc.landscape, bc.exclude_from_budget, bc.is_income, bc.control_mode,
-           bc.annual_budget::text, bc.monthly_amounts
+           eb.annual_budget::text AS annual_budget, eb.monthly_amounts::text[] AS monthly_amounts
       FROM budget_categories bc
+      JOIN effective_budget($1) eb ON eb.category_id = bc.id
      ORDER BY bc.sort_order, bc.name
-  `);
+  `, [year]);
   return result.rows;
 }
 
@@ -338,7 +344,7 @@ export interface MonthOutlookRead {
 
 export async function loadMonthOutlook(asOf: AsOf): Promise<MonthOutlookRead> {
   const [categories, actuals, coverageGroups, recurrenceWindow] = await Promise.all([
-    getBudgetCategories(), getMonthlyActuals(asOf), getCoverageGroups(asOf), getRecurrenceWindow(asOf),
+    getBudgetCategories(asOf.year), getMonthlyActuals(asOf), getCoverageGroups(asOf), getRecurrenceWindow(asOf),
   ]);
 
   // The bound, from the same category rows the verdict is computed over. One fetch, one membership
