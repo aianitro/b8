@@ -56,8 +56,38 @@ export default function ExpandableKpiCards({
 
   return (
     <>
-      {/* UNCATEGORIZED JOINED THE OTHER TWO, at the owner's request, and it leads for the reason
-          it always did: it is the one with work attached rather than a state to read.
+      {/* NEW ARRIVALS LEADS THE ROW, at the owner's request: it is the card that changes every
+          morning, and the one opened first. */}
+      <Card
+        label="New arrivals"
+        value={arrivalsCount.toLocaleString()}
+        // THE COUNT IS NOT THE LIST'S LENGTH. The reader caps its rows at twelve, so a card
+        // counting them would read "12" whether twelve arrived or forty did. When they differ the
+        // card says which figure the panel is showing.
+        //
+        // ALL THREE BELOW MEASURED AT 11px AGAINST THE 79px A CARD HAS AT 390px. The phrasing this
+        // replaced was prose — 'in the last 36 hours' is 2 lines, 'last 36 hours · showing 12' is
+        // 2, 'nothing new · a feed is behind' is 130px against 79. A caption that wraps in a card
+        // this narrow pushes the row's height around as the figures change, which is worse than
+        // being terse. The phone reached the same wording first, for the same reason.
+        sub={arrivalsCount === 0
+          // ZERO ARRIVALS IS AMBIGUOUS AND THE PANEL USED TO SAY SO. While the feed sat open on the
+          // page, its empty state distinguished a quiet day from a bank that stopped reporting —
+          // and collapsing it into a card would have thrown that away silently, since a card
+          // nobody can open never shows its panel. The distinction moves onto the card instead.
+          // 'feed behind' alone, because a zero above it already says nothing arrived.
+          ? (staleFeed ? 'feed behind' : 'nothing new')
+          : arrivalsCount > arrivalsShown
+            ? `36h · ${arrivalsShown} shown`
+            : 'last 36h'}
+        amber={arrivalsCount === 0 && staleFeed}
+        open={open === 'arrivals'}
+        onToggle={() => setOpen((v) => (v === 'arrivals' ? null : 'arrivals'))}
+        disabled={arrivalsShown === 0}
+      />
+
+      {/* UNCATEGORIZED JOINED THE OTHER TWO, at the owner's request. It led the row until New
+          arrivals was moved ahead of it; it is still the one with work attached.
 
           It used to NAVIGATE while its two neighbours opened — off to the ledger's uncategorized
           filter, on the argument that filing is real work and the ledger is where work happens.
@@ -91,34 +121,6 @@ export default function ExpandableKpiCards({
         onToggle={() => setOpen((v) => (v === 'watch' ? null : 'watch'))}
         disabled={watchCount === 0}
       />
-      <Card
-        label="New arrivals"
-        value={arrivalsCount.toLocaleString()}
-        // THE COUNT IS NOT THE LIST'S LENGTH. The reader caps its rows at twelve, so a card
-        // counting them would read "12" whether twelve arrived or forty did. When they differ the
-        // card says which figure the panel is showing.
-        //
-        // ALL THREE BELOW MEASURED AT 11px AGAINST THE 79px A CARD HAS AT 390px. The phrasing this
-        // replaced was prose — 'in the last 36 hours' is 2 lines, 'last 36 hours · showing 12' is
-        // 2, 'nothing new · a feed is behind' is 130px against 79. A caption that wraps in a card
-        // this narrow pushes the row's height around as the figures change, which is worse than
-        // being terse. The phone reached the same wording first, for the same reason.
-        sub={arrivalsCount === 0
-          // ZERO ARRIVALS IS AMBIGUOUS AND THE PANEL USED TO SAY SO. While the feed sat open on the
-          // page, its empty state distinguished a quiet day from a bank that stopped reporting —
-          // and collapsing it into a card would have thrown that away silently, since a card
-          // nobody can open never shows its panel. The distinction moves onto the card instead.
-          // 'feed behind' alone, because a zero above it already says nothing arrived.
-          ? (staleFeed ? 'feed behind' : 'nothing new')
-          : arrivalsCount > arrivalsShown
-            ? `36h · ${arrivalsShown} shown`
-            : 'last 36h'}
-        amber={arrivalsCount === 0 && staleFeed}
-        open={open === 'arrivals'}
-        onToggle={() => setOpen((v) => (v === 'arrivals' ? null : 'arrivals'))}
-        disabled={arrivalsShown === 0}
-      />
-
       {open !== null && (
         <div className="col-span-full">
           {open === 'unfiled' ? unfiledPanel : open === 'watch' ? watchPanel : arrivalsPanel}
