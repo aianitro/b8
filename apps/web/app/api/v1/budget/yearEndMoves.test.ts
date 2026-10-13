@@ -42,8 +42,10 @@ describe('year-end snapshot', () => {
              CASE WHEN category_name = $1 THEN actuals[1:${month - 1}] || ARRAY[120::numeric] || actuals[${month + 1}:12] ELSE actuals END
         FROM year_end_snapshots WHERE snapshot_date = CURRENT_DATE`, [CAT]);
 
-    const { sinceYesterday } = await loadYearEndMoves('operational');
+    const { sinceYesterday, streak } = await loadYearEndMoves('operational');
     const move = sinceYesterday!.move;
+    // The overspend lies between yesterday's snapshot and this morning's: the streak restarts today.
+    expect(streak).toMatchObject({ days: 0, sinceTracking: false, slippedToday: false });
     expect(move.categories.find((c) => c.name === CAT)?.spending).toBe(-30);
     // On the 1st, yesterday is last month and every category also moves by its month closing.
     if (new Date().getDate() !== 1) {
@@ -53,6 +55,16 @@ describe('year-end snapshot', () => {
   });
 
   it('is silent before any snapshot exists', async () => {
-    expect(await loadYearEndMoves('operational')).toEqual({ sinceYesterday: null, sinceMonthStart: null });
+    expect(await loadYearEndMoves('operational')).toEqual({ sinceYesterday: null, sinceMonthStart: null, streak: null });
+  });
+
+  it('counts days held when spending has not moved since yesterday', async () => {
+    await writeYearEndSnapshot();
+    await db.query(`
+      INSERT INTO year_end_snapshots (snapshot_date, landscape, category_name, is_income, plan, actuals)
+      SELECT CURRENT_DATE - 3, landscape, category_name, is_income, plan, actuals
+        FROM year_end_snapshots WHERE snapshot_date = CURRENT_DATE`);
+    const { streak } = await loadYearEndMoves('operational');
+    expect(streak).toMatchObject({ days: 3, sinceTracking: true, slippedToday: false });
   });
 });

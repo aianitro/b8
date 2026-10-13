@@ -1,3 +1,4 @@
+import { Flame } from 'lucide-react';
 import type { MoveSince, YearEndMoves } from '@/lib/yearEndSnapshots';
 
 const fmt = (n: number) =>
@@ -101,5 +102,20 @@ export function YearEndMovesPanel({ moves, today }: { moves: YearEndMoves; today
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The streak, for the dashboard's Projected P/L card: days in a row spending has not moved the
+ * year-end down. Silent at zero and before there is anything to compare — a streak of nothing is
+ * not encouragement, and the red move line beneath already says when today slipped.
+ */
+export function YearEndStreak({ streak }: { streak: YearEndMoves['streak'] }) {
+  if (!streak || streak.slippedToday || streak.days < 1) return null;
+  return (
+    <p className="flex items-center gap-1 whitespace-nowrap font-medium text-green-600" title={streak.sinceTracking ? 'No slip since tracking began' : `Last slip ${short(streak.since)}`}>
+      <Flame size={12} className="shrink-0" />
+      {streak.days} {streak.days === 1 ? 'day' : 'days'} without slipping
+    </p>
   );
 }

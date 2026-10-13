@@ -1,7 +1,7 @@
 import db from './db';
 import { createLogger } from './logger';
 import { loadYearEndStates } from './yearEndRead';
-import { decompose, type CategoryState, type YearEndMove } from './domain/yearEndMoves';
+import { decompose, holdStreak, type CategoryState, type HoldStreak, type Moment, type YearEndMove } from './domain/yearEndMoves';
 
 const log = createLogger('yearEndSnapshots');
 
@@ -74,13 +74,8 @@ export interface MoveSince {
 export interface YearEndMoves {
   sinceYesterday: MoveSince | null;
   sinceMonthStart: MoveSince | null;
-}
-
-async function snapshotOn(landscape: Landscape, date: string): Promise<CategoryState[]> {
-  const { rows } = await db.query<{ category_name: string; is_income: boolean; plan: string[]; actuals: string[] }>(
-    `SELECT category_name, is_income, plan::text[], actuals::text[] FROM year_end_snapshots WHERE landscape = $1 AND snapshot_date = $2`,
-    [landscape, date]);
-  return rows.map((r) => ({ name: r.category_name, isIncome: r.is_income, plan: r.plan.map(Number), actuals: r.actuals.map(Number) }));
+  /** Days in a row this year's spending has not moved the year-end down (`holdStreak`). */
+  streak: HoldStreak | null;
 }
 
 /**
@@ -92,21 +87,28 @@ export async function loadYearEndMoves(landscape: Landscape): Promise<YearEndMov
   const t = await today();
   const monthStart = `${t.iso.slice(0, 7)}-01`;
   const yearStart = `${t.iso.slice(0, 4)}-01-01`;
-  const [prev, first, live] = await Promise.all([
-    db.query<{ d: string }>(
-      `SELECT MAX(snapshot_date)::text AS d FROM year_end_snapshots WHERE landscape = $1 AND snapshot_date < $2 AND snapshot_date >= $3`,
-      [landscape, t.iso, yearStart]),
-    db.query<{ d: string }>(
-      `SELECT MIN(snapshot_date)::text AS d FROM year_end_snapshots WHERE landscape = $1 AND snapshot_date >= $2`,
-      [landscape, monthStart]),
+  // This year's snapshots up to and including this morning's, every one: the streak walks them
+  // all, and the two baselines are among them. A few dozen rows a day, so a year is still a small read.
+  const [snaps, live] = await Promise.all([
+    db.query<{ d: string; category_name: string; is_income: boolean; plan: string[]; actuals: string[] }>(
+      `SELECT snapshot_date::text AS d, category_name, is_income, plan::text[], actuals::text[]
+         FROM year_end_snapshots WHERE landscape = $1 AND snapshot_date >= $2 AND snapshot_date <= $3
+        ORDER BY snapshot_date`,
+      [landscape, yearStart, t.iso]),
     loadYearEndStates(landscape, t),
   ]);
-  const now = { month: t.month, categories: live };
-  const since = async (date: string | null): Promise<MoveSince | null> => {
-    if (!date) return null;
-    const month = Number(date.slice(5, 7)) - 1;
-    return { from: date, move: decompose({ month, categories: await snapshotOn(landscape, date) }, now) };
+  const byDate = new Map<string, CategoryState[]>();
+  for (const r of snaps.rows) {
+    byDate.set(r.d, [...(byDate.get(r.d) ?? []), { name: r.category_name, isIncome: r.is_income, plan: r.plan.map(Number), actuals: r.actuals.map(Number) }]);
+  }
+  const points: { date: string; moment: Moment }[] = [...byDate].map(([date, categories]) => ({ date, moment: { month: Number(date.slice(5, 7)) - 1, categories } }));
+  const now: Moment = { month: t.month, categories: live };
+
+  const since = (p: { date: string; moment: Moment } | undefined): MoveSince | null =>
+    p ? { from: p.date, move: decompose(p.moment, now) } : null;
+  return {
+    sinceYesterday: since(points.filter((p) => p.date < t.iso).pop()),
+    sinceMonthStart: since(points.find((p) => p.date >= monthStart)),
+    streak: holdStreak([...points, { date: t.iso, moment: now }], t.iso),
   };
-  const [sinceYesterday, sinceMonthStart] = await Promise.all([since(prev.rows[0]?.d ?? null), since(first.rows[0]?.d ?? null)]);
-  return { sinceYesterday, sinceMonthStart };
 }

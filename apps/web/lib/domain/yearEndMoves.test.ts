@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contribution, decompose, type CategoryState } from './yearEndMoves';
+import { contribution, decompose, holdStreak, type CategoryState } from './yearEndMoves';
 import { projectYearEnd, type YearEndRow } from './yearEnd';
 
 const flat = (n: number) => Array<number>(12).fill(n);
@@ -52,5 +52,32 @@ describe('decompose', () => {
   it('treats a category that appears as a budget edit', () => {
     const m = decompose({ month: oct, categories: [] }, { month: oct, categories: [groceries(flat(0))] });
     expect(m).toMatchObject({ budget: -300, spending: 0, total: -300 }); // Oct, Nov, Dec at plan
+  });
+});
+
+describe('holdStreak', () => {
+  const oct = 9;
+  const at = (date: string, spent: number, plan = flat(100)) => ({ date, moment: { month: oct, categories: [groceries(with_(flat(0), oct, spent), plan)] } });
+
+  it('counts the days since the last spending slip', () => {
+    // Over plan from the 3rd (110 → 130 is a slip), then flat.
+    const s = holdStreak([at('2026-10-02', 110), at('2026-10-03', 130), at('2026-10-04', 130), at('2026-10-06', 130)], '2026-10-06');
+    expect(s).toEqual({ days: 3, since: '2026-10-03', sinceTracking: false, slippedToday: false });
+  });
+
+  it('ignores a budget edit and a month closing, and runs from the first snapshot when nothing slipped', () => {
+    const edited = { ...at('2026-10-05', 50, with_(flat(100), 11, 300)) };                 // Dec plan raised
+    const closed = { date: '2026-11-01', moment: { month: 10, categories: [groceries(with_(flat(0), oct, 50))] } };
+    const s = holdStreak([at('2026-10-04', 50), edited, closed], '2026-11-01');
+    expect(s).toEqual({ days: 28, since: '2026-10-04', sinceTracking: true, slippedToday: false });
+  });
+
+  it('says so when today has already slipped', () => {
+    expect(holdStreak([at('2026-10-05', 120), at('2026-10-06', 140)], '2026-10-06'))
+      .toEqual({ days: 0, since: '2026-10-06', sinceTracking: false, slippedToday: true });
+  });
+
+  it('needs two points', () => {
+    expect(holdStreak([at('2026-10-06', 0)], '2026-10-06')).toBeNull();
   });
 });

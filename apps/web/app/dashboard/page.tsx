@@ -11,7 +11,7 @@ import { loadValuationFindings } from '@/lib/valuationStalenessRead';
 import { loadSuggestions } from '@/lib/categorySuggester';
 import { loadBuckets } from '@/lib/unspentStore';
 import { loadYearEndMoves } from '@/lib/yearEndSnapshots';
-import { YearEndMoveLine } from '@/components/YearEndMoves';
+import { YearEndMoveLine, YearEndStreak } from '@/components/YearEndMoves';
 import { loadForecasts, loadOverdrafts } from '@/lib/overdraftWatch';
 import OverdraftForecastCard from '@/components/OverdraftForecastCard';
 import OverdraftCard from '@/components/OverdraftCard';
@@ -327,7 +327,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           // below with its own count, which is where unfiled records are dealt with.
           sub={`${yearEnd.netToDate < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.netToDate))} so far`}
           highlight={yearEnd.profitLoss < 0 ? 'red' : 'green'}
-          note={<YearEndMoveLine moves={moves} today={`${asOf.year}-${String(asOf.month + 1).padStart(2, '0')}-${String(asOf.day).padStart(2, '0')}`} />}
+          note={<><YearEndStreak streak={moves.streak} /><YearEndMoveLine moves={moves} today={`${asOf.year}-${String(asOf.month + 1).padStart(2, '0')}-${String(asOf.day).padStart(2, '0')}`} /></>}
           href="/budget"
         />
         {/* ONE CARD WHERE THERE WERE TWO. "Annual Budget" was a constant — it changes when the

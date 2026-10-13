@@ -110,3 +110,44 @@ export function decompose(a: Moment, b: Moment): YearEndMove {
   const sum = (k: 'budget' | 'past' | 'spending' | 'closed' | 'total') => cents(categories.reduce((s, c) => s + c[k], 0));
   return { total: sum('total'), budget: sum('budget'), past: sum('past'), spending: sum('spending'), closed: sum('closed'), categories };
 }
+
+export interface HoldStreak {
+  /** Whole days since the last slip — or since tracking began, when there has been none. */
+  days: number;
+  /** The day the streak counts from, `YYYY-MM-DD`. */
+  since: string;
+  /** True when no slip appears anywhere in the snapshots read: the streak is as old as the data. */
+  sinceTracking: boolean;
+  /** True when today's own spending has already moved the year-end down. */
+  slippedToday: boolean;
+}
+
+/**
+ * Days in a row the year-end P/L has not slipped — for the dashboard, rewarding restraint as it
+ * happens rather than at month end.
+ *
+ * ONLY SPENDING BREAKS IT. A month closing, a budget edit, a late transaction: each moves the
+ * projection, and none is the owner's restraint failing, so a streak broken by them would punish
+ * the wrong thing — on the 1st of every month, on schedule. A day that holds level continues it:
+ * holding the line is the behaviour being rewarded. A slip is a spending move of a dollar or more,
+ * so a rounding cent breaks nothing.
+ *
+ * `points` are the morning snapshots in date order with the live state last, dated today; each
+ * neighbouring pair is one stretch of days (several, if a morning was missed). Null with fewer than
+ * two points: there is nothing to compare yet.
+ */
+export function holdStreak(points: readonly { date: string; moment: Moment }[], today: string): HoldStreak | null {
+  if (points.length < 2) return null;
+  const day = (iso: string) => Math.round(Date.parse(`${iso}T00:00:00Z`) / 86_400_000);
+  let start = 0;
+  let slippedToday = false;
+  for (let i = points.length - 1; i >= 1; i--) {
+    if (decompose(points[i - 1].moment, points[i].moment).spending <= -1) {
+      start = i;
+      slippedToday = i === points.length - 1;
+      break;
+    }
+  }
+  const since = points[start].date;
+  return { days: Math.max(0, day(today) - day(since)), since, sinceTracking: start === 0, slippedToday };
+}
