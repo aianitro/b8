@@ -11,12 +11,27 @@ Built as a hobby project to get hands-on with a production-grade Plaid integrati
 
 | | |
 |---|---|
-| ![Dashboard](docs/screenshots/dashboard.jpg) | ![Net worth](docs/screenshots/net-worth.jpg) |
-| **Dashboard** — will this month close inside its limits, and which categories say no | **Net worth** — what the total is, and what it is made of |
-| ![Net worth breakdown](docs/screenshots/net-worth-breakdown.jpg) | ![Property](docs/screenshots/property.jpg) |
-| **Breakdown** — every account and property behind each component; rentals collapse to one equity line | **Property** — value against mortgage over time, plus a per-property P&L |
-| ![Accounts](docs/screenshots/accounts.jpg) | ![Budget](docs/screenshots/budget.jpg) |
-| **Accounts** — per-account valuation mode and landscape, with per-connection sync health | **Budget** — annual allocations on a month-by-month grid |
+| ![Dashboard](docs/screenshots/dashboard.jpg) | ![Budget](docs/screenshots/budget.jpg) |
+| **Dashboard** — the year-end target, what is waiting on you, and where each category sits this month | **Budget** — annual allocations, what is left, and the projected year end |
+| ![Accounts](docs/screenshots/accounts.jpg) | ![Net worth](docs/screenshots/net-worth.jpg) |
+| **Accounts** — per landscape, with the year's opening and change | **Net worth** — four components that sum to the total, over a week, month or year |
+| ![Profit & loss](docs/screenshots/profit-loss.jpg) | ![Property](docs/screenshots/property.jpg) |
+| **Profit & loss** — settled months, then the forecast to December | **Property** — value against mortgage over time, plus a per-property P&L |
+| ![Transactions](docs/screenshots/transactions.jpg) | |
+| **Transactions** — the ledger, filed by rule or by hand | |
+
+**On the phone** — installed to the Home Screen, which is how it is used day to day:
+
+<p>
+  <img src="docs/screenshots/phone-dashboard.jpg" width="130" alt="Dashboard on the phone">
+  <img src="docs/screenshots/phone-accounts.jpg" width="130" alt="Accounts on the phone">
+  <img src="docs/screenshots/phone-budget.jpg" width="130" alt="Budget grid on the phone">
+  <img src="docs/screenshots/phone-net-worth.jpg" width="130" alt="Net worth on the phone">
+  <img src="docs/screenshots/phone-transaction.jpg" width="130" alt="A transaction's detail sheet">
+  <img src="docs/screenshots/phone-swipe.jpg" width="130" alt="Swipe an account row to remove it">
+</p>
+
+Dashboard · accounts · budget grid · net worth · a transaction's detail · swipe to remove
 
 ## Features
 
@@ -74,23 +89,21 @@ Ports are published to `127.0.0.1` only, matching the dev/start scripts' own loc
 
 This repo contains only application code and schema — no real account data, transactions, or credentials. All of that lives in a local Postgres database and a gitignored `.env.local`, neither of which is part of this repository.
 
-That includes the screenshots above. They were produced by backing up the database, loading a wholly synthetic dataset, capturing the pages, and restoring afterwards — so every balance, bank, merchant, property and address shown is invented. Street and city names are fictional and the postal codes are deliberately invalid.
+That includes the screenshots above. They are taken from a wholly synthetic dataset in a throwaway database — so every balance, bank, merchant, property and address shown is invented. Street and city names are fictional and the postal codes are deliberately invalid.
 
 ### Regenerating the screenshots
 
-`apps/web/scripts/seed-demo.mjs` produces that dataset. It is anchored to the day it runs, so the figures always look current rather than frozen at whenever the screenshots were last taken.
-
-**It truncates every table before writing**, and the `DATABASE_URL` in `.env.local` is normally the real database — so it refuses to run without an explicit flag, and there is no default-yes path:
+One command, from `apps/web`:
 
 ```sh
-pg_dump -Fc -d b8_finance -f backup.dump          # back up first
-npm run seed:demo -- --yes-wipe-my-database
-# …capture the pages…
-psql -d b8_finance -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
-pg_restore -d b8_finance --no-owner backup.dump   # then verify row counts match
+npm run screenshots
 ```
 
-Set `DATABASE_URL` in the environment to point it at a scratch database instead, which is the safer way to try it:
+`scripts/screenshots.mjs` creates its own scratch database (`b8_screens`), migrates it, fills it with `scripts/seed-demo.mjs`'s fabricated data, mints a test session, starts the dev server against it, and drives headless Chrome over the DevTools protocol to write every image in `docs/screenshots/` — desktop at 1440×900 and the phone at 390×844 in installed-app mode. It then drops the database. It never reads `DATABASE_URL` from the environment or `.env.local`, so it cannot touch a real ledger.
+
+The seed is anchored to the day it runs, so the figures always look current; look over every image before committing all the same.
+
+`seed-demo.mjs` can also fill a database of your own choosing for poking around. **It truncates every table first**, so it refuses to run without an explicit flag — point it at a scratch database, never at a real one:
 
 ```sh
 createdb b8_demo && DATABASE_URL=postgresql://localhost/b8_demo npx node-pg-migrate up

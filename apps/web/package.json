@@ -14,6 +14,7 @@
     "backfill:enrichment": "tsx --env-file=.env.local scripts/backfill-enrichment.ts",
     "rekey:plaid-ids": "tsx --env-file=.env.local scripts/rekey-plaid-ids.ts",
     "seed:demo": "node scripts/seed-demo.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
     "ping:web": "tsx --env-file=.env.local scripts/ping-web-test.ts"
   },
   "dependencies": {

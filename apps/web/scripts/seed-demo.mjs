@@ -470,8 +470,11 @@ async function main() {
 
     const r2 = (n) => Math.round(n * 100) / 100;
     await db.query(
-      `INSERT INTO net_worth_snapshots (snapshot_date, operational, capital_financial, real_estate_equity, liabilities, total)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
+      // Deposits held for tenants: none in this dataset, stated as 0 rather than left NULL — a NULL
+      // marks a row written before the deposit split, which the net worth page will not compare.
+      `INSERT INTO net_worth_snapshots (snapshot_date, operational, capital_financial, real_estate_equity, liabilities, total,
+                                        liabilities_security_deposits)
+       VALUES ($1,$2,$3,$4,$5,$6,0)`,
       [d(YEAR, m, m === monthsElapsed ? TODAY.getDate() : lastDay(m)), r2(operational), r2(capitalFinancial),
        r2(realEstateEquity), r2(liabilities), r2(operational + capitalFinancial + realEstateEquity + liabilities)]
     );
