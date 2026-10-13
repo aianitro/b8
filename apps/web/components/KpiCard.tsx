@@ -1,12 +1,15 @@
+import type { ReactNode } from 'react';
 import { STATUS_CLASS, type StatusColor } from '@/lib/chartColors';
 
 /**
  * A headline figure: label, value, and an optional line under it. Shared by the dashboard and
  * /budget so the two pages' cards are the same card, not two that drift apart.
  */
-export default function KpiCard({ label, value, sub, subColor, highlight, href }: {
+export default function KpiCard({ label, value, sub, subColor, highlight, href, note }: {
   label: string; value: string; sub?: string; subColor?: StatusColor;
   highlight?: StatusColor; href?: string;
+  /** A second line under `sub`, for a figure that needs its own colours — the year-end move. */
+  note?: ReactNode;
 }) {
   const content = (
     <>
@@ -34,6 +37,7 @@ export default function KpiCard({ label, value, sub, subColor, highlight, href }
         {value}
       </p>
       {sub && <p className={`text-[11px] sm:text-xs mt-1 sm:mt-1.5 ${subColor ? STATUS_CLASS[subColor] : 'text-slate-400'}`}>{sub}</p>}
+      {note && <div className="text-[11px] sm:text-xs mt-0.5">{note}</div>}
     </>
   );
   if (href) {

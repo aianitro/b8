@@ -1,5 +1,6 @@
 import db from './db';
-import { projectYearEnd, projectYearEndByMonth, monthlyRow, type MonthPoint } from './domain/yearEnd';
+import { projectYearEnd, projectYearEndByMonth, monthlyRow, plannedForMonth, type MonthPoint } from './domain/yearEnd';
+import type { CategoryState } from './domain/yearEndMoves';
 
 /**
  * Where a landscape's year lands, read once and shared.
@@ -41,42 +42,51 @@ export interface YearEndRead {
   monthly: MonthPoint[];
 }
 
+/**
+ * Each budgeted category of a landscape for the year: its plan and its actuals. The ONE query both
+ * the projection below and the daily snapshot (lib/yearEndSnapshots.ts) read, so the move the
+ * snapshot reports is a move in this very figure.
+ */
+function queryCategories(landscape: 'operational' | 'capital', asOf: { year: number; month: number }) {
+  return db.query<{
+    name: string; is_income: boolean; annual_budget: string; monthly_amounts: string[] | null;
+    closed_months: string; current_month: string; ytd: string; monthly_actuals: string[] | null;
+  }>(`
+    -- The monthly plan from effective_budget(), which adds unspent money carried into this year.
+    SELECT bc.name, bc.is_income, eb.annual_budget::text AS annual_budget, eb.monthly_amounts::text[] AS monthly_amounts,
+           COALESCE(SUM(t.amount) FILTER (WHERE EXTRACT(MONTH FROM t.date) < $3), 0)::text AS closed_months,
+           COALESCE(SUM(t.amount) FILTER (WHERE EXTRACT(MONTH FROM t.date) = $3), 0)::text AS current_month,
+           COALESCE(SUM(t.amount), 0)::text AS ytd,
+           -- Per month, Jan–Dec, so the chart and the card read one set of actuals. Built as an
+           -- array here rather than as twelve rows so a category is still one row out.
+           (SELECT ARRAY(
+              SELECT COALESCE(SUM(t2.amount), 0)
+                FROM generate_series(1, 12) AS g(m)
+                LEFT JOIN transactions t2
+                  ON t2.mapped_category = bc.name
+                 AND EXTRACT(YEAR FROM t2.date) = $1
+                 AND EXTRACT(MONTH FROM t2.date) = g.m
+                 AND t2.hidden = FALSE
+                 AND t2.account_id IN (SELECT id FROM accounts WHERE track_transactions = TRUE)
+               GROUP BY g.m ORDER BY g.m))::text[] AS monthly_actuals
+      FROM budget_categories bc
+      JOIN effective_budget($1) eb ON eb.category_id = bc.id
+      LEFT JOIN transactions t ON t.mapped_category = bc.name
+        AND EXTRACT(YEAR FROM t.date) = $1 AND t.hidden = FALSE
+      LEFT JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
+     WHERE bc.exclude_from_budget = FALSE
+       AND bc.landscape = $2
+       AND (t.id IS NULL OR a.id IS NOT NULL)
+     GROUP BY bc.id, bc.name, bc.is_income, eb.annual_budget, eb.monthly_amounts
+  `, [asOf.year, landscape, asOf.month + 1]);
+}
+
 export async function loadYearEnd(
   landscape: 'operational' | 'capital',
   asOf: { year: number; month: number },
 ): Promise<YearEndRead> {
   const [cats, uncat] = await Promise.all([
-    db.query<{
-      is_income: boolean; annual_budget: string; monthly_amounts: string[] | null;
-      closed_months: string; current_month: string; ytd: string; monthly_actuals: string[] | null;
-    }>(`
-      -- The monthly plan from effective_budget(), which adds unspent money carried into this year.
-      SELECT bc.is_income, eb.annual_budget::text AS annual_budget, eb.monthly_amounts::text[] AS monthly_amounts,
-             COALESCE(SUM(t.amount) FILTER (WHERE EXTRACT(MONTH FROM t.date) < $3), 0)::text AS closed_months,
-             COALESCE(SUM(t.amount) FILTER (WHERE EXTRACT(MONTH FROM t.date) = $3), 0)::text AS current_month,
-             COALESCE(SUM(t.amount), 0)::text AS ytd,
-             -- Per month, Jan–Dec, so the chart and the card read one set of actuals. Built as an
-             -- array here rather than as twelve rows so a category is still one row out.
-             (SELECT ARRAY(
-                SELECT COALESCE(SUM(t2.amount), 0)
-                  FROM generate_series(1, 12) AS g(m)
-                  LEFT JOIN transactions t2
-                    ON t2.mapped_category = bc.name
-                   AND EXTRACT(YEAR FROM t2.date) = $1
-                   AND EXTRACT(MONTH FROM t2.date) = g.m
-                   AND t2.hidden = FALSE
-                   AND t2.account_id IN (SELECT id FROM accounts WHERE track_transactions = TRUE)
-                 GROUP BY g.m ORDER BY g.m))::text[] AS monthly_actuals
-        FROM budget_categories bc
-        JOIN effective_budget($1) eb ON eb.category_id = bc.id
-        LEFT JOIN transactions t ON t.mapped_category = bc.name
-          AND EXTRACT(YEAR FROM t.date) = $1 AND t.hidden = FALSE
-        LEFT JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-       WHERE bc.exclude_from_budget = FALSE
-         AND bc.landscape = $2
-         AND (t.id IS NULL OR a.id IS NOT NULL)
-       GROUP BY bc.id, bc.is_income, eb.annual_budget, eb.monthly_amounts
-    `, [asOf.year, landscape, asOf.month + 1]),
+    queryCategories(landscape, asOf),
 
     // Unfiled rows, scoped by the ACCOUNT's landscape because they have no category to carry one.
     // Reported separately and counted nowhere — see `uncategorized` above for why.
@@ -123,4 +133,24 @@ export async function loadYearEnd(
     monthly,
     uncategorized: { income: uncatIn, expense: uncatOut, net: uncatIn - uncatOut },
   };
+}
+
+/**
+ * The same categories as plain state — resolved twelve-month plan, twelve monthly actuals in the
+ * ledger's sign — for the year-end snapshot and the move read against it (`./domain/yearEndMoves`).
+ */
+export async function loadYearEndStates(
+  landscape: 'operational' | 'capital',
+  asOf: { year: number; month: number },
+): Promise<CategoryState[]> {
+  const { rows } = await queryCategories(landscape, asOf);
+  return rows.map((r) => {
+    const row = monthlyRow(Number(r.annual_budget), r.monthly_amounts?.length === 12 ? r.monthly_amounts.map(Number) : null, [], 0);
+    const actuals = (r.monthly_actuals ?? []).map(Number);
+    return {
+      name: r.name, isIncome: r.is_income,
+      plan: Array.from({ length: 12 }, (_, i) => Math.round(plannedForMonth(row, i) * 100) / 100),
+      actuals: Array.from({ length: 12 }, (_, i) => actuals[i] ?? 0),
+    };
+  });
 }

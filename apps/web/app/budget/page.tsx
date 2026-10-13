@@ -1,5 +1,7 @@
 export const dynamic = 'force-dynamic';
 
+import { loadYearEndMoves } from '@/lib/yearEndSnapshots';
+import { YearEndMoveLine, YearEndMovesPanel } from '@/components/YearEndMoves';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import db from '@/lib/db';
@@ -211,7 +213,7 @@ export default async function BudgetPage({ searchParams }: PageProps) {
 
   const year = new Date().getFullYear();
 
-  const [summary, uncategorized, settingsRow, yearEnd, buckets, destinations] = await Promise.all([
+  const [summary, uncategorized, settingsRow, yearEnd, buckets, destinations, moves, todayIso] = await Promise.all([
     getBudgetSummary(),
     getUncategorized(landscape),
     db.query<{ beginning_balance: string }>(
@@ -224,6 +226,9 @@ export default async function BudgetPage({ searchParams }: PageProps) {
     db.query<{ id: number; name: string }>(
       'SELECT id, name FROM budget_categories WHERE is_income = FALSE AND exclude_from_budget = FALSE ORDER BY name'
     ).then((r) => r.rows),
+    // How far the year-end moved since yesterday and since the month began, and why.
+    loadYearEndMoves(landscape),
+    db.query<{ d: string }>('SELECT CURRENT_DATE::text AS d').then((r) => r.rows[0].d),
   ]);
 
   const beginningBalance = Number(settingsRow.rows[0]?.beginning_balance ?? 0);
@@ -306,6 +311,7 @@ export default async function BudgetPage({ searchParams }: PageProps) {
               value={`${projectedPL < 0 ? '−' : '+'}${fmt(Math.abs(projectedPL))}`}
               sub={`${netToDate < 0 ? '−' : '+'}${fmt(Math.abs(netToDate))} so far`}
               highlight={projectedPL < 0 ? 'red' : 'green'}
+              note={<YearEndMoveLine moves={moves} today={todayIso} />}
             />
             <KpiCard
               label="Budget remaining"
@@ -314,6 +320,8 @@ export default async function BudgetPage({ searchParams }: PageProps) {
               sub={`${fmt(totalSpent)} spent of ${fmt(totalBudget)}`}
             />
           </div>
+
+          <YearEndMovesPanel moves={moves} today={todayIso} />
 
           {/* This tab's categories' unspent leftovers from closed months, waiting to be allocated. */}
           <UnspentBuckets

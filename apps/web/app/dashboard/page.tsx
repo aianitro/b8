@@ -10,6 +10,8 @@ import ValuationStalenessCard from '@/components/ValuationStalenessCard';
 import { loadValuationFindings } from '@/lib/valuationStalenessRead';
 import { loadSuggestions } from '@/lib/categorySuggester';
 import { loadBuckets } from '@/lib/unspentStore';
+import { loadYearEndMoves } from '@/lib/yearEndSnapshots';
+import { YearEndMoveLine } from '@/components/YearEndMoves';
 import { loadForecasts, loadOverdrafts } from '@/lib/overdraftWatch';
 import OverdraftForecastCard from '@/components/OverdraftForecastCard';
 import OverdraftCard from '@/components/OverdraftCard';
@@ -194,6 +196,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // scores — see `offCycleFrom`. Read beside the overview, like the two reads above.
   const offCyclePromise = loadOffCycle(asOf);
   const bucketsPromise = loadBuckets();
+  // How far the year-end moved since yesterday and since the month began — under Projected P/L.
+  const movesPromise = loadYearEndMoves('operational');
   // Cash accounts below their cushion, from the last sync — the bell's first card.
   const overdraftsPromise = loadOverdrafts();
   // And those whose next week of recurring charges would take them there.
@@ -224,6 +228,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const { thisMonth: offCycleThisMonth } = await offCyclePromise;
   // Unspent budget from closed months still waiting to be allocated, across both landscapes.
   const overdrafts = await overdraftsPromise;
+  const moves = await movesPromise;
   const forecasts = await forecastsPromise;
   const unspentWaiting = (await bucketsPromise).reduce((s, b) => s + Math.max(0, b.balance), 0);
   // Suggested categories for the unfiled rows the Uncategorized panel lists.
@@ -322,6 +327,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           // below with its own count, which is where unfiled records are dealt with.
           sub={`${yearEnd.netToDate < 0 ? '−' : '+'}${fmt(Math.abs(yearEnd.netToDate))} so far`}
           highlight={yearEnd.profitLoss < 0 ? 'red' : 'green'}
+          note={<YearEndMoveLine moves={moves} today={`${asOf.year}-${String(asOf.month + 1).padStart(2, '0')}-${String(asOf.day).padStart(2, '0')}`} />}
           href="/budget"
         />
         {/* ONE CARD WHERE THERE WERE TWO. "Annual Budget" was a constant — it changes when the

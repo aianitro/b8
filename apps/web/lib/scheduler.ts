@@ -3,6 +3,7 @@ import { runDailyDigest } from './dailyDigest';
 import { sendWebPushIfDelivered } from './webPush';
 import { suggestCategories } from './categorySuggester';
 import { recordCloses } from './unspentStore';
+import { writeYearEndSnapshot } from './yearEndSnapshots';
 import { writeNetWorthSnapshot } from './netWorth';
 import { createLogger } from './logger';
 
@@ -53,6 +54,11 @@ export async function runDailyJob() {
   // Close the unspent-budget month once its grace days have passed (lib/unspentStore.ts) — after
   // the syncs, so the late charges they pulled are counted. Written once; resolves rather than rejects.
   await recordCloses();
+
+  // This morning's year-end snapshot (lib/yearEndSnapshots.ts) — after the syncs and the close, so
+  // it is the day's starting point the dashboard's "since yesterday" is read against. First write
+  // of the day wins; resolves rather than rejects.
+  await writeYearEndSnapshot();
 
   // Category suggestions for the rows this run pulled, before the digest, so the morning's
   // unfiled rows already carry one when the owner opens the app. Resolves rather than rejects.

@@ -711,6 +711,44 @@ CREATE TABLE IF NOT EXISTS net_worth_snapshots (
 ALTER TABLE net_worth_snapshots
   ADD COLUMN IF NOT EXISTS liabilities_security_deposits NUMERIC(14, 2);
 
+-- The year-end projection's INPUTS, per budgeted category, as they stood each morning (migration
+-- 1792200000000). The projection itself (lib/domain/yearEnd.ts via lib/yearEndRead.ts) stays a
+-- derived read. These are stored for the net_worth_snapshots reason: the plan is edited in place and
+-- re-filing, hiding or deleting a transaction keeps no history, so an earlier morning's inputs cannot
+-- be rebuilt. Per category and per month, not one total, because "what moved the target" is a
+-- sequential substitution over two snapshots (plan edits, closed months' actuals, the month in
+-- progress, the calendar advancing), and a total cannot be decomposed. Never the figure "now".
+--
+-- Written once each morning; the first write of a (snapshot_date, landscape) wins AS A WHOLE, so a
+-- second run that day adds, changes and removes nothing. No rows for a (date, landscape) means no
+-- snapshot was taken, never "nothing budgeted": the move is then unknown, not zero. Year and month in
+-- progress are derived from snapshot_date (the app's local calendar date), not stored.
+CREATE TABLE IF NOT EXISTS year_end_snapshots (
+  snapshot_date  DATE NOT NULL,
+  landscape      TEXT NOT NULL CHECK (landscape IN ('operational', 'capital')),
+  -- The NAME, not an id: actuals are summed by transactions.mapped_category, which is a name, and a
+  -- deleted or renamed category's past must still read. A rename between two snapshots therefore
+  -- reads as one category removed and another added, with offsetting moves.
+  category_name  TEXT NOT NULL,
+  is_income      BOOLEAN NOT NULL,  -- as of that morning; it can be flipped in place
+  -- effective_budget(year) resolved to 12 months, January first: the explicit schedule or the even
+  -- spread, carries included, rounded to cents. Positive for income and spending alike, never the
+  -- ledger's sign. A zero month is a real plan of zero.
+  plan           NUMERIC(12, 2)[] NOT NULL
+    CONSTRAINT year_end_snapshots_plan_twelve_months
+      CHECK (array_ndims(plan) = 1 AND array_lower(plan, 1) = 1 AND cardinality(plan) = 12
+             AND array_position(plan, NULL) IS NULL),
+  -- The 12 monthly actuals of that year, January first, in the LEDGER's sign (money out positive,
+  -- money in negative), on loadYearEnd's rule (hidden = FALSE, track_transactions = TRUE), rounded to
+  -- cents. A month with no transactions is a real 0, so NULL is refused.
+  actuals        NUMERIC(12, 2)[] NOT NULL
+    CONSTRAINT year_end_snapshots_actuals_twelve_months
+      CHECK (array_ndims(actuals) = 1 AND array_lower(actuals, 1) = 1 AND cardinality(actuals) = 12
+             AND array_position(actuals, NULL) IS NULL),
+  recorded_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (snapshot_date, landscape, category_name)
+);
+
 -- ══ The authentication boundary ═══════════════════════════════════════════════════════════════
 --
 -- The two tables below are the first in this schema that hold no financial data of any kind: no
