@@ -1,6 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import ProfitLossChart from '@/components/charts/ProfitLossChart';
+import YearEndPathChart from '@/components/charts/YearEndPathChart';
+import { loadYearEndPath } from '@/lib/yearEndSnapshots';
 import { asOfFromDate } from '@/lib/domain/monthOutlook';
 import { loadOverview } from '@/lib/overviewRead';
 import { dashboardFromWire } from '@/lib/overviewFromWire';
@@ -31,7 +33,9 @@ export default async function ProfitLossPage() {
   // integers, so nothing here can straddle midnight.
   const now = new Date();
   const asOf = asOfFromDate(now);
-  const { monthlySpending: monthly, yearEnd } = dashboardFromWire(await loadOverview(now));
+  // The projection's path, morning by morning: operational, the landscape the dashboard card shows.
+  const [overview, path] = await Promise.all([loadOverview(now), loadYearEndPath('operational')]);
+  const { monthlySpending: monthly, yearEnd } = dashboardFromWire(overview);
 
   // `pl` and `plProjected` overlap on the last settled month. Without that shared point the dashed
   // line would start a month adrift of where the solid one ended, leaving a visible gap exactly at
@@ -67,6 +71,7 @@ export default async function ProfitLossPage() {
       </div>
 
       <ProfitLossChart data={plSeries} />
+      <YearEndPathChart data={path} />
     </div>
   );
 }

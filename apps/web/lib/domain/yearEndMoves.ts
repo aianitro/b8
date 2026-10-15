@@ -151,3 +151,31 @@ export function holdStreak(points: readonly { date: string; moment: Moment }[], 
   const since = points[start].date;
   return { days: Math.max(0, day(today) - day(since)), since, sinceTracking: start === 0, slippedToday };
 }
+
+/** One point on the year-end P/L's path: where the projection stood that morning. */
+export interface YearEndPathPoint {
+  /** `YYYY-MM-DD`. The last point is today, read live. */
+  date: string;
+  /** The projected year-end P/L at that moment — the sum of every category's `contribution`. */
+  projected: number;
+  /** The move from the point before, split as `decompose` splits it; null on the first point. */
+  move: Pick<YearEndMove, 'total' | 'spending' | 'budget' | 'past' | 'closed'> | null;
+}
+
+/** The projected figure at one moment. */
+export function projectedAt(m: Moment): number {
+  return cents(m.categories.reduce((s, c) => s + contribution(c.plan, c.actuals, c.isIncome, m.month), 0));
+}
+
+/**
+ * The projection's path through the year, for the P&L page's chart: one point per snapshot, in the
+ * order given. Each step carries its move's parts, so the chart can say whether a drop was spending
+ * or the calendar — the same split the budget page's table makes for two fixed periods.
+ */
+export function yearEndPath(points: readonly { date: string; moment: Moment }[]): YearEndPathPoint[] {
+  return points.map((p, i) => {
+    if (i === 0) return { date: p.date, projected: projectedAt(p.moment), move: null };
+    const { total, spending, budget, past, closed } = decompose(points[i - 1].moment, p.moment);
+    return { date: p.date, projected: projectedAt(p.moment), move: { total, spending, budget, past, closed } };
+  });
+}

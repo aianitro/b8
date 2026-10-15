@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contribution, decompose, holdStreak, type CategoryState } from './yearEndMoves';
+import { contribution, decompose, holdStreak, yearEndPath, type CategoryState } from './yearEndMoves';
 import { projectYearEnd, type YearEndRow } from './yearEnd';
 
 const flat = (n: number) => Array<number>(12).fill(n);
@@ -79,5 +79,23 @@ describe('holdStreak', () => {
 
   it('needs two points', () => {
     expect(holdStreak([at('2026-10-06', 0)], '2026-10-06')).toBeNull();
+  });
+});
+
+describe('yearEndPath', () => {
+  const oct = 9;
+
+  it('puts each morning at its projected figure, and each step is the move between them', () => {
+    const m = (spent: number) => ({ month: oct, categories: [groceries(with_(flat(0), oct, spent))] });
+    const path = yearEndPath([{ date: '2026-10-01', moment: m(80) }, { date: '2026-10-02', moment: m(130) }, { date: '2026-10-03', moment: m(130) }]);
+    expect(path.map((p) => p.date)).toEqual(['2026-10-01', '2026-10-02', '2026-10-03']);
+    expect(path[0].move).toBeNull();
+    expect(path[1].projected - path[0].projected).toBeCloseTo(path[1].move!.total);
+    expect(path[1].move).toMatchObject({ total: -30, spending: -30 });
+    expect(path[2].move).toMatchObject({ total: 0, spending: 0 });
+  });
+
+  it('is empty with no points', () => {
+    expect(yearEndPath([])).toEqual([]);
   });
 });

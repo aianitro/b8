@@ -4,7 +4,7 @@
 
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import db from '@/lib/db';
-import { loadYearEndMoves, writeYearEndSnapshot } from '@/lib/yearEndSnapshots';
+import { loadYearEndMoves, loadYearEndPath, writeYearEndSnapshot } from '@/lib/yearEndSnapshots';
 
 const P = 'ye-moves-test';
 const ACCOUNT = `${P}-acct`;
@@ -66,5 +66,20 @@ describe('year-end snapshot', () => {
         FROM year_end_snapshots WHERE snapshot_date = CURRENT_DATE`);
     const { streak } = await loadYearEndMoves('operational');
     expect(streak).toMatchObject({ days: 3, sinceTracking: true, slippedToday: false });
+  });
+
+  it('draws the path from the earlier mornings to the live figure, today once', async () => {
+    expect(await loadYearEndPath('operational')).toEqual([]);
+    await writeYearEndSnapshot();
+    await db.query(`
+      INSERT INTO year_end_snapshots (snapshot_date, landscape, category_name, is_income, plan, actuals)
+      SELECT CURRENT_DATE - 2, landscape, category_name, is_income, plan, actuals
+        FROM year_end_snapshots WHERE snapshot_date = CURRENT_DATE`);
+    const path = await loadYearEndPath('operational');
+    const today = (await db.query<{ d: string }>('SELECT CURRENT_DATE::text AS d')).rows[0].d;
+    expect(path.map((p) => p.date).at(-1)).toBe(today);
+    expect(new Set(path.map((p) => p.date)).size).toBe(path.length);
+    // Every step is the move between its two points, so the line's slope is the card's move.
+    for (let i = 1; i < path.length; i++) expect(path[i].projected - path[i - 1].projected).toBeCloseTo(path[i].move!.total, 1);
   });
 });

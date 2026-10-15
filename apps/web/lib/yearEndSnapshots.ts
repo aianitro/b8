@@ -1,7 +1,7 @@
 import db from './db';
 import { createLogger } from './logger';
 import { loadYearEndStates } from './yearEndRead';
-import { decompose, holdStreak, type CategoryState, type HoldStreak, type Moment, type YearEndMove } from './domain/yearEndMoves';
+import { decompose, holdStreak, yearEndPath, type CategoryState, type HoldStreak, type Moment, type YearEndMove, type YearEndPathPoint } from './domain/yearEndMoves';
 
 const log = createLogger('yearEndSnapshots');
 
@@ -84,11 +84,26 @@ export interface YearEndMoves {
  * every 1 January. Read against the live figures, so the move is in the number on the card.
  */
 export async function loadYearEndMoves(landscape: Landscape): Promise<YearEndMoves> {
-  const t = await today();
+  const { t, points, now } = await loadYearEndPoints(landscape);
   const monthStart = `${t.iso.slice(0, 7)}-01`;
+  const since = (p: { date: string; moment: Moment } | undefined): MoveSince | null =>
+    p ? { from: p.date, move: decompose(p.moment, now) } : null;
+  return {
+    sinceYesterday: since(points.filter((p) => p.date < t.iso).pop()),
+    sinceMonthStart: since(points.find((p) => p.date >= monthStart)),
+    streak: holdStreak([...points, { date: t.iso, moment: now }], t.iso),
+  };
+}
+
+/**
+ * This year's snapshots up to and including this morning's, every one, and the live state. The
+ * moves above and the path below both read this, so the chart's steps are the card's moves.
+ */
+async function loadYearEndPoints(landscape: Landscape) {
+  const t = await today();
   const yearStart = `${t.iso.slice(0, 4)}-01-01`;
-  // This year's snapshots up to and including this morning's, every one: the streak walks them
-  // all, and the two baselines are among them. A few dozen rows a day, so a year is still a small read.
+  // The streak and the path walk them all, and the two baselines are among them. A few dozen rows
+  // a day, so a year is still a small read.
   const [snaps, live] = await Promise.all([
     db.query<{ d: string; category_name: string; is_income: boolean; plan: string[]; actuals: string[] }>(
       `SELECT snapshot_date::text AS d, category_name, is_income, plan::text[], actuals::text[]
@@ -103,12 +118,16 @@ export async function loadYearEndMoves(landscape: Landscape): Promise<YearEndMov
   }
   const points: { date: string; moment: Moment }[] = [...byDate].map(([date, categories]) => ({ date, moment: { month: Number(date.slice(5, 7)) - 1, categories } }));
   const now: Moment = { month: t.month, categories: live };
+  return { t, points, now };
+}
 
-  const since = (p: { date: string; moment: Moment } | undefined): MoveSince | null =>
-    p ? { from: p.date, move: decompose(p.moment, now) } : null;
-  return {
-    sinceYesterday: since(points.filter((p) => p.date < t.iso).pop()),
-    sinceMonthStart: since(points.find((p) => p.date >= monthStart)),
-    streak: holdStreak([...points, { date: t.iso, moment: now }], t.iso),
-  };
+/**
+ * The projected year-end P/L, morning by morning this year, ending on the live figure — the P&L
+ * page's chart. This morning's snapshot is replaced by the live state rather than drawn beside it:
+ * two points on one date would read as a move made at midnight. Empty before the first snapshot.
+ */
+export async function loadYearEndPath(landscape: Landscape): Promise<YearEndPathPoint[]> {
+  const { t, points, now } = await loadYearEndPoints(landscape);
+  if (points.length === 0) return [];
+  return yearEndPath([...points.filter((p) => p.date < t.iso), { date: t.iso, moment: now }]);
 }
