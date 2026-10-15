@@ -12,8 +12,15 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
 import db from '@/lib/db';
-import { decideProposal, canonicalCategory } from '@/lib/proposalStore';
+import { decideProposal, canonicalCategory, createProposal } from '@/lib/proposalStore';
 import { POST } from './route';
+import {
+  bootstrapOwner,
+  enrolSecondUser,
+  resetAuth,
+  type EnrolledUser,
+} from '@/app/api/v1/auth/secondUserTestKit';
+import { SESSION_COOKIE_NAME, hashSessionToken } from '@/lib/sessionToken';
 
 const CATEGORY = 'Groceries';
 const OTHER = 'Dining Out';
@@ -162,5 +169,85 @@ describe('the route refuses a caller with no qualifying session', () => {
     const res = await POST(decideRequest(id, 'yes please'), { params: Promise.resolve({ id }) });
     expect([400, 403]).toContain(res.status);
     expect(await categoryOf()).toBe(OTHER);
+  });
+});
+
+// P7-41a, S14. The acting PERSON is recorded beside the acting session, and outlives it.
+//
+// Both users are enrolled through the real ceremonies (the owner by bootstrap, the second user by
+// invitation), so the sessions deciding below are ones the app issued. The auth tables are reset at
+// the start and the end of this block only; the blocks above never read them.
+describe('the acting user on a decision', () => {
+  function decideAs(id: string, decision: string, token: string): Promise<Response> {
+    return POST(
+      new NextRequest(`http://localhost/api/v1/agent/proposals/${id}/decide`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', cookie: `${SESSION_COOKIE_NAME}=${token}` },
+        body: JSON.stringify({ decision }),
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+  }
+
+  async function attribution(id: string) {
+    const r = await db.query<{
+      decided_by: string | null; decided_by_user_id: number | null;
+      proposed_by: string | null; proposed_by_user_id: number | null;
+    }>(
+      'SELECT decided_by, decided_by_user_id, proposed_by, proposed_by_user_id FROM agent_proposals WHERE id = $1',
+      [id]
+    );
+    return r.rows[0];
+  }
+
+  afterAll(resetAuth);
+
+  it('T41a-S14: each decision records the deciding user, system proposals record none, and the user outlives the session', async () => {
+    await resetAuth();
+    await seed();
+    const owner: EnrolledUser = await bootstrapOwner();
+    const second = await enrolSecondUser(owner.token);
+
+    // The category moves on every confirm, so each proposal observes what the previous one left.
+    const cases: Array<[string, 'confirmed' | 'rejected', EnrolledUser, string, string]> = [
+      ['second user confirms', 'confirmed', second, CATEGORY, OTHER],
+      ['second user rejects', 'rejected', second, OTHER, CATEGORY],
+      ['owner confirms', 'confirmed', owner, OTHER, CATEGORY],
+      ['owner rejects', 'rejected', owner, CATEGORY, OTHER],
+    ];
+    const decidedBySecond: string[] = [];
+    for (const [label, decision, actor, category, observed] of cases) {
+      const id = await makeProposal(category, observed);
+      const res = await decideAs(id, decision, actor.token);
+      expect(res.status, label).toBe(200);
+      const row = await attribution(id);
+      expect(String(row.decided_by_user_id), label).toBe(String(actor.userId));
+      expect(row.decided_by, label).toBe(hashSessionToken(actor.token));
+      if (actor === second) decidedBySecond.push(id);
+    }
+
+    // A SYSTEM-MADE PROPOSAL names no person — not the owner. Both the direct row and one made
+    // through the store with no actor, which is how the category suggester writes.
+    const direct = await makeProposal(CATEGORY);
+    expect(await attribution(direct)).toMatchObject({ proposed_by: null, proposed_by_user_id: null });
+    await db.query('DELETE FROM agent_proposals WHERE id = $1', [direct]);
+    const { view } = await createProposal({
+      subjectId: txnId,
+      proposed: { category: CATEGORY },
+      observed: { category: OTHER },
+      rationale: null,
+      proposedBy: null,
+      now: new Date(),
+    });
+    expect(await attribution(view.id)).toMatchObject({ proposed_by: null, proposed_by_user_id: null });
+
+    // THE PERSON OUTLIVES THE SESSION. Deleting the second user's session row nulls the session
+    // column (ON DELETE SET NULL) and leaves the user column exactly as it was.
+    await db.query('DELETE FROM auth_sessions WHERE token_hash = $1', [hashSessionToken(second.token)]);
+    for (const id of decidedBySecond) {
+      const row = await attribution(id);
+      expect(row.decided_by).toBeNull();
+      expect(String(row.decided_by_user_id)).toBe(String(second.userId));
+    }
   });
 });

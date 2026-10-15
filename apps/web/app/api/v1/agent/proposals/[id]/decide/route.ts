@@ -60,7 +60,8 @@ export async function POST(
     const outcome = await decideProposal({
       id,
       decision: body.decision,
-      decidedBy: session.tokenHash,
+      // The session AND its person — P7-41a. The session row may be pruned later; the person stays.
+      decidedBy: { tokenHash: session.tokenHash, userId: session.userId },
       now: new Date(),
     });
 

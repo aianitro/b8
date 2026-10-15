@@ -39,8 +39,11 @@ export const RELYING_PARTY_NAME = 'B8 Finance';
 /**
  * The owner's user handle: a fixed constant, and emphatically not a column.
  *
- * A table holding one handle forever is a users table under another name, and this step's
- * migration refuses one at length (see `migrations/1789300800000_…`). So the handle lives here.
+ * When this was written there was one principal, and a table holding one handle forever would have
+ * been a users table under another name. P7-41a added that table for a second person, and the
+ * owner's handle stayed exactly this constant, because the owner's passkeys are enrolled under it.
+ * The second user's handle is derived elsewhere (`webauthnIdentityFor` in `lib/users.ts`) and is
+ * built so it can never equal this one.
  *
  * IT MUST NEVER BE REGENERATED. A handle that changes per ceremony makes every registration look
  * like a different user to the authenticator, so a platform authenticator silently creates a
@@ -53,7 +56,7 @@ export const RELYING_PARTY_NAME = 'B8 Finance';
  */
 export const OWNER_USER_HANDLE = 'b8-owner';
 
-/** What the authenticator shows beside the handle. Single-user, so both are constants. */
+/** What the authenticator shows beside the owner's handle. A second user is shown by their own name. */
 export const OWNER_USER_NAME = 'owner';
 
 /**

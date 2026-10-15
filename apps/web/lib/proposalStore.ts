@@ -111,12 +111,29 @@ export interface CreateResult {
   preexisting: boolean;
 }
 
+/**
+ * Who did something to a proposal: the SESSION and the PERSON behind it, always together.
+ *
+ * ONE VALUE, NOT TWO ARGUMENTS, because the two columns are one fact recorded twice for two
+ * lifetimes. `proposed_by` / `decided_by` name a session, which is pruned at sign-in housekeeping or
+ * cascaded away when a passkey is removed (ON DELETE SET NULL); `proposed_by_user_id` /
+ * `decided_by_user_id` (P7-41a) name the person and survive that. A writer that could pass a session
+ * without its user is the silent half of the attribution — the migration's CHECKs refuse that row,
+ * and this shape makes it unwritable before the database has to. Both halves come from the same
+ * `ActiveSession`, resolved at the request boundary where the caller is known.
+ *
+ * `null` is "no person": a system-made proposal (the category suggester), or a caller with no
+ * session. It is never the owner by default — `categorySuggester` selects on `proposed_by IS NULL`,
+ * and a NULL user here is what keeps those proposals distinguishable from a person's.
+ */
+export type ProposalActor = { tokenHash: string; userId: number };
+
 export async function createProposal(args: {
   subjectId: number;
   proposed: CategorizeProposed;
   observed: CategorizeObserved;
   rationale: string | null;
-  proposedBy: string | null;
+  proposedBy: ProposalActor | null;
   now: Date;
   /**
    * How long the proposal stays confirmable. Defaults to the chat's short window (PROPOSAL_TTL_MS),
@@ -128,8 +145,8 @@ export async function createProposal(args: {
   const id = generateProposalId();
   const r = await db.query(
     `INSERT INTO agent_proposals
-       (id, kind, subject_id, proposed, observed, rationale, expires_at, proposed_by)
-     VALUES ($1, 'categorize_transaction', $2, $3, $4, $5, $6, $7)
+       (id, kind, subject_id, proposed, observed, rationale, expires_at, proposed_by, proposed_by_user_id)
+     VALUES ($1, 'categorize_transaction', $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (kind, subject_id) WHERE decided_at IS NULL DO NOTHING
      RETURNING id, expires_at`,
     [
@@ -139,7 +156,8 @@ export async function createProposal(args: {
       JSON.stringify(args.observed),
       args.rationale,
       (args.ttlMs === undefined ? expiryFrom(args.now) : new Date(args.now.getTime() + args.ttlMs)).toISOString(),
-      args.proposedBy,
+      args.proposedBy?.tokenHash ?? null,
+      args.proposedBy?.userId ?? null,
     ]
   );
 
@@ -196,7 +214,8 @@ export type DecideOutcome =
 export async function decideProposal(args: {
   id: string;
   decision: 'confirmed' | 'rejected';
-  decidedBy: string | null;
+  /** See `ProposalActor`: the session and its person, written together on every closing UPDATE. */
+  decidedBy: ProposalActor | null;
   now: Date;
 }): Promise<DecideOutcome> {
   const client = await db.connect();
@@ -222,9 +241,10 @@ export async function decideProposal(args: {
         return { ok: false, code: 'ALREADY_DECIDED', message: 'This proposal has already been decided.' };
       }
       await client.query(
-        `UPDATE agent_proposals SET decided_at = $2, decision = 'rejected', decided_by = $3
+        `UPDATE agent_proposals
+            SET decided_at = $2, decision = 'rejected', decided_by = $3, decided_by_user_id = $4
           WHERE id = $1`,
-        [args.id, args.now.toISOString(), args.decidedBy]
+        [args.id, args.now.toISOString(), args.decidedBy?.tokenHash ?? null, args.decidedBy?.userId ?? null]
       );
       await client.query('COMMIT');
       return { ok: true, applied: false, message: 'Dismissed. Nothing was changed.' };
@@ -266,9 +286,10 @@ export async function decideProposal(args: {
       if (stored && !stored.decidedAt && verdict.code !== 'NOT_FOUND') {
         await client.query(
           `UPDATE agent_proposals
-              SET decided_at = $2, decision = 'rejected', failure_reason = $3, decided_by = $4
+              SET decided_at = $2, decision = 'rejected', failure_reason = $3, decided_by = $4,
+                  decided_by_user_id = $5
             WHERE id = $1`,
-          [args.id, args.now.toISOString(), verdict.code, args.decidedBy]
+          [args.id, args.now.toISOString(), verdict.code, args.decidedBy?.tokenHash ?? null, args.decidedBy?.userId ?? null]
         );
       }
       await client.query('COMMIT');
@@ -283,9 +304,10 @@ export async function decideProposal(args: {
     );
     await client.query(
       `UPDATE agent_proposals
-          SET decided_at = $2, decision = 'confirmed', applied = TRUE, decided_by = $3
+          SET decided_at = $2, decision = 'confirmed', applied = TRUE, decided_by = $3,
+              decided_by_user_id = $4
         WHERE id = $1`,
-      [args.id, args.now.toISOString(), args.decidedBy]
+      [args.id, args.now.toISOString(), args.decidedBy?.tokenHash ?? null, args.decidedBy?.userId ?? null]
     );
     await client.query('COMMIT');
 

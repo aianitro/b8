@@ -80,7 +80,10 @@ async function sessionCount(): Promise<number> {
 }
 
 beforeEach(async () => {
-  await db.query('TRUNCATE auth_sessions, webauthn_credentials CASCADE');
+  // `users` too, since P7-41a: the first bootstrap creates the owner, and an owner left over from
+  // the previous test would make `users_one_owner` refuse it. CASCADE reaches the tables that point
+  // at users (invitations, push subscriptions, proposals), all of them fabricated rows here.
+  await db.query('TRUNCATE auth_sessions, webauthn_credentials, users CASCADE');
 });
 
 afterAll(async () => {

@@ -24,9 +24,12 @@ After seeding, the injection fixtures and a credential for minting a token:
 
 ```sh
 psql -d b8_evals -f evals/golden/injection.sql
-# The token minter refuses when no passkey is enrolled, and a fresh database has none:
-psql -d b8_evals -c "INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, enrolled_via) \
-  VALUES ('evals-fixture-credential','\\x00'::bytea,0,'bootstrap') ON CONFLICT DO NOTHING;"
+# The token minter refuses when the owner has no passkey, and a fresh database has neither an owner
+# nor a passkey. Since P7-41a every credential belongs to a user, so the owner is created first:
+psql -d b8_evals -c "INSERT INTO users (display_name, is_owner) SELECT 'Owner', TRUE \
+  WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_owner);"
+psql -d b8_evals -c "INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, enrolled_via, user_id) \
+  VALUES ('evals-fixture-credential','\\x00'::bytea,0,'bootstrap',(SELECT id FROM users WHERE is_owner)) ON CONFLICT DO NOTHING;"
 ```
 
 **Never run the repo's integration suite against this database** — it truncates transactions and

@@ -63,7 +63,9 @@ export async function POST(req: NextRequest) {
     : null;
 
   try {
-    await registerSubscription(endpoint, label);
+    // AS THE SESSION'S USER, so a ping sent for that user reaches this device and a ping for the
+    // other user does not. Re-registering an endpoint someone else held moves it here.
+    await registerSubscription(endpoint, label, session.userId);
     return Response.json({ success: true, data: { registered: true } } satisfies ApiResponse<{ registered: boolean }>);
   } catch (err) {
     // The endpoint is credential-shaped and is never logged, on this path or the send path.

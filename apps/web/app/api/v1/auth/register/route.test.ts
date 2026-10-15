@@ -83,7 +83,10 @@ async function credentialRows(): Promise<{ credential_id: string; enrolled_via: 
 beforeEach(async () => {
   // `auth_sessions` first — it holds the foreign key. Fabricated rows only; this scratch database
   // holds nothing else.
-  await db.query('TRUNCATE auth_sessions, webauthn_credentials CASCADE');
+  // `users` too, since P7-41a: the first bootstrap creates the owner, and an owner left over from
+  // the previous test would make `users_one_owner` refuse it. CASCADE reaches the tables that point
+  // at users (invitations, push subscriptions, proposals), all of them fabricated rows here.
+  await db.query('TRUNCATE auth_sessions, webauthn_credentials, users CASCADE');
 });
 
 afterAll(async () => {
@@ -126,9 +129,12 @@ describe('POST /api/v1/auth/register/*, against a scratch database', () => {
   it('registration is refused without a session once at least one credential already exists', async () => {
     // Precondition, seeded directly: one credential exists. Fabricated bytes — this row never came
     // from a real authenticator and does not need to have.
+    // Since P7-41a the credential needs its user, so the fabricated owner is seeded with it.
+    await db.query(`INSERT INTO users (display_name, is_owner) VALUES ('Owner', TRUE)`);
     await db.query(
-      `INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, transports, enrolled_via)
-       VALUES ('p112-incumbent-credential', '\\x0102030405'::bytea, 0, NULL, 'bootstrap')`
+      `INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, transports, enrolled_via, user_id)
+       VALUES ('p112-incumbent-credential', '\\x0102030405'::bytea, 0, NULL, 'bootstrap',
+               (SELECT id FROM users WHERE is_owner))`
     );
 
     const stranger = createTestAuthenticator();

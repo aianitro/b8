@@ -111,9 +111,11 @@ export const relyingPartyId = z
  * A response missing it cannot satisfy this schema, so the omission is a failure here rather than a
  * silently different relying party in the field.
  *
- * `user.id` is the owner's stable handle. It is a fixed constant in `lib/`, deliberately NOT a
- * column: a table holding one handle forever is a users table under another name, and this step's
- * schema refuses one for reasons written into the migration. It must be STABLE across ceremonies —
+ * `user.id` is the signing-up user's stable WebAuthn handle. Until P7-41a it was one fixed constant in
+ * `lib/` for the only principal, and the owner's existing passkeys were enrolled under it, so the
+ * owner's handle must stay exactly that constant. Since P7-41a there is a second user, whose handle
+ * must DIFFER from the owner's: two people enrolling under one handle on a shared password manager
+ * makes the second enrolment silently REPLACE the first person's passkey. It must be STABLE across ceremonies —
  * a handle regenerated per request makes every registration look like a different user to the
  * authenticator, so a platform authenticator silently creates a second passkey instead of
  * recognising the first, and the owner ends up with a credential list that grows on every visit.
@@ -191,10 +193,10 @@ export const RegistrationCeremonyResponseSchema = z.looseObject({
  * Same loose shape, same disclaimer: parsing proves nothing about who sent it.
  *
  * `userHandle` is nullable and optional — a non-discoverable credential returns none. It carries no
- * routing information in this application and must never be used to select a credential: there is
- * one principal, so the handle is a constant, and the value that identifies WHICH authenticator is
- * asserting is `id`. A lookup keyed on the user handle finds every credential or none, and either
- * way has answered the wrong question.
+ * routing information in this application and must never be used to select a credential or a user:
+ * the value that identifies WHICH authenticator is asserting is `id`, and the user is read from that
+ * credential's row (`webauthn_credentials.user_id`). The handle is browser-supplied input inside the
+ * thing being verified; resolving the user from it would let a payload name its own principal.
  */
 export const AuthenticationCeremonyResponseSchema = z.looseObject({
   id: base64url,
@@ -263,6 +265,95 @@ export const DeviceSessionSchema = z.strictObject({
 
 export const DeviceSessionResponseSchema = apiResponseSchema(DeviceSessionSchema);
 
+// ─── Users and invitations (P7-41a) ──────────────────────────────────────────────────────────────
+//
+// Every object below is STRICT, the envelope's choice rather than the ceremony objects'. This app
+// authors each of them at both ends, and nothing legitimately adds a key: a stray `isOwner: true` on
+// an invitation request is exactly the key that must be refused, not ignored.
+
+/**
+ * A user's display name: 1 to 60 characters, the bound `users.display_name` and
+ * `user_invitations.display_name` carry as CHECKs, so a name this accepts is a name the INSERT
+ * accepts. Not trimmed here: a schema that reshapes input hands the handler a value the client did
+ * not send. Refuse, never reshape.
+ */
+export const UserDisplayNameSchema = z
+  .string()
+  .min(1, 'a display name may not be empty')
+  .max(60, 'a display name is at most 60 characters');
+
+/**
+ * A user's id, as `users.id` (SERIAL) reaches a consumer: a positive integer. Opaque to every
+ * consumer — tests compare it with `String(...)` — and never a WebAuthn user handle.
+ */
+export const UserIdSchema = z.int().positive();
+
+/**
+ * `GET /api/v1/auth/me` — who the session belongs to.
+ *
+ * Every field is required and none is nullable, because there is no partial answer: a request whose
+ * session resolves to no user is refused (the error branch), never answered with a null user, and
+ * never answered as the owner for want of a better guess. A client that cannot read this renders no
+ * name at all — not "Owner".
+ */
+export const MeSchema = z.strictObject({
+  userId: UserIdSchema,
+  displayName: UserDisplayNameSchema,
+  isOwner: z.boolean(),
+});
+
+export const MeResponseSchema = apiResponseSchema(MeSchema);
+
+/**
+ * An invitation code, as minted by the owner and presented in the `X-Invitation-Code` header on both
+ * `register/options` and `register/verify`.
+ *
+ * Unpadded base64url carrying at least 16 bytes of entropy — 22 characters, the challenge's floor and
+ * for a sharper version of its reason. The code is presented PRE-AUTH, to endpoints any visitor can
+ * reach, and lives up to seven days; it is the only thing between a stranger and a new user on this
+ * app. The database stores only its SHA-256 (`user_invitations.code_hash`), so this schema is the one
+ * place its strength can be pinned. A header failing this is refused exactly as a well-formed code
+ * that matches nothing is — `REGISTRATION_CLOSED` — so the format check tells a prober nothing.
+ */
+export const invitationCode = base64url.min(
+  22,
+  'an invitation code carries at least 16 bytes of entropy — 22 unpadded base64url characters'
+);
+
+/** `POST /api/v1/auth/invitations` — the body. The invitee's name, chosen by the owner. */
+export const InvitationCreateRequestSchema = z.strictObject({
+  displayName: UserDisplayNameSchema,
+});
+
+/**
+ * `POST /api/v1/auth/invitations` — what the owner receives.
+ *
+ * THE RAW CODE APPEARS HERE AND NOWHERE ELSE: not in the database, not in a log line, not in any
+ * later response. There is no endpoint that reads it back, so a lost code is replaced by minting
+ * another, never recovered. Strict for the reason `DeviceSessionSchema` is: this object carries a
+ * secret, and it is the one payload that must never grow quietly.
+ *
+ * `expiresAt` is the database's `user_invitations.expires_at`, at most seven days after creation.
+ * It is shown so the owner knows how long they have; it is never the check. Whether a code is live is
+ * decided by Postgres `NOW()` at redemption.
+ */
+export const InvitationCreatedSchema = z.strictObject({
+  code: invitationCode,
+  expiresAt: timestamptz,
+});
+
+export const InvitationCreatedResponseSchema = apiResponseSchema(InvitationCreatedSchema);
+
+/**
+ * `POST /api/v1/auth/users/[id]/revoke` — the envelope, `data: null`.
+ *
+ * Null for the reason `CeremonyVerifiedResponseSchema` is: the outcome is a state change the client
+ * already asked for, and a body describing it would be a second representation that can disagree
+ * with the database. A refusal (not the owner, the owner revoking the owner, an unknown id) is the
+ * error branch, never a success carrying a negative result.
+ */
+export const UserRevokedResponseSchema = apiResponseSchema(z.null());
+
 /**
  * The body the boundary returns for a request it refuses: an unauthenticated request to anything
  * outside the five allowlisted surfaces, and `POST /api/v1/auth/logout` with no session.
@@ -311,6 +402,10 @@ export const AuthErrorCodeSchema = z.enum([
   'INSUFFICIENT_SCOPE',
   // P1-12a. A device token was requested by a caller that is a browser. See DeviceSessionSchema.
   'DEVICE_TOKEN_REFUSED',
+  // P7-41a. Authenticated, but only the OWNER's full-scope browser session may invite or remove a
+  // user. 403, for INSUFFICIENT_SCOPE's reason: signing in again would not help. A refused invitation
+  // code is NOT this code — it is REGISTRATION_CLOSED, so a code holder learns nothing about why.
+  'OWNER_ONLY',
 ]);
 
 export type RegistrationCeremonyOptions = z.infer<typeof RegistrationCeremonyOptionsSchema>;
@@ -319,3 +414,6 @@ export type RegistrationCeremonyResponse = z.infer<typeof RegistrationCeremonyRe
 export type AuthenticationCeremonyResponse = z.infer<typeof AuthenticationCeremonyResponseSchema>;
 export type AuthErrorCode = z.infer<typeof AuthErrorCodeSchema>;
 export type DeviceSession = z.infer<typeof DeviceSessionSchema>;
+export type Me = z.infer<typeof MeSchema>;
+export type InvitationCreateRequest = z.infer<typeof InvitationCreateRequestSchema>;
+export type InvitationCreated = z.infer<typeof InvitationCreatedSchema>;

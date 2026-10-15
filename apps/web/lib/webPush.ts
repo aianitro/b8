@@ -72,9 +72,24 @@ function signJwt(signingInput: string, privateKeyBase64: string): string {
   return base64url(signature);
 }
 
-async function liveSubscriptions(): Promise<string[]> {
+/**
+ * The live endpoints of ONE user — `userId`, or the owner when it is omitted.
+ *
+ * THE OWNER DEFAULT IS RESOLVED IN SQL, from `users.is_owner`, and that is the whole of what
+ * "omitted" means. It is NOT "every live subscription", which is what this query was before
+ * P7-41a, and which with two users would send the owner's overdraft alarm to the second user's
+ * phone. The scheduled pushes (the daily ping, the cushion and overdraft warnings) call
+ * `sendWebPush` with no user, so they reach the owner and only the owner — the owner's decision at
+ * G0, and a product question rather than this step's to widen. On a database with no owner yet the
+ * subquery is NULL, `user_id = NULL` matches nothing, and nothing is sent: no owner, no recipient.
+ */
+async function liveSubscriptions(userId: number | undefined): Promise<string[]> {
   const { rows } = await db.query<{ endpoint: string }>(
-    'SELECT endpoint FROM web_push_subscriptions WHERE revoked_at IS NULL ORDER BY created_at'
+    `SELECT endpoint FROM web_push_subscriptions
+      WHERE revoked_at IS NULL
+        AND user_id = COALESCE($1::int, (SELECT id FROM users WHERE is_owner))
+      ORDER BY created_at`,
+    [userId ?? null]
   );
   return rows.map((r) => r.endpoint);
 }
@@ -98,14 +113,15 @@ export async function sendWebPushIfDelivered(deliveredKinds: readonly AlertKind[
 }
 
 /**
- * The ping itself, to every live subscription. Resolves to how many devices accepted it — zero when
- * nothing was configured, nothing was registered, or every attempt failed — so a caller that must
- * retry until a device has it (the overdraft watch) can tell.
+ * The ping itself, to every live subscription OF ONE USER — `userId`, or the owner when omitted
+ * (see `liveSubscriptions`). Resolves to how many devices accepted it — zero when nothing was
+ * configured, nothing was registered, or every attempt failed — so a caller that must retry until a
+ * device has it (the overdraft watch) can tell.
  *
  * `urgency` is `high` only for an alarm with a deadline: an account below its cushion, where the
  * fix is a transfer before the fee. The daily ping stays `normal`.
  */
-export async function sendWebPush(urgency: 'normal' | 'high'): Promise<number> {
+export async function sendWebPush(urgency: 'normal' | 'high', userId?: number): Promise<number> {
   let delivered = 0;
   try {
     const vapid = vapidFrom(process.env);
@@ -114,7 +130,7 @@ export async function sendWebPush(urgency: 'normal' | 'high'): Promise<number> {
       return 0;
     }
 
-    const endpoints = await liveSubscriptions();
+    const endpoints = await liveSubscriptions(userId);
     if (endpoints.length === 0) {
       log.info('no web push subscriptions registered');
       return 0;
@@ -181,16 +197,26 @@ export async function sendWebPush(urgency: 'normal' | 'high'): Promise<number> {
   return delivered;
 }
 
-/** Register or re-register a subscription. Re-subscribing the same device must not duplicate it. */
-export async function registerSubscription(endpoint: string, label: string | null): Promise<void> {
+/**
+ * Register or re-register a subscription, as `userId`'s. Re-subscribing the same device must not
+ * duplicate it.
+ *
+ * RE-REGISTRATION MOVES THE ROW TO WHOEVER REGISTERED IT LAST. An endpoint is one browser profile on
+ * one device, and the user registering it now is the user signed in on it now — if the owner's
+ * shared iPad is handed over and the second user turns notifications on, the owner's pings must stop
+ * arriving there. Keeping the old `user_id` on conflict would send one person's alarms to a device
+ * the other is holding; the endpoint is UNIQUE, so the row has exactly one user either way.
+ */
+export async function registerSubscription(endpoint: string, label: string | null, userId: number): Promise<void> {
   await db.query(
-    `INSERT INTO web_push_subscriptions (endpoint, label) VALUES ($1, $2)
+    `INSERT INTO web_push_subscriptions (endpoint, label, user_id) VALUES ($1, $2, $3)
      ON CONFLICT (endpoint) DO UPDATE
        SET label = EXCLUDED.label,
+           user_id = EXCLUDED.user_id,
            -- Re-subscribing is how a revoked or failed device comes back, so both are cleared.
            revoked_at = NULL,
            last_error = NULL`,
-    [endpoint, label]
+    [endpoint, label, userId]
   );
 }
 
@@ -205,13 +231,20 @@ export async function registerSubscription(endpoint: string, label: string | nul
  *
  * Takes the endpoint rather than returning the list, because the list is a set of credentials and
  * this answer is the only part a client needs.
+ *
+ * AS SEEN BY `userId`. An endpoint registered to the OTHER user is "not registered" for this one —
+ * which is the truth from where they sit (nothing will reach them on it), it tells them to register,
+ * and registering moves it to them. Answering "registered" there would leave a button reading
+ * "notifications are on" while every ping went to the other person.
  */
 export async function subscriptionStatus(
-  endpoint: string
+  endpoint: string,
+  userId: number
 ): Promise<{ registered: boolean; revoked: boolean }> {
   const { rows } = await db.query<{ revoked: boolean }>(
-    'SELECT revoked_at IS NOT NULL AS revoked FROM web_push_subscriptions WHERE endpoint = $1',
-    [endpoint]
+    `SELECT revoked_at IS NOT NULL AS revoked FROM web_push_subscriptions
+      WHERE endpoint = $1 AND user_id = $2`,
+    [endpoint, userId]
   );
   if (rows.length === 0) return { registered: false, revoked: false };
   return { registered: !rows[0].revoked, revoked: rows[0].revoked };

@@ -8,30 +8,51 @@
 // satisfy every constraint in the schema and still hand the app to a stranger. That is the
 // AUTHORIZATION hole, it is closed by the three lines below that derive `enrolledVia` from the
 // session rather than from anything else, and SPEC.md's I2 is the fixture that holds it.
+//
+// P7-41a ADDS A THIRD DOOR AND RE-CHECKS IT HERE. An invitation code is checked on `options` and
+// checked again on this endpoint, because options saying yes is not a promise: a header present on
+// one and not re-checked on the other is the gap that enrols a stranger. The order is: the gate
+// (session, code, count), a read-only liveness check of the code so a dead one is refused before the
+// ceremony spends its challenge, the ceremony itself, and only then the enrolment transaction, which
+// locks the invitation, re-checks it, creates the user and credential, consumes the code and opens
+// the session as one outcome. A ceremony that does not verify reaches none of that, so it cannot
+// burn the code.
 
 import type { NextRequest } from 'next/server';
-import { countCredentials, enrolCredential } from '@/lib/authSession';
+import { countCredentials, enrolCredential, type EnrolmentPath } from '@/lib/authSession';
+import { INVITATION_HEADER, liveInvitationHash } from '@/lib/invitations';
 import { createLogger } from '@/lib/logger';
 import { registrationDecision } from '@/lib/registrationGate';
 import { consumeChallenge } from '@/lib/webauthnChallenge';
 import { verifyRegistrationCeremony } from '@/lib/webauthnVerify';
 import { RegistrationCeremonyResponseSchema } from '@b8/contracts/auth';
-import { authError, ceremonyCompleted, sessionFrom, withEnvelope } from '../../shared';
+import { authError, ceremonyCompleted, registrationClosed, sessionFrom, withEnvelope } from '../../shared';
 
 const log = createLogger('auth');
 
 export const POST = withEnvelope(async (request: NextRequest) => {
   const session = await sessionFrom(request);
+  const presented = request.headers.get(INVITATION_HEADER);
   const decision = registrationDecision({
     session,
     credentialCount: await countCredentials(),
+    invitationPresented: presented !== null,
   });
-  if (!decision.allowed) {
-    return authError(
-      'REGISTRATION_CLOSED',
-      'This app already has an enrolled passkey. Sign in first to add another device.',
-      403
-    );
+  if (!decision.allowed) return registrationClosed();
+
+  // WHOSE CREDENTIAL THIS WILL BE, fixed here from the same decision that admitted the request, and
+  // never from the ceremony payload. `authenticated` is the signed-in user — the session's, not the
+  // owner's by default. `invitation` carries only the code's hash: the user it creates does not
+  // exist yet, and is created inside the enrolment transaction.
+  let path: EnrolmentPath;
+  if (decision.enrolledVia === 'invitation') {
+    const codeHash = await liveInvitationHash(presented);
+    if (codeHash === null) return registrationClosed();
+    path = { via: 'invitation', codeHash };
+  } else if (decision.enrolledVia === 'authenticated' && session) {
+    path = { via: 'authenticated', userId: session.userId };
+  } else {
+    path = { via: 'bootstrap' };
   }
 
   let body: unknown;
@@ -68,22 +89,19 @@ export const POST = withEnvelope(async (request: NextRequest) => {
 
   const enrolment = await enrolCredential({
     credential: verification.credential,
-    // THE TAG COMES FROM THE SESSION, through the same decision that permitted the request. Not
-    // from the credential count, and not from a default.
-    enrolledVia: decision.enrolledVia,
+    // THE PATH COMES FROM THE SESSION OR THE CODE, through the same decision that permitted the
+    // request. Not from the credential count, and not from a default.
+    path,
   });
 
   if (!enrolment.enrolled) {
     if (enrolment.refusal === 'REGISTRATION_CLOSED') {
       // The concurrent case: another unauthenticated registration took the single bootstrap slot
-      // between this request's count and its INSERT. Same refusal as the count check produces, and
-      // no retry — this request lost a race it was right to lose.
-      log.warn('registration refused by the bootstrap constraint');
-      return authError(
-        'REGISTRATION_CLOSED',
-        'This app already has an enrolled passkey. Sign in first to add another device.',
-        403
-      );
+      // between this request's count and its INSERT — or another redemption consumed this
+      // invitation, or it expired, between the liveness read above and the locked re-check. Same
+      // refusal as the gate produces, and no retry — this request lost a race it was right to lose.
+      log.warn('registration refused at enrolment', { via: path.via });
+      return registrationClosed();
     }
     return authError('CEREMONY_FAILED', 'That authenticator is already enrolled.', 409);
   }

@@ -80,3 +80,55 @@ describe('sessionMayEnrol', () => {
     expect(sessionMayEnrol({ kind: 'browser', scope: 'read' })).toBe(false);
   });
 });
+
+// P7-41a: the third input. Whether a request carried an invitation code is a fact this rule reads;
+// whether the code is LIVE is not — only Postgres can say, by hash, against NOW(). So an
+// `'invitation'` decision is "proceed to redeem", and these fixtures pin the doors around it.
+describe('registrationDecision with an invitation code (P7-41a)', () => {
+  it('sends a code with no session to the invitation door, whatever the count', () => {
+    // Not the bootstrap window, even on an empty store: the caller said it was redeeming, and a
+    // dead code must be refused rather than reinterpreted as "no code".
+    for (const credentialCount of [0, 1, 7]) {
+      expect(registrationDecision({ session: null, credentialCount, invitationPresented: true }))
+        .toEqual({ allowed: true, enrolledVia: 'invitation' });
+    }
+  });
+
+  it('refuses a session and a code together, for every kind of session and every count', () => {
+    // Two doors to two different people. Honouring either would be a guess.
+    for (const session of [BROWSER, PHONE, SCRIPT, READ_ONLY]) {
+      for (const credentialCount of [0, 1]) {
+        expect(registrationDecision({ session, credentialCount, invitationPresented: true }))
+          .toEqual({ allowed: false });
+      }
+    }
+  });
+
+  it('leaves the no-code cases exactly as they were', () => {
+    // An absent flag and an explicit `false` are the same input, and both reproduce the original
+    // four-way table — the bootstrap window, the closed gate, and the signed-in device.
+    for (const invitationPresented of [undefined, false]) {
+      expect(registrationDecision({ session: null, credentialCount: 0, invitationPresented }))
+        .toEqual({ allowed: true, enrolledVia: 'bootstrap' });
+      expect(registrationDecision({ session: null, credentialCount: 1, invitationPresented }))
+        .toEqual({ allowed: false });
+      expect(registrationDecision({ session: BROWSER, credentialCount: 1, invitationPresented }))
+        .toEqual({ allowed: true, enrolledVia: 'authenticated' });
+      expect(registrationDecision({ session: SCRIPT, credentialCount: 1, invitationPresented }))
+        .toEqual({ allowed: false });
+    }
+  });
+
+  it('never yields a bootstrap once a code is presented', () => {
+    // The invited enrolment must never take the bootstrap tag: that would trip the at-most-one
+    // bootstrap index for the second user, or — if the index were dropped to make room — reopen
+    // the race it closes.
+    const sessions: Array<EnrolCandidate | null> = [null, BROWSER, PHONE, SCRIPT, READ_ONLY];
+    for (const session of sessions) {
+      for (const credentialCount of [0, 1, 3]) {
+        const decision = registrationDecision({ session, credentialCount, invitationPresented: true });
+        expect(decision.allowed && decision.enrolledVia === 'bootstrap').toBe(false);
+      }
+    }
+  });
+});

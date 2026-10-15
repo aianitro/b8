@@ -76,6 +76,8 @@ the item that justified it.
 | P6-40d-enriched-display | 40d | **MERGED** 2026-10-07 — merchant logo tile on account-statement and Transactions rows (https-only via `safeLogoUrl`, `no-referrer`, never painted until loaded), authorized date and city/region as a detail line when they add something. Orchestrator's browser check found the broken-image icon flashing on a dead logo at 390px; cycle 1 made the image invisible until load, which also removed an engine-dependent heuristic the reviewer could not settle without WebKit. 1 cycle | 40b | none expected — UI only; A8 tier-down candidate |
 | P6-40e-plaid-rekey | 40e | **MERGED** 2026-10-07 — `npm run rekey:plaid-ids` re-keys stored rows to Plaid's current ids for unambiguous one-to-one matches only (sync's own matcher), id column only, verified backup first. Root cause adjudicated: **H-a** (Plaid changed ids on the same item; sync stayed incremental), H-f unrefuted for the laptop-era window. Fixed a live sync defect found on the way (**H-d**: an item's cursor depended on account row order; any NULL now syncs the item from no cursor). H-g reported for a follow-up | 40a, 40b, 40c (merged) | none expected |
 | P6-40f-sync-reid-across-pages | 40f | MERGED | 40e (merged) | none expected |
+| P7-41a-second-user | 41a | **MERGED** 2026-10-15 (G0–G4 ✅, 1 cycle) — a user principal under every passkey and session; owner-only invitations and revoke; push per user; `/auth/me` and the signed-in name. G2 amended three acceptance commands (A1–A3, each adjudicated by command); G3 cycle 1 made S6's concurrency real (lock-removal probe 5/5 fail). Pre-deploy CSV backup taken on the server. Follow-ups in NITS.md | — | expected: `migrations/**`, `db/schema.sql`, `packages/contracts/**` |
+| P7-41b-gifts | 41b | QUEUED — spec after 41a merges, it builds on 41a's principal | P7-41a | expected: `migrations/**`, `db/schema.sql`, `packages/contracts/**` |
 
 Status: `QUEUED` → `SPEC` → `G0` → `G1` → `IMPL` → `G2` → `REVIEW` → `G3` → `G4` → `MERGED`,
 or `ESCALATED` when the cycle counter hits 3.
@@ -136,6 +138,13 @@ scratch copy before acting. **The T4 judgement that the remaining duplicates wer
 nothing compiles the rest" was wrong**, because a glob is not a compile. Eight remain
 (`lib/domain/adherence 2.ts` + seven markdown under `plan/`); neither class is reachable by a glob
 that matters, measured for those two classes rather than assumed for all.
+
+**H9 — RC-03 is an order-dependent flake in the full integration suite (found at P7-41a G2, 2026-10-15).**
+`app/api/v1/plaid/exchange-token/reissue-root-cause.test.ts`, "RC-03: an item whose accounts disagree on the cursor
+syncs from no cursor, whichever account the table returns first", fails with `could not arrange the physical row order`.
+Measured on a detached HEAD worktree with no P7-41a code: alone, 0 of 10 runs fail; in the full integration suite, 1 of 6.
+The test depends on the physical order of `accounts` rows, which other suites' leftovers can change. Until fixed, any spec
+that runs the whole integration config must treat RC-03 like the H4 pair.
 
 **H1 (original text) — `lib/domain/adherence.test 2.ts` is inside the tsconfig program (P0.5-29a T4).** A Finder/
 iCloud byte-identical duplicate, untracked, that imports `./adherence` and calls the *old*

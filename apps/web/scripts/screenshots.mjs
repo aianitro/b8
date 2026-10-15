@@ -54,9 +54,12 @@ function prepareDatabase() {
   run('node', ['scripts/seed-demo.mjs', '--yes-wipe-my-database'], { cwd: WEB, env });
   const token = randomBytes(32).toString('base64url');
   const hash = createHash('sha256').update(token).digest('hex');
+  // Every credential belongs to a user since P7-41a, so the fabricated owner is created first —
+  // under the neutral name the migration gives a backfilled owner, which is what the sidebar shows.
   run('psql', ['-d', DB, '-v', 'ON_ERROR_STOP=1', '-qc', `
-    INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, enrolled_via)
-      VALUES ('screenshots-cred', '\\x00'::bytea, 0, 'bootstrap');
+    INSERT INTO users (display_name, is_owner) VALUES ('Owner', TRUE);
+    INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, enrolled_via, user_id)
+      VALUES ('screenshots-cred', '\\x00'::bytea, 0, 'bootstrap', (SELECT id FROM users WHERE is_owner));
     INSERT INTO auth_sessions (token_hash, credential_id, expires_at)
       VALUES ('${hash}', 'screenshots-cred', NOW() + interval '2 hours');`]);
   const propertyId = execFileSync('psql', ['-d', DB, '-Atc', 'SELECT id FROM properties ORDER BY id LIMIT 1']).toString().trim();

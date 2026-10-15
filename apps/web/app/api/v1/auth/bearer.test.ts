@@ -77,7 +77,10 @@ async function row(token: string) {
 }
 
 beforeEach(async () => {
-  await db.query('TRUNCATE auth_sessions, webauthn_credentials CASCADE');
+  // `users` too, since P7-41a: the first bootstrap creates the owner, and an owner left over from
+  // the previous test would make `users_one_owner` refuse it. CASCADE reaches the tables that point
+  // at users (invitations, push subscriptions, proposals), all of them fabricated rows here.
+  await db.query('TRUNCATE auth_sessions, webauthn_credentials, users CASCADE');
 });
 
 afterAll(async () => {
@@ -118,9 +121,16 @@ describe('bearer tokens at the boundary', () => {
     kind: 'browser' | 'device' | 'personal',
     opts: { scope?: 'full' | 'read'; expiresIn?: string; createdAgo?: string } = {}
   ) {
+    // Every credential belongs to a user since P7-41a. The fabricated owner is created once per test
+    // (the TRUNCATE above clears it), and the credential is theirs.
     await db.query(
-      `INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, enrolled_via)
-       VALUES ('bearer-fixture', '\\x01'::bytea, 0, 'bootstrap') ON CONFLICT DO NOTHING`
+      `INSERT INTO users (display_name, is_owner) SELECT 'Owner', TRUE
+        WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_owner)`
+    );
+    await db.query(
+      `INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, enrolled_via, user_id)
+       VALUES ('bearer-fixture', '\\x01'::bytea, 0, 'bootstrap', (SELECT id FROM users WHERE is_owner))
+       ON CONFLICT DO NOTHING`
     );
     const token = generateSessionToken();
     await db.query(

@@ -2,6 +2,7 @@
  * Mint, list and revoke personal tokens — the only way they are created.
  *
  *   npm run tokens -- create "eval runner" --read --days 90
+ *   npm run tokens -- create "second user's script" --user 2
  *   npm run tokens -- list
  *   npm run tokens -- revoke 3f9a1c2b
  *
@@ -11,6 +12,10 @@
  *
  * The token is printed ONCE and never stored anywhere readable — the database holds only its hash.
  * Lose it and mint another.
+ *
+ * WHOSE TOKEN (P7-41a): the owner's, unless `--user <id>` names another user. Never "whoever
+ * enrolled a passkey last" — see `createPersonalToken`. The id is `users.id`, which `GET
+ * /api/v1/auth/me` reports for whoever is signed in.
  */
 import db from '../lib/db';
 import { createPersonalToken, listSessions, revokeByPrefix } from '../lib/authSession';
@@ -18,7 +23,7 @@ import { createPersonalToken, listSessions, revokeByPrefix } from '../lib/authSe
 function usage(): never {
   console.error(
     'usage:\n' +
-    '  npm run tokens -- create "<label>" [--read] [--days N]\n' +
+    '  npm run tokens -- create "<label>" [--read] [--days N] [--user <id>]\n' +
     '  npm run tokens -- list\n' +
     '  npm run tokens -- revoke <first 8+ characters of the id>'
   );
@@ -29,14 +34,28 @@ async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
 
   if (command === 'create') {
-    const label = rest.find((a) => !a.startsWith('--'));
+    // A flag's VALUE is not the label. Without this, `create --user 2 "label"` would mint a token
+    // labelled "2" for the owner — a silent wrong answer to exactly the question --user asks.
+    const valueOf = (flag: string) => (rest.includes(flag) ? rest[rest.indexOf(flag) + 1] : undefined);
+    const flagValueIndexes = new Set(
+      ['--days', '--user'].filter((f) => rest.includes(f)).map((f) => rest.indexOf(f) + 1)
+    );
+    const label = rest.find((a, i) => !a.startsWith('--') && !flagValueIndexes.has(i));
     if (!label) usage();
     const read = rest.includes('--read');
-    const daysArg = rest[rest.indexOf('--days') + 1];
-    const days = rest.includes('--days') ? Number(daysArg) : undefined;
+    const daysArg = valueOf('--days');
+    const days = daysArg !== undefined ? Number(daysArg) : undefined;
+    // Refused rather than coerced: `Number('two')` is NaN, and a NaN that fell through to the
+    // default would mint the OWNER a token the operator meant for someone else.
+    const userArg = valueOf('--user');
+    if (rest.includes('--user') && (userArg === undefined || !/^[1-9]\d*$/.test(userArg))) usage();
+    const userId = userArg !== undefined ? Number(userArg) : undefined;
 
-    const minted = await createPersonalToken({ label, scope: read ? 'read' : 'full', days });
-    console.log(`\nToken for "${label}" — ${read ? 'READ-ONLY' : 'FULL ACCESS'}, expires ${minted.expiresAt}`);
+    const minted = await createPersonalToken({ label, scope: read ? 'read' : 'full', days, userId });
+    console.log(
+      `\nToken for "${label}" — ${read ? 'READ-ONLY' : 'FULL ACCESS'}, ` +
+      `${userId === undefined ? 'the owner' : `user ${userId}`}, expires ${minted.expiresAt}`
+    );
     console.log(`id: ${minted.tokenHash.slice(0, 12)}\n`);
     console.log(minted.token);
     console.log('\nThis is the only time it will be shown. Use it as:  Authorization: Bearer <token>\n');

@@ -14,6 +14,8 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import type { ActiveSession } from '@/lib/authSession';
 import { credentialFrom } from '@/lib/requestAuth';
+import { sessionMayAdminister } from '@/lib/userAuthority';
+import { findUser, type UserRecord } from '@/lib/users';
 import { createLogger } from '@/lib/logger';
 import { clearedSessionCookie, sessionCookie } from '@/lib/sessionToken';
 import type { ApiResponse } from '@b8/contracts/types';
@@ -38,6 +40,34 @@ export async function sessionFrom(request: NextRequest): Promise<ActiveSession |
 }
 
 /**
+ * The session a request carries IF it belongs to the owner and may administer users — otherwise
+ * the refusal to return.
+ *
+ * Shared by `POST /auth/invitations` and `POST /auth/users/[id]/revoke`, which are the only two
+ * owner-only actions in the app, so they cannot hold two opinions about who the owner is. The
+ * person is read from `users` through the session's own `userId`; nothing a request sends can name
+ * it. 401 when there is no qualifying session at all (including a read-only token on a POST, which
+ * `credentialFrom` refuses), 403 `OWNER_ONLY` for a session that is real but is not the owner's
+ * full-scope browser session — signing in again as the same person would not help.
+ */
+export async function ownerSessionFrom(
+  request: NextRequest
+): Promise<{ ok: true; session: ActiveSession; user: UserRecord } | { ok: false; response: NextResponse }> {
+  const session = await sessionFrom(request);
+  if (!session) {
+    return { ok: false, response: authError('UNAUTHENTICATED', 'Sign in to do this.', 401) };
+  }
+  const user = await findUser(session.userId);
+  if (!user || !sessionMayAdminister(session, user.isOwner)) {
+    return {
+      ok: false,
+      response: authError('OWNER_ONLY', "Only the owner, signed in in a browser, can do this.", 403),
+    };
+  }
+  return { ok: true, session, user };
+}
+
+/**
  * The error branch, in the envelope every handler in this app returns.
  *
  * `shared/contracts/auth.ts` names the three codes this surface defines and keeps them a documented
@@ -48,6 +78,22 @@ export function authError(code: string, message: string, status: number): NextRe
   return NextResponse.json(
     { success: false, error: { code, message } } satisfies ApiResponse<never>,
     { status }
+  );
+}
+
+/**
+ * The registration gate's refusal — one wording for every reason the gate is shut.
+ *
+ * ONE ANSWER FOR NO SESSION, A DEAD CODE, A MALFORMED CODE AND A SESSION-PLUS-CODE, deliberately.
+ * These endpoints answer anybody, and telling a code holder whether their code was expired, used or
+ * never existed is reconnaissance with no legitimate use: the owner, who might want to know, can
+ * simply mint another.
+ */
+export function registrationClosed(): NextResponse {
+  return authError(
+    'REGISTRATION_CLOSED',
+    'This app already has an enrolled passkey. Sign in first to add another device, or use a current invitation.',
+    403
   );
 }
 
@@ -101,8 +147,9 @@ const log = createLogger('auth');
  * that audience is the owner with the browser open, and withholding the one sentence that explains
  * the failure is how this bug cost an afternoon.
  *
- * Applied to all five auth handlers and nowhere else. The rest of the API already returns the
- * envelope from its own catch blocks; these five were written to let the throw escape.
+ * Applied to the auth handlers and nowhere else — the five ceremony and logout endpoints, and since
+ * P7-41a `me`, `invitations` and `users/[id]/revoke`, which follow the same let-it-throw style. The
+ * rest of the API already returns the envelope from its own catch blocks.
  */
 /**
  * Generic over the handler's ARITY, not fixed to one argument.

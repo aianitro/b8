@@ -8,7 +8,7 @@ import { check, createLimiter } from '@/lib/rateLimit';
 import { parseBearer } from '@/lib/bearerAuth';
 import { credentialFrom } from '@/lib/requestAuth';
 import { isNoop } from '@/lib/domain/proposal';
-import { canonicalCategory, createProposal, loadSubject, type ProposalView } from '@/lib/proposalStore';
+import { canonicalCategory, createProposal, loadSubject, type ProposalActor, type ProposalView } from '@/lib/proposalStore';
 
 const log = createLogger('chat');
 
@@ -110,7 +110,8 @@ const TOOLS: Anthropic.Tool[] = [
 /** What a tool call needs to know about the caller and the clock. */
 interface ToolContext {
   now: Date;
-  sessionHash: string | null;
+  /** The proposing session and its person, recorded together on every proposal (P7-41a). */
+  actor: ProposalActor | null;
   /** Proposals created during this request, collected for the response. */
   proposals: ProposalView[];
 }
@@ -167,7 +168,7 @@ async function runTool(
         proposed,
         observed,
         rationale: typeof rationale === 'string' && rationale.trim() ? rationale.trim() : null,
-        proposedBy: ctx.sessionHash,
+        proposedBy: ctx.actor,
         now: ctx.now,
       });
       ctx.proposals.push(view);
@@ -513,7 +514,7 @@ export async function POST(req: NextRequest) {
     const session = await credentialFrom(req);
     const run = await runAgentLoop(messages, {
       now: new Date(),
-      sessionHash: session?.tokenHash ?? null,
+      actor: session ? { tokenHash: session.tokenHash, userId: session.userId } : null,
       proposals: [],
     });
     // `reply` keeps its place and its meaning, so the web chat is untouched; everything else is

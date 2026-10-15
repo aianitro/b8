@@ -50,10 +50,15 @@ async function seedSession(lifetime: { createdAgo: string; expiresIn: string }):
 }
 
 beforeEach(async () => {
-  await db.query('TRUNCATE auth_sessions, webauthn_credentials CASCADE');
+  // `users` too, since P7-41a: the first bootstrap creates the owner, and an owner left over from
+  // the previous test would make `users_one_owner` refuse it. CASCADE reaches the tables that point
+  // at users (invitations, push subscriptions, proposals), all of them fabricated rows here.
+  await db.query('TRUNCATE auth_sessions, webauthn_credentials, users CASCADE');
+  // Since P7-41a the credential needs its user, so the fabricated owner is seeded with it.
+  await db.query(`INSERT INTO users (display_name, is_owner) VALUES ('Owner', TRUE)`);
   await db.query(
-    `INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, transports, enrolled_via)
-     VALUES ($1, '\\x0102030405'::bytea, 0, NULL, 'bootstrap')`,
+    `INSERT INTO webauthn_credentials (credential_id, public_key, sign_count, transports, enrolled_via, user_id)
+     VALUES ($1, '\\x0102030405'::bytea, 0, NULL, 'bootstrap', (SELECT id FROM users WHERE is_owner))`,
     [CREDENTIAL_ID]
   );
 });
@@ -263,6 +268,33 @@ describe('the request boundary', () => {
     for (const path of ['/dashboard', '/api/accounts', '/api/v1/overview', ...PRE_AUTH_PATHS]) {
       expect({ path, matched: unstable_doesMiddlewareMatch({ config, url: path }) })
         .toEqual({ path, matched: true });
+    }
+  });
+});
+
+// P7-41a, S17. A second user adds three endpoints and no pre-auth path.
+describe('the boundary after P7-41a', () => {
+  it('T41a-S17: PRE_AUTH_PATHS keeps exactly its twelve members, and the new auth endpoints refuse a request with no cookie', async () => {
+    // THE MEMBERS, not only the size: a swap of one path for another keeps the count and changes
+    // what is reachable. Invitation redemption rides the two register endpoints already listed.
+    expect([...PRE_AUTH_PATHS].sort()).toEqual([
+      '/api/v1/auth/login/options',
+      '/api/v1/auth/login/verify',
+      '/api/v1/auth/register/options',
+      '/api/v1/auth/register/verify',
+      '/apple-icon.png',
+      '/icon-192.png',
+      '/icon-512.png',
+      '/icon-maskable-512.png',
+      '/login',
+      '/manifest.webmanifest',
+      '/offline',
+      '/sw.js',
+    ]);
+    for (const path of ['/api/v1/auth/invitations', '/api/v1/auth/me', '/api/v1/auth/users/2/revoke']) {
+      const response = await proxy(requestFor(path));
+      expect(response.status, path).toBe(401);
+      expect(letsThrough(response), path).toBe(false);
     }
   });
 });

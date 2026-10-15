@@ -29,9 +29,12 @@ export const POST = withEnvelope(async (request: NextRequest) => {
     return authError('INVALID_INPUT', 'That is not an authentication ceremony response.', 400);
   }
 
-  // Over all of them. `userHandle` is deliberately not consulted: it is a constant in this app, so
-  // a lookup keyed on it would find every credential or none, and either way has answered the wrong
-  // question.
+  // Over all of them, both users' included: the login is pre-auth and does not yet know who is
+  // asking. `userHandle` is deliberately not consulted — it is browser-supplied input inside the
+  // thing being verified, and resolving a user from it would let a payload name its own principal.
+  // WHO this is comes from the credential row the assertion names (`webauthn_credentials.user_id`),
+  // which is what the session opened below resolves through. A removed user's credentials no longer
+  // exist, so their assertion fails here as an unknown credential.
   const credential = selectCredential(await listCredentials(), parsed.data.id);
   if (!credential) {
     // An unknown credential id is the same wire answer as a bad signature — one code for all four

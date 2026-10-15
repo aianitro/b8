@@ -756,17 +756,62 @@ CREATE TABLE IF NOT EXISTS year_end_snapshots (
 -- money"; these two answer "who is allowed to ask". They are grouped at the end, as their own
 -- section, rather than interleaved with the ledger, because nothing above joins to them.
 --
--- NEITHER TABLE HAS A user_id, AND THAT IS A DECISION. This application has exactly one principal.
--- A user_id would reference a users table holding one row forever, and every query would carry a
--- predicate with only one possible value — decoration that reads as multi-user support to whoever
--- arrives later. The decisive reason is narrower than tidiness, though: the single-user model is
--- what makes this step's central rule expressible. Registration is open only while ZERO
--- credentials exist, which is a global count; with a user_id it becomes "zero for this user", and
--- an unauthenticated request cannot name a user without being allowed to invent one. The bootstrap
--- gate and a one-row users table cannot both be honest. Multi-user, if it ever arrives, is an
--- additive migration: add the column nullable, backfill the owner, tighten.
+-- TWO USERS, ONE LEDGER (migration 1792300000000, P7-41a). The passkey migration refused a users
+-- table while there was one principal, and named the way out: add the column nullable, backfill the
+-- owner, tighten. There are now two people, and every credential belongs to one of them. Its
+-- decisive objection — an unauthenticated request cannot name a user without inventing one — is
+-- answered rather than dropped: the bootstrap gate stays a GLOBAL count of credentials, and the only
+-- way an unauthenticated request creates a user is by presenting an invitation the owner minted while
+-- signed in. NO LEDGER TABLE ABOVE HAS A user COLUMN, AND NONE MAY: both users are full peers over the
+-- same data. The only actor columns are agent_proposals.proposed_by_user_id / decided_by_user_id.
+-- auth_sessions and device_handoffs reach their user through credential_id and carry no copy of it.
 
--- One row per authenticator enrolled to speak for the owner. Multi-credential by construction — a
+-- One row per person who may sign in. Never deleted — agent_proposals names users as history.
+-- Removing a user is revoked_at plus deleting that user's credentials, which cascades their sessions
+-- and personal tokens. id is a plain integer: it appears only in the owner-only revoke URL, and it is
+-- never a WebAuthn user handle. is_owner is the one asymmetry (only the owner invites or removes), and
+-- it is stored, not derived from "the oldest row". revoked_at NULL means NOT REMOVED, the same stated
+-- departure auth_sessions.revoked_at makes. The backfilled owner is named 'Owner'.
+CREATE TABLE IF NOT EXISTS users (
+  id           SERIAL PRIMARY KEY,
+  display_name TEXT NOT NULL
+                 CONSTRAINT users_display_name_length CHECK (length(display_name) BETWEEN 1 AND 60),
+  is_owner     BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  revoked_at   TIMESTAMPTZ,
+  -- The owner cannot be removed; otherwise one careless UPDATE leaves an app nobody can administer.
+  CONSTRAINT users_owner_not_revoked CHECK (NOT (is_owner AND revoked_at IS NOT NULL))
+);
+
+-- At most one owner, as webauthn_credentials_one_bootstrap is at most one bootstrap: two concurrent
+-- bootstraps both read "no owner yet", and this makes the second INSERT fail however they interleave.
+-- It does not require an owner to exist — a database with zero credentials has none until bootstrap.
+CREATE UNIQUE INDEX IF NOT EXISTS users_one_owner ON users (is_owner) WHERE is_owner;
+
+-- The owner's invitation to a second user: the only way an unauthenticated request may enrol a
+-- passkey once any credential exists, presented at the existing register/* endpoints. device_handoffs'
+-- shape for device_handoffs' reason. code_hash is SHA-256 of the code, never the code; redemption is a
+-- lookup on it in SQL. Live while expires_at > NOW() AND consumed_at IS NULL, evaluated by Postgres.
+-- consumed_at and consumed_by are set together, in the same transaction that creates the user and the
+-- credential; consumed_by is UNIQUE so one invitation makes exactly one user. created_by is always the
+-- owner, which only the application can check.
+CREATE TABLE IF NOT EXISTS user_invitations (
+  code_hash    TEXT PRIMARY KEY
+                 CONSTRAINT user_invitations_code_hash_format CHECK (code_hash ~ '^[0-9a-f]{64}$'),
+  created_by   INTEGER NOT NULL REFERENCES users(id),
+  display_name TEXT NOT NULL
+                 CONSTRAINT user_invitations_display_name_length CHECK (length(display_name) BETWEEN 1 AND 60),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at   TIMESTAMPTZ NOT NULL
+                 CONSTRAINT user_invitations_expires_after_created CHECK (expires_at > created_at),
+  consumed_at  TIMESTAMPTZ,
+  consumed_by  INTEGER UNIQUE REFERENCES users(id),
+  CONSTRAINT user_invitations_consumed_together CHECK ((consumed_at IS NULL) = (consumed_by IS NULL)),
+  -- Seven days at most, in the database, like auth_sessions_personal_lifetime.
+  CONSTRAINT user_invitations_lifetime CHECK (expires_at <= created_at + INTERVAL '7 days')
+);
+
+-- One row per authenticator enrolled to speak for a user. Multi-credential by construction — a
 -- laptop and a phone are two rows — so every read here handles N rows. A query that takes the
 -- newest row ("the" passkey) produces a second device that registers fine and can never log in.
 --
@@ -794,13 +839,21 @@ CREATE TABLE IF NOT EXISTS year_end_snapshots (
 --
 -- enrolled_via is provenance, not derivation: 'bootstrap' = enrolled by an unauthenticated request
 -- while zero credentials existed; 'authenticated' = enrolled by a request carrying a valid
--- session. Not recoverable from created_at, which answers a different question.
+-- session, and the credential belongs to that session's user; 'invitation' = enrolled by an
+-- unauthenticated request presenting a live user_invitations code, which created a new user. Not
+-- recoverable from created_at, which answers a different question. An invited enrolment is never
+-- tagged 'bootstrap': that would trip the one-bootstrap index for the second user.
+--
+-- user_id is NOT NULL: every session resolves to a user through its credential with no gap, so a
+-- lookup that finds no user has found no session and must fail closed, never default to the owner.
+-- Every credential that predates migration 1792300000000 was backfilled to the owner.
 CREATE TABLE IF NOT EXISTS webauthn_credentials (
   credential_id TEXT PRIMARY KEY CHECK (credential_id ~ '^[A-Za-z0-9_-]+$'),  -- unpadded base64url, as the browser sends it
   public_key    BYTEA NOT NULL CHECK (octet_length(public_key) > 0),          -- COSE public key, as bytes
   sign_count    BIGINT NOT NULL CHECK (sign_count >= 0),                      -- no DEFAULT on purpose; 0 means "this authenticator has no counter"
   transports    TEXT[],                                                       -- NULL = not reported; never defaulted to '{}'
-  enrolled_via  TEXT NOT NULL CHECK (enrolled_via IN ('bootstrap', 'authenticated')),
+  enrolled_via  TEXT NOT NULL CHECK (enrolled_via IN ('bootstrap', 'authenticated', 'invitation')),
+  user_id       INTEGER NOT NULL REFERENCES users(id),                        -- no ON DELETE: users rows are never deleted
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -941,7 +994,19 @@ CREATE TABLE IF NOT EXISTS agent_proposals (
   -- Which credential ASKED and which AGREED are different questions, and the design rests on them
   -- being allowed to differ: a read-only script may propose, only a full-scope session may confirm.
   proposed_by TEXT REFERENCES auth_sessions(token_hash) ON DELETE SET NULL,
-  decided_by TEXT REFERENCES auth_sessions(token_hash) ON DELETE SET NULL
+  decided_by TEXT REFERENCES auth_sessions(token_hash) ON DELETE SET NULL,
+
+  -- The PERSON behind those sessions (migration 1792300000000). A session row is pruned or cascaded
+  -- away and SET NULL erases it; these survive, with no ON DELETE action, because users rows are
+  -- never deleted. NULL means no person is known: a system-made proposal (the category suggester
+  -- writes proposed_by NULL), or one whose session was already gone when the column was backfilled.
+  -- NEVER the owner by default. The suggester keeps selecting on proposed_by IS NULL.
+  proposed_by_user_id INTEGER REFERENCES users(id),
+  decided_by_user_id INTEGER REFERENCES users(id),
+  -- Naming a session means naming its person. One-directional: the session may go while the person
+  -- stays. Refuses a writer that records the session and forgets the user.
+  CONSTRAINT agent_proposals_proposer_has_user CHECK (proposed_by IS NULL OR proposed_by_user_id IS NOT NULL),
+  CONSTRAINT agent_proposals_decider_has_user CHECK (decided_by IS NULL OR decided_by_user_id IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS agent_proposals_pending
@@ -1038,7 +1103,14 @@ CREATE TABLE IF NOT EXISTS web_push_subscriptions (
 
   -- A lost phone is one UPDATE, like a revoked session. Kept rather than deleted, so what was
   -- registered survives the revocation.
-  revoked_at TIMESTAMPTZ
+  revoked_at TIMESTAMPTZ,
+
+  -- Whose device this is (migration 1792300000000). A push sent for a user reaches only that user's
+  -- live subscriptions; re-registering an endpoint under another user's session moves it, so the row
+  -- always has exactly one user. Existing rows were backfilled to the owner, except on a database with
+  -- no credentials at all, where there was no owner to give them to and they were deleted rather than
+  -- handed to whoever bootstraps next.
+  user_id INTEGER NOT NULL REFERENCES users(id)
 );
 
 -- Serves the only read on the send path: every live subscription. Partial, because a revoked row is

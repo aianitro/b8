@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ArrowLeftRight, Building2, FlaskConical, Home, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Wallet, X, Zap } from 'lucide-react';
+import type { Me } from '@b8/contracts/auth';
 
 // The order is the owner's: Budget directly under Dashboard, Accounts directly under Budget, Net
 // Worth directly above Properties.
@@ -57,6 +58,51 @@ function NavItem({ href, label, icon: Icon, pathname, onNavigate }: {
   );
 }
 
+/**
+ * Who is signed in, from `GET /api/v1/auth/me` — P7-41a, now that there can be two people.
+ *
+ * NOTHING, NOT "OWNER", WHEN THE ANSWER IS MISSING. A failed request, a 401 on the login screen, or
+ * a body that does not look like `Me` all render no line at all. Showing the owner's name for want
+ * of an answer is the one wrong thing this can do: it tells the second user they are someone they
+ * are not, or tells anybody that a session exists when it does not.
+ *
+ * Checked structurally rather than with `MeResponseSchema`, because this component ships on every
+ * page and the schema would pull the validation library into the shell bundle for one string. The
+ * TYPE is the contract's; only the runtime check is the cheap one.
+ */
+function useSignedInUser(active: boolean): Me | null {
+  const [me, setMe] = useState<Me | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    fetch('/api/v1/auth/me', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: { success?: boolean; data?: Me } | null) => {
+        if (cancelled) return;
+        const data = body?.success === true ? body.data : undefined;
+        setMe(data && typeof data.displayName === 'string' && data.displayName.length > 0 ? data : null);
+      })
+      .catch(() => { if (!cancelled) setMe(null); });
+    return () => { cancelled = true; };
+  }, [active]);
+  // Stale state from a previous page is not shown on the login screen: `active` false means no line.
+  return active ? me : null;
+}
+
+/** The "signed in as" line, at the foot of the sidebar and the drawer. Renders nothing without a user. */
+function SignedInAs({ me }: { me: Me | null }) {
+  if (!me) return null;
+  return (
+    // Solid cyan-100 on cyan-700, NOT the /80 this line first shipped with: at 12px the floor is
+    // 4.5:1, solid cyan-100 clears it (4.79:1) and any alpha on it falls below. The file's own
+    // palette rather than the app's slate, so the line reads as part of the nav and not as a stray
+    // row from a page.
+    <div className="px-5 py-4 border-t border-white/20 text-xs text-cyan-100">
+      Signed in as <span className="font-medium text-white">{me.displayName}</span>
+    </div>
+  );
+}
+
 /** The nav itself, identical in the sidebar and in the drawer — one list, rendered twice. */
 function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   return (
@@ -100,6 +146,10 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
 export default function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  // Not asked on the login screen, where the answer is a 401 by construction. Re-asked when the
+  // reader leaves it, because the layout — and this component — survive the navigation that
+  // follows a sign-in.
+  const me = useSignedInUser(pathname !== '/login');
 
   // NO EFFECT CLOSING THIS ON `pathname`. That was the first version and the lint rule was right to
   // refuse it: setting state synchronously in an effect cascades a render for something an event
@@ -122,9 +172,10 @@ export default function Sidebar() {
         <div className="px-5 pt-7 pb-6">
           <div className="text-[#f0dfae] font-bold text-xl tracking-tight">B8</div>
           {/* cyan-100, NOT champagne: at 12px the mark colour is 4.05:1 and the floor is 4.5:1. */}
-          <div className="text-cyan-100/80 text-xs mt-0.5 font-medium tracking-wider uppercase">Finance</div>
+          <div className="text-cyan-100 text-xs mt-0.5 font-medium tracking-wider uppercase">Finance</div>
         </div>
         <NavList pathname={pathname} />
+        <SignedInAs me={me} />
       </aside>
 
       {/* MOBILE: a header bar that stays put, carrying the one control the page needs.
@@ -149,7 +200,7 @@ export default function Sidebar() {
               <Menu size={22} />
             </button>
             <Link href="/dashboard" className="text-[#f0dfae] font-bold text-lg tracking-tight">
-              B8<span className="text-cyan-100/80 font-medium text-xs ml-1.5 uppercase tracking-wider">Finance</span>
+              B8<span className="text-cyan-100 font-medium text-xs ml-1.5 uppercase tracking-wider">Finance</span>
             </Link>
           </div>
           {/* WHERE THE WARNINGS GO ON A PHONE. The bell is rendered by whichever page HAS
@@ -188,7 +239,7 @@ export default function Sidebar() {
             <div className="flex items-start justify-between px-5 pt-6 pb-5">
               <div>
                 <div className="text-[#f0dfae] font-bold text-xl tracking-tight">B8</div>
-                <div className="text-cyan-100/80 text-xs mt-0.5 font-medium tracking-wider uppercase">Finance</div>
+                <div className="text-cyan-100 text-xs mt-0.5 font-medium tracking-wider uppercase">Finance</div>
               </div>
               <button
                 type="button"
@@ -200,6 +251,7 @@ export default function Sidebar() {
               </button>
             </div>
             <NavList pathname={pathname} onNavigate={() => setOpen(false)} />
+            <SignedInAs me={me} />
           </div>
         </div>
       )}
