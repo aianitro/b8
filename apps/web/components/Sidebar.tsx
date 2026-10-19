@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ArrowLeftRight, Building2, FlaskConical, Home, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Wallet, X, Zap } from 'lucide-react';
 import type { Me } from '@b8/contracts/auth';
+import { mayInvite } from '@/lib/invitationLink';
+import InviteControl from './InviteControl';
 
 // The order is the owner's: Budget directly under Dashboard, Accounts directly under Budget, Net
 // Worth directly above Properties.
@@ -103,6 +105,20 @@ function SignedInAs({ me }: { me: Me | null }) {
   );
 }
 
+/**
+ * The owner's invite control (P7-41a2), above the "signed in as" line in the sidebar and in the
+ * drawer — one component, rendered in both, for `NavList`'s reason.
+ *
+ * Only when `me` says `isOwner` strictly `true` (`mayInvite`); a missing, failed or second-user `me`
+ * renders nothing, exactly as `SignedInAs` does. KEYED BY PATHNAME so navigating away remounts it
+ * and drops any code the panel was showing — the desktop sidebar otherwise survives every page
+ * change, and "shown once" would quietly become "shown until you close the tab".
+ */
+function OwnerInvite({ me, pathname }: { me: Me | null; pathname: string }) {
+  if (!mayInvite(me)) return null;
+  return <InviteControl key={pathname} />;
+}
+
 /** The nav itself, identical in the sidebar and in the drawer — one list, rendered twice. */
 function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   return (
@@ -175,6 +191,7 @@ export default function Sidebar() {
           <div className="text-cyan-100 text-xs mt-0.5 font-medium tracking-wider uppercase">Finance</div>
         </div>
         <NavList pathname={pathname} />
+        <OwnerInvite me={me} pathname={pathname} />
         <SignedInAs me={me} />
       </aside>
 
@@ -251,6 +268,7 @@ export default function Sidebar() {
               </button>
             </div>
             <NavList pathname={pathname} onNavigate={() => setOpen(false)} />
+            <OwnerInvite me={me} pathname={pathname} />
             <SignedInAs me={me} />
           </div>
         </div>

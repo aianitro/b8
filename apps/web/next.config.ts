@@ -59,6 +59,19 @@ const nextConfig: NextConfig = {
     return [{ source: '/balances', destination: '/accounts', permanent: true }];
   },
 
+  /**
+   * NO REFERRER FROM THE LOGIN PAGE (P7-41a2). An invitation link opens `/login` with its code in
+   * the fragment, and a browser never puts a fragment in a `Referer` — so this is belt and braces
+   * rather than the protection itself. It covers the moment before the page has scrubbed the
+   * address bar, any subresource or navigation the page starts, and any future edit that moves the
+   * code somewhere a Referer would carry. A header rather than a `<meta>` because it applies before
+   * a single byte of the document is parsed, and because the page is a client component that cannot
+   * export metadata.
+   */
+  async headers() {
+    return [{ source: '/login', headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }] }];
+  },
+
   async rewrites() {
     return [
       {
