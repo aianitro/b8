@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import db from './db';
+import { visibleTransactions } from './giftReadPath';
 import { createLogger } from './logger';
 import { createProposal } from './proposalStore';
 import { buildPrompt, historySuggestions, parseModelReply, type FiledExample, type Suggestion, type UnfiledRow } from './domain/categorySuggest';
@@ -15,6 +16,16 @@ const MAX_ROWS = 60;
 const MAX_MODEL_ROWS = 40;
 /** Filed examples shown to the model — enough to convey the owner's habits, few enough to be cheap. */
 const MAX_EXAMPLES = 80;
+
+/**
+ * NO GIFT ROW, IN EITHER DIRECTION (P7-41b). The suggester's history goes into a model prompt sent to
+ * a third party and into the `rationale` stored on every proposal ("You filed N of M earlier …"),
+ * which any viewer may read later. A row held by an unrevealed gift is therefore neither a filed
+ * example nor an unfiled row to suggest for: both reads go through `visibleTransactions(null)` and
+ * drop `gift_masked` rows. Read as nobody in particular, because a suggestion is made for whoever
+ * opens the app next.
+ */
+const SUGGESTER_ROWS = visibleTransactions(null);
 
 /**
  * Suggest categories for unfiled transactions, as proposals the owner confirms one tap at a time.
@@ -46,9 +57,9 @@ export async function suggestCategories(now: Date = new Date()): Promise<{ histo
     // 2. The unfiled rows that have no pending proposal — newest first, so today's arrivals lead.
     const unfiled = await db.query<{ id: number; date: string; amount: string; name: string | null; merchant: string | null; plaid_category: string | null }>(
       `SELECT t.id, t.date::text, t.amount::text, t.name, NULLIF(t.merchant_name, '') AS merchant, t.plaid_category
-         FROM transactions t
+         FROM ${SUGGESTER_ROWS} t
          JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
-        WHERE t.mapped_category IS NULL AND t.hidden = FALSE
+        WHERE t.mapped_category IS NULL AND t.hidden = FALSE AND NOT t.gift_masked
           AND NOT EXISTS (SELECT 1 FROM agent_proposals p
                            WHERE p.kind = 'categorize_transaction' AND p.subject_id = t.id AND p.decided_at IS NULL)
         ORDER BY t.date DESC, t.id DESC
@@ -62,9 +73,10 @@ export async function suggestCategories(now: Date = new Date()): Promise<{ histo
 
     // 3. History: the owner's own filings of the same merchants over the past year.
     const filedRes = await db.query<{ merchant: string | null; name: string | null; category: string }>(
-      `SELECT NULLIF(merchant_name, '') AS merchant, name, mapped_category AS category
-         FROM transactions
-        WHERE mapped_category IS NOT NULL AND date >= $1::date - INTERVAL '365 days'`,
+      `SELECT NULLIF(t.merchant_name, '') AS merchant, t.name, t.mapped_category AS category
+         FROM ${SUGGESTER_ROWS} t
+        WHERE t.mapped_category IS NOT NULL AND NOT t.gift_masked
+          AND t.date >= $1::date - INTERVAL '365 days'`,
       [now.toISOString().slice(0, 10)]
     );
     const filed: FiledExample[] = filedRes.rows;

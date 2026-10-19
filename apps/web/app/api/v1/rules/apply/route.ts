@@ -1,10 +1,13 @@
 import db from '@/lib/db';
 import type { ApiResponse } from '@b8/contracts/types';
+import { giftLinkedSql } from '@/lib/giftReadPath';
 
 // Retroactively apply all rules to:
 // - uncategorized transactions matching a rule
 // - transactions previously set by a rule (rule_applied = TRUE) — re-applies in case rule changed
 // Does NOT touch manual categorizations (mapped_category IS NOT NULL AND rule_applied = FALSE)
+// Does NOT touch a row a gift holds (P7-41b): its category is the gift's, and it is not counted in
+// `updated` either, so the figure says nothing about what a masked row was.
 export async function POST() {
   const result = await db.query<{ count: string }>(`
     WITH updated AS (
@@ -27,6 +30,7 @@ export async function POST() {
                           AND LOWER(TRIM(m.merchant_name)) = LOWER(TRIM(t.merchant_name))))
             )
         AND (t.mapped_category IS NULL OR t.rule_applied = TRUE)
+        AND NOT ${giftLinkedSql('t')}
       RETURNING t.id
     )
     SELECT COUNT(*)::text AS count FROM updated

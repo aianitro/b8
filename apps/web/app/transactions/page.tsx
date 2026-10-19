@@ -9,6 +9,8 @@ import type { Transaction } from '@b8/contracts/types';
 import { loadCategoryOptions } from '@/lib/categoryOptionsRead';
 import TransactionFilter from '@/components/TransactionFilter';
 import TransactionTable from '@/components/TransactionTable';
+import { visibleTransactions, type GiftViewer } from '@/lib/giftReadPath';
+import { pageViewer } from '@/lib/giftViewer';
 
 type GroupPeer = { account_name: string; amount: string };
 
@@ -54,6 +56,8 @@ function prettyDate(iso: string, withYear = true): string {
 }
 
 async function getData(
+  /** Who is looking (P7-41b) — see the note on the two queries below. */
+  viewer: GiftViewer,
   uncategorizedOnly: boolean,
   watchedOnly: boolean,
   accountId: string | null,
@@ -135,6 +139,14 @@ async function getData(
 
   const where = conds.length ? `AND ${conds.join(' AND ')}` : '';
 
+  // BOTH THE LIST AND ITS COUNTS READ THE LEDGER AS `viewer` SEES IT (P7-41b). The search and payee
+  // filters above match on merchant and name, so run against `transactions` itself they would find a
+  // gift's real merchant for the person it is for — an empty-looking page with "1 transaction" at
+  // the top is still an answer. Through `visibleTransactions(viewer)` a held row matches as `Gift`
+  // and nothing else, and it still matches an amount search. Unfiltered, every figure here is the
+  // same for every viewer: amounts, categories and `hidden` are not masked. The one exception is the
+  // watched chip, which counts a flag that is itself row content and so follows the list.
+  const rowsSource = visibleTransactions(viewer);
   const [txns, cats, counts, accounts, props] = await Promise.all([
     db.query<TxRow>(
       `SELECT t.id, t.plaid_transaction_id, t.account_id, t.date::text AS date,
@@ -155,7 +167,7 @@ async function getData(
                  FROM transactions t2 JOIN accounts a2 ON a2.id = t2.account_id
                 WHERE t2.transfer_group_id = t.transfer_group_id AND t2.id != t.id
               ) AS group_peers
-       FROM transactions t
+       FROM ${rowsSource} t
        JOIN accounts a ON a.id = t.account_id
        WHERE 1=1 AND a.track_transactions = TRUE ${where} ORDER BY t.date DESC, t.id DESC`,
       args
@@ -186,7 +198,7 @@ async function getData(
               -- from the net, which has already lost the split by the time it arrives.
               COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0 AND t.hidden = FALSE), 0)::text AS sum_out,
               COALESCE(ABS(SUM(t.amount) FILTER (WHERE t.amount < 0 AND t.hidden = FALSE)), 0)::text AS sum_in
-       FROM transactions t JOIN accounts a ON a.id = t.account_id
+       FROM ${rowsSource} t JOIN accounts a ON a.id = t.account_id
        WHERE a.track_transactions = TRUE ${where}`,
       args
     ),
@@ -297,6 +309,7 @@ export default async function TransactionsPage({
   const merchantValue = merchant?.trim() || null;
 
   const { transactions, categories, total, uncategorized, watched, sum, sumBudgeted, sumOut, sumIn, accounts, properties } = await getData(
+    await pageViewer('/transactions'),
     uncategorizedOnly, watchedOnly, accountId, drillCategories, drillMonth, searchQuery,
     dateFromValue, dateToValue,
     amountMinValue !== null && !isNaN(amountMinValue) ? amountMinValue : null,

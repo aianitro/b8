@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import BudgetTracks from '@/components/charts/BudgetTracks';
 import { asOfFromDate } from '@/lib/domain/monthOutlook';
 import { loadOverview } from '@/lib/overviewRead';
+import { pageViewer } from '@/lib/giftViewer';
 import { dashboardFromWire } from '@/lib/overviewFromWire';
 import { MONTHS } from '@/lib/drilldown';
 
@@ -32,7 +33,7 @@ export default async function SandboxPage() {
   // below is derived from these three integers so nothing here can straddle midnight.
   const now = new Date();
   const asOf = asOfFromDate(now);
-  const { budgetVsActual } = dashboardFromWire(await loadOverview(now));
+  const { budgetVsActual } = dashboardFromWire(await loadOverview(await pageViewer('/sandbox'), now));
 
   // Share of the year gone, which is what the tick on every track marks. Same arithmetic as the
   // dashboard's, and it is UTC so a DST boundary cannot move the mark by a day.

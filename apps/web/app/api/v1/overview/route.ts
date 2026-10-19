@@ -19,11 +19,16 @@
 // `Response.json` is the Web API, as in every other handler here — `next/server` is not imported
 // because nothing in this file needs the extended request or response.
 
+import type { NextRequest } from 'next/server';
 import { loadOverview } from '@/lib/overviewRead';
+import { viewerOf } from '@/lib/giftViewer';
 import type { OverviewData } from '@b8/contracts/overview';
 import type { ApiResponse } from '@b8/contracts/types';
 
-export async function GET() {
-  const data = await loadOverview();
+// The signed-in person decides what the row lists show (P7-41b); every figure is the same for all.
+// The request is optional only because a caller with no request — a fixture calling the handler
+// bare — has nobody to name: that is the `null` viewer, which sees every unrevealed gift masked.
+export async function GET(req?: NextRequest) {
+  const data = await loadOverview(req ? await viewerOf(req) : null);
   return Response.json({ success: true, data } satisfies ApiResponse<OverviewData>);
 }

@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import db from '@/lib/db';
 import { validateTransferRows } from '@/lib/transferValidation';
 import { roundCents } from '@/lib/budgetMath';
+import { GIFT_LOCKED_ERROR, giftLockSql, lockedFor } from '@/lib/giftLock';
 
 export type CashTransferArgs =
   /** An existing transaction — a withdrawal — put cash into a wallet. */
@@ -33,7 +34,7 @@ export type CashTransferResult =
   | { ok: true; groupId: number; createdTransactionIds: number[] }
   | {
       ok: false;
-      code: 'NOT_FOUND' | 'NOT_COUNTABLE' | 'ALREADY_GROUPED' | 'INVALID' | 'UNBALANCED';
+      code: 'NOT_FOUND' | 'NOT_COUNTABLE' | 'ALREADY_GROUPED' | 'INVALID' | 'UNBALANCED' | 'GIFT_LOCKED';
       message: string;
     };
 
@@ -68,6 +69,13 @@ export async function recordCashTransfer(args: CashTransferArgs): Promise<CashTr
         return { ok: false, code: 'NOT_FOUND', message: 'No such transaction.' };
       }
       const a = anchor.rows[0];
+      // A withdrawal a gift holds cannot fund a wallet (P7-41b): grouping it re-files it as Transfer,
+      // out of the gift category, which nobody may do before the reveal. Locked for everyone, so the
+      // viewer does not matter; the refusal is the one every locked write gives, with no row text.
+      if (await lockedFor([a.id], 'transfer', null, client)) {
+        await client.query('ROLLBACK');
+        return { ok: false, code: 'GIFT_LOCKED', message: GIFT_LOCKED_ERROR.message };
+      }
       if (a.transfer_group_id !== null) {
         await client.query('ROLLBACK');
         return {
@@ -159,7 +167,8 @@ export async function recordCashTransfer(args: CashTransferArgs): Promise<CashTr
     const group = await client.query<{ id: number }>('INSERT INTO transfer_groups DEFAULT VALUES RETURNING id');
     const groupId = group.rows[0].id;
     await client.query(
-      `UPDATE transactions SET transfer_group_id = $1, mapped_category = 'Transfer' WHERE id = ANY($2)`,
+      `UPDATE transactions SET transfer_group_id = $1, mapped_category = 'Transfer'
+        WHERE id = ANY($2) AND NOT ${giftLockSql('transactions', 'transfer', null)}`,
       [groupId, memberIds]
     );
 

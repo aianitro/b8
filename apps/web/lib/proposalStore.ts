@@ -11,6 +11,8 @@ import {
   type CategorizeProposed,
   type StoredProposal,
 } from '@/lib/domain/proposal';
+import { visibleTransactions, giftHeldSql, type GiftViewer } from '@/lib/giftReadPath';
+import { GIFT_LOCKED_ERROR, giftLockSql, lockedFor } from '@/lib/giftLock';
 
 /** 16 CSPRNG bytes as unpadded base64url — 22 chars, matching the table's id CHECK. */
 export function generateProposalId(): string {
@@ -53,14 +55,22 @@ function toStored(row: ProposalRow): StoredProposal {
   };
 }
 
-/** The transaction a proposal is about, as the confirmation card needs to show it. */
+/**
+ * The transaction a proposal is about, as the confirmation card needs to show it — AS `viewer` SEES
+ * IT (P7-41b). Read through `visibleTransactions(viewer)`, so a row a gift holds for someone else is
+ * `Gift` on the card and in every message built from it. `held` says whether an unrevealed gift holds
+ * the row at all, whoever is looking: such a row's category is locked for everyone, so no proposal
+ * about it is made (the chat refuses first) and none can be applied.
+ */
 export async function loadSubject(
-  transactionId: number
-): Promise<{ category: string | null; date: string; amount: number; merchant: string | null } | null> {
+  transactionId: number,
+  viewer: GiftViewer
+): Promise<{ category: string | null; date: string; amount: number; merchant: string | null; held: boolean } | null> {
   const r = await db.query(
-    `SELECT mapped_category, date::text AS date, amount::float8 AS amount,
-            COALESCE(merchant_name, name) AS merchant
-       FROM transactions WHERE id = $1`,
+    `SELECT t.mapped_category, t.date::text AS date, t.amount::float8 AS amount,
+            COALESCE(t.merchant_name, t.name) AS merchant,
+            ${giftHeldSql('t')} AS held
+       FROM ${visibleTransactions(viewer)} t WHERE t.id = $1`,
     [transactionId]
   );
   if (r.rows.length === 0) return null;
@@ -70,6 +80,7 @@ export async function loadSubject(
     date: row.date,
     amount: Number(row.amount),
     merchant: row.merchant ?? null,
+    held: row.held === true,
   };
 }
 
@@ -168,7 +179,7 @@ export async function createProposal(args: {
         WHERE kind = 'categorize_transaction' AND subject_id = $1 AND decided_at IS NULL`,
       [args.subjectId]
     );
-    return { view: await viewOf(toStored(existing.rows[0] as ProposalRow)), preexisting: true };
+    return { view: await viewOf(toStored(existing.rows[0] as ProposalRow), args.proposedBy?.userId ?? null), preexisting: true };
   }
 
   return { preexisting: false, view: await viewOf({
@@ -180,11 +191,12 @@ export async function createProposal(args: {
     rationale: args.rationale,
     expiresAt: new Date(r.rows[0].expires_at),
     decidedAt: null,
-  }) };
+  }, args.proposedBy?.userId ?? null) };
 }
 
-async function viewOf(p: StoredProposal): Promise<ProposalView> {
-  const subject = await loadSubject(p.subjectId);
+/** The card for a proposal, built for the person who asked for it (the system's own: nobody). */
+async function viewOf(p: StoredProposal, viewer: GiftViewer): Promise<ProposalView> {
+  const subject = await loadSubject(p.subjectId, viewer);
   return {
     id: p.id,
     kind: p.kind,
@@ -261,6 +273,23 @@ export async function decideProposal(args: {
         )
       : { rows: [] as Array<{ mapped_category: string | null }> };
     const subjectExists = subjectRow.rows.length > 0;
+
+    // HELD BY A GIFT (P7-41b): the category of a row an unrevealed gift holds is locked for
+    // everyone, the giver included, so a proposal made before the gift took the row can no longer
+    // be applied. Closed as rejected — the same impossible button should not be offered again — and
+    // answered with the one locked refusal every write uses, which carries no row text.
+    if (stored && !stored.decidedAt && subjectExists
+        && await lockedFor([stored.subjectId], 'category', args.decidedBy?.userId ?? null, client)) {
+      await client.query(
+        `UPDATE agent_proposals
+            SET decided_at = $2, decision = 'rejected', failure_reason = 'GIFT_LOCKED', decided_by = $3,
+                decided_by_user_id = $4
+          WHERE id = $1`,
+        [args.id, args.now.toISOString(), args.decidedBy?.tokenHash ?? null, args.decidedBy?.userId ?? null]
+      );
+      await client.query('COMMIT');
+      return { ok: false, code: GIFT_LOCKED_ERROR.code, message: GIFT_LOCKED_ERROR.message };
+    }
     const currentCategory = subjectExists ? subjectRow.rows[0].mapped_category ?? null : null;
 
     let canonical: string | null = null;
@@ -299,7 +328,8 @@ export async function decideProposal(args: {
     // The CANONICAL name, never the model's spelling. See `canonicalCategory`.
     const toWrite = verdict.setCategory === null ? null : canonical;
     await client.query(
-      'UPDATE transactions SET mapped_category = $1, rule_applied = false WHERE id = $2',
+      `UPDATE transactions SET mapped_category = $1, rule_applied = false
+        WHERE id = $2 AND NOT ${giftLockSql('transactions', 'category', null)}`,
       [toWrite, stored!.subjectId]
     );
     await client.query(

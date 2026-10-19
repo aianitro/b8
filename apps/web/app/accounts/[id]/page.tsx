@@ -13,6 +13,8 @@ import AccountStatementList, { type StatementMonth } from '@/components/AccountS
 import AccountBalanceChart from '@/components/charts/AccountBalanceChart';
 import { ledgerSeries, valuationSeries } from '@/lib/domain/balanceSeries';
 import type { BudgetCategory } from '@b8/contracts/types';
+import { visibleTransactions } from '@/lib/giftReadPath';
+import { pageViewer } from '@/lib/giftViewer';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
@@ -44,6 +46,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
   // double a day whenever the two disagree about the zone.
   const today = (await db.query<{ today: string }>('SELECT CURRENT_DATE::text AS today')).rows[0].today;
   const year = Number(today.slice(0, 4));
+  const viewer = await pageViewer(`/accounts/${id}`);
 
   const [accountRes, balanceRes, txRes, valuationRes, categoriesRes] = await Promise.all([
     db.query<AccountRow>(
@@ -58,12 +61,16 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
     // the chart needs twelve months back, and one query covers both. The authorized date is cast
     // to text like the posted one: a pg Date would not survive the trip to the client component,
     // and could not be compared with the posted date by equality.
+    //
+    // As the signed-in person sees the ledger (P7-41b): a row a gift holds for someone else is
+    // `Gift` with no merchant, logo or place. Its amount is not masked, so the running balance and
+    // the chart are the same for every viewer.
     db.query<TxRow>(
-      `SELECT id, date::text, amount::text, name, merchant_name, mapped_category,
-              logo_url, authorized_date::text, location_city, location_region
-       FROM transactions
-       WHERE account_id = $1 AND date >= LEAST(make_date($2, 1, 1), CURRENT_DATE - $3::int)
-       ORDER BY date ASC, id ASC`,
+      `SELECT t.id, t.date::text, t.amount::text, t.name, t.merchant_name, t.mapped_category,
+              t.logo_url, t.authorized_date::text, t.location_city, t.location_region
+       FROM ${visibleTransactions(viewer)} t
+       WHERE t.account_id = $1 AND t.date >= LEAST(make_date($2, 1, 1), CURRENT_DATE - $3::int)
+       ORDER BY t.date ASC, t.id ASC`,
       [id, year, SERIES_DAYS]
     ),
     db.query<{ date: string; value: string }>(

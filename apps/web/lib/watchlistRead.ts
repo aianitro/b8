@@ -1,4 +1,5 @@
 import db from './db';
+import { visibleTransactions, type GiftViewer } from './giftReadPath';
 
 /**
  * What the owner has flagged to come back to, read once and shared.
@@ -49,11 +50,16 @@ interface Row {
  * Oldest first is the partial index's own order and the order that puts the forgotten thing at the
  * top. The entry flagged an hour ago needs no reminding.
  *
+ * READ AS `viewer` SEES IT (P7-41b). A row a gift holds for someone else has no watch flag in
+ * `visibleTransactions(viewer)`, so the giver's own flag on their gift is not on the recipient's
+ * list; `null` (the digest) sees no held row at all. The flag still counts wherever figures are
+ * graded, which read `transactions` itself.
+ *
  * HIDDEN ROWS ARE INCLUDED, and that is not an oversight. Hiding a transaction says "do not count
  * this"; watching one says "I am not finished with this". Both are true of a charge excluded from
  * the budget while its refund is chased, which is precisely the case the flag exists for.
  */
-export async function loadWatchlist(): Promise<WatchedTransaction[]> {
+export async function loadWatchlist(viewer: GiftViewer): Promise<WatchedTransaction[]> {
   const { rows } = await db.query<Row>(`
     SELECT t.id,
            t.date::text AS date,
@@ -66,7 +72,7 @@ export async function loadWatchlist(): Promise<WatchedTransaction[]> {
            -- calendar and a subtraction across a DST boundary; here it is one clock, the same one
            -- that wrote watched_at.
            FLOOR(EXTRACT(EPOCH FROM (NOW() - t.watched_at)) / 86400)::text AS days_open
-      FROM transactions t
+      FROM ${visibleTransactions(viewer)} t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
      WHERE t.watched_at IS NOT NULL
      ORDER BY t.watched_at ASC, t.id

@@ -11,6 +11,7 @@
 // only authoritative figure.
 
 import { safeLogoUrl } from './enrichedDisplay';
+import { GIFT_LABEL } from './domain/giftMask';
 
 export interface DetailLocation {
   address: string | null;
@@ -225,5 +226,43 @@ export function transactionDetail(row: DetailRow): TransactionDetail {
     watched: row.watched_at !== null && row.watched_at !== undefined,
     hidden: row.hidden,
     enriched: raw !== null,
+  };
+}
+
+/**
+ * The detail of a row a gift holds, as anyone but its giver sees it before the reveal (P7-41b).
+ *
+ * BUILT BY NAMING WHAT SURVIVES, from SPEC.md's allowlist: the id, date, amount, the account, the
+ * category (the gift category), `hidden`, and the title `Gift`. Every other field is null, empty or
+ * false — `enriched` false included, so the sheet does not promise detail it is not showing. The
+ * route reads such a row through `visibleTransactions`, which has already masked it in SQL; this is
+ * the second line, so a field added to `TransactionDetail` later is masked here by default rather
+ * than by someone remembering to.
+ */
+export function maskedTransactionDetail(d: TransactionDetail): TransactionDetail {
+  return {
+    id: d.id,
+    date: d.date,
+    authorizedDate: null,
+    amount: d.amount,
+    title: GIFT_LABEL,
+    bankDescription: null,
+    logoUrl: null,
+    website: null,
+    account: { id: d.account.id, name: d.account.name },
+    budgetCategory: d.budgetCategory,
+    plaidCategory: null,
+    plaidCategoryDetailed: null,
+    plaidConfidence: null,
+    paymentChannel: null,
+    paymentMethod: null,
+    paymentProcessor: null,
+    location: null,
+    mapsUrl: null,
+    counterparties: [],
+    note: null,
+    watched: false,
+    hidden: d.hidden,
+    enriched: false,
   };
 }

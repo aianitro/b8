@@ -30,6 +30,7 @@ import NotificationBell from '@/components/NotificationBell';
 // this one replaces was already in tension with it.
 import { asOfFromDate } from '@/lib/domain/monthOutlook';
 import { loadMonthCategories, loadOffCycle, loadOverview } from '@/lib/overviewRead';
+import { pageViewer } from '@/lib/giftViewer';
 import DashboardMonthNav from '@/components/DashboardMonthNav';
 import { dashboardFromWire } from '@/lib/overviewFromWire';
 // The SQL behind that verdict now lives in `lib/`, shared with the daily job's breach alert, so the
@@ -221,7 +222,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     recentArrivals, recentArrivalsTotal, uncategorized: unfiled, watchlist, yearEnd,
     monthCategories,
     feedFindings, driftFindings, jobHealth, walletFindings,
-  } = dashboardFromWire(await loadOverview(now));
+  } = dashboardFromWire(await loadOverview(await pageViewer('/dashboard'), now));
   // Started before the overview and collected here, so the two reads overlap rather than queue.
   const categoryOptions = await categoryOptionsPromise;
   const valuationFindings = await valuationFindingsPromise;

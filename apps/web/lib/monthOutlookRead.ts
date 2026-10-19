@@ -1,4 +1,5 @@
 import db from './db';
+import { visibleTransactions } from './giftReadPath';
 import { isTrackedCategory, type AdherenceInput } from './domain/adherence';
 import { categorizationCoverage, monthOutlook, type CoverageGroup, type MonthOutlook } from './domain/monthOutlook';
 import { categoryPacing, type AsOf, type CategoryPace } from './domain/pacing';
@@ -244,6 +245,14 @@ async function getCoverageGroups(asOf: AsOf): Promise<CoverageGroup[]> {
  * `CLUB SPORT @ THE PLEX` and `Club Sport` in the same year, while its `name` never moved. Plaid's
  * cleaned merchant name improves over time, and a series that re-keys itself is a series that
  * dissolves. Normalisation of the label is the domain module's, not this query's.
+ *
+ * NO GIFT ROW, FOR ANY VIEWER (P7-41b). This list groups charges by their text, and what it finds is
+ * shown — and for the overdraft forecast, stored — for whoever looks later. A gift the giver marked
+ * is a one-off by definition, and its real merchant must not surface as a "series" to the person it
+ * is for. So rows held by an unrevealed gift are left out for everyone: the reader goes through
+ * `visibleTransactions(null)` and drops `gift_masked` rows, which are exactly those.
+ * This changes which charges are called recurring, never `actual`: the month's actuals are summed
+ * by `getMonthlyActuals` from `transactions`, gift rows included.
  */
 async function getRecurrenceWindow(asOf: AsOf): Promise<RecurrenceTxn[]> {
   const result = await db.query<{ category: string; label: string; month: number; day: number; amount: string }>(`
@@ -252,9 +261,10 @@ async function getRecurrenceWindow(asOf: AsOf): Promise<RecurrenceTxn[]> {
            EXTRACT(MONTH FROM t.date)::int - 1   AS month,
            EXTRACT(DAY   FROM t.date)::int       AS day,
            t.amount::text                        AS amount
-      FROM transactions t
+      FROM ${visibleTransactions(null)} t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
      WHERE t.hidden = FALSE
+       AND NOT t.gift_masked
        AND t.amount > 0
        AND t.mapped_category IS NOT NULL
        AND t.date >= ($2::date - make_interval(months => $1::int))

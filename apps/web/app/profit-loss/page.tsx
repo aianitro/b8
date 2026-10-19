@@ -5,6 +5,7 @@ import YearEndPathChart from '@/components/charts/YearEndPathChart';
 import { loadYearEndPath } from '@/lib/yearEndSnapshots';
 import { asOfFromDate } from '@/lib/domain/monthOutlook';
 import { loadOverview } from '@/lib/overviewRead';
+import { pageViewer } from '@/lib/giftViewer';
 import { dashboardFromWire } from '@/lib/overviewFromWire';
 import { MONTHS } from '@/lib/drilldown';
 
@@ -34,7 +35,7 @@ export default async function ProfitLossPage() {
   const now = new Date();
   const asOf = asOfFromDate(now);
   // The projection's path, morning by morning: operational, the landscape the dashboard card shows.
-  const [overview, path] = await Promise.all([loadOverview(now), loadYearEndPath('operational')]);
+  const [overview, path] = await Promise.all([loadOverview(await pageViewer('/profit-loss'), now), loadYearEndPath('operational')]);
   const { monthlySpending: monthly, yearEnd } = dashboardFromWire(overview);
 
   // `pl` and `plProjected` overlap on the last settled month. Without that shared point the dashed

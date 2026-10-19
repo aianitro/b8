@@ -5,6 +5,7 @@ import { suggestCategories } from './categorySuggester';
 import { recordCloses } from './unspentStore';
 import { writeYearEndSnapshot } from './yearEndSnapshots';
 import { writeNetWorthSnapshot } from './netWorth';
+import { runGiftSweep } from './giftStore';
 import { createLogger } from './logger';
 
 const log = createLogger('scheduler');
@@ -40,6 +41,11 @@ export async function runDailyJob() {
   } catch (err) {
     log.error('daily sync failed', { error: err instanceof Error ? err.message : String(err) });
   }
+
+  // Gifts (P7-41b): the window-end notice and the expiry of gifts still unresolved on their reveal
+  // date. After the syncs, so a purchase they just linked is not reported as missing; on this job
+  // rather than a timer of its own (SPEC.md non-goals). Resolves rather than rejects.
+  await runGiftSweep();
 
   // Snapshotted after the syncs, and outside their try, for two reasons: it should reflect
   // balances the run just pulled, and a failed sync still leaves a worth-recording position —

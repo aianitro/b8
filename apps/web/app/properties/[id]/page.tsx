@@ -21,6 +21,8 @@ import {
   type TenantFundRow, type TenantHeldFunds,
 } from '@/lib/domain/property';
 import type { Property, PropertyType, TenantFundKind } from '@b8/contracts/types';
+import { visibleTransactions, type GiftViewer } from '@/lib/giftReadPath';
+import { pageViewer } from '@/lib/giftViewer';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
@@ -162,7 +164,11 @@ async function getPnlTransactions(propertyId: string, year: number): Promise<Pnl
 // the property's cash. Ignoring the flag double-counted every Myrtle Beach mortgage payment —
 // once leaving the trust checking, once arriving at the loan — and put sign-inverted servicer
 // entries in a cash ledger. The mortgage still reaches net worth through its valuation.
-async function getLedgerTransactions(propertyId: string, year: number): Promise<LedgerInput[]> {
+//
+// As `viewer` sees the ledger (P7-41b): a row a gift holds for someone else describes itself as
+// `Gift`, never the `—` fallback. Its amount and property attribution are not masked, so this
+// ledger reconciles to the same figure for every viewer.
+async function getLedgerTransactions(propertyId: string, year: number, viewer: GiftViewer): Promise<LedgerInput[]> {
   const result = await db.query<{
     id: number; date: Date; name: string | null; merchant_name: string | null;
     mapped_category: string | null; amount: string; account_name: string; tagged_directly: boolean;
@@ -170,7 +176,7 @@ async function getLedgerTransactions(propertyId: string, year: number): Promise<
     `SELECT t.id, t.date, t.name, t.merchant_name, t.mapped_category, t.amount,
             a.name AS account_name,
             (t.property_id IS NOT NULL) AS tagged_directly
-       FROM transactions t
+       FROM ${visibleTransactions(viewer)} t
        JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
       WHERE COALESCE(t.property_id, a.property_id) = $1
         AND EXTRACT(YEAR FROM t.date) = $2 AND t.hidden = FALSE
@@ -248,7 +254,7 @@ export default async function PropertyDetailPage({ params }: { params: Promise<{
     ledgerTransactions, beginningBalance, defaultHiddenCategories, tenantHeldFunds,
   ] = await Promise.all([
     getProperty(id), getValuations(id), getLinkableAccounts(id, year), getPnlTransactions(id, year),
-    getLedgerTransactions(id, year), getBeginningBalance(id, year), getDefaultHiddenCategories(),
+    getLedgerTransactions(id, year, await pageViewer(`/properties/${id}`)), getBeginningBalance(id, year), getDefaultHiddenCategories(),
     getTenantHeldFunds(id),
   ]);
 

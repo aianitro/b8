@@ -7,6 +7,8 @@ import {
   CategoryTransactionsDataSchema,
   type CategoryTransactionsData,
 } from '@b8/contracts/categoryTransactions';
+import { visibleTransactions } from '@/lib/giftReadPath';
+import { viewerOf } from '@/lib/giftViewer';
 
 const log = createLogger('transactions');
 
@@ -67,6 +69,10 @@ export async function GET(req: NextRequest) {
   try {
     const year = new Date().getFullYear();
     const args = [category, year, month];
+    // WHO IS ASKING (P7-41b): the rows are listed as this viewer may see them, so a gift held for
+    // someone else is `Gift` with no note. `spent`, `pending` and `count` below are summed from
+    // `transactions` itself and come out the same for every viewer — a masked row still counts.
+    const viewer = await viewerOf(req);
 
     const [rows, totals] = await Promise.all([
       db.query<{ id: number; date: string; label: string; amount: string; account: string; watched: boolean; note: string | null }>(`
@@ -77,7 +83,7 @@ export async function GET(req: NextRequest) {
                a.name AS account,
                (t.watched_at IS NOT NULL) AS watched,
                t.note
-          FROM transactions t
+          FROM ${visibleTransactions(viewer)} t
           JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
          WHERE t.mapped_category = $1
            AND t.hidden = FALSE

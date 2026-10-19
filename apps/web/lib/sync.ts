@@ -9,12 +9,17 @@ import { createLogger } from './logger';
 import { matchReissuedTransactions } from './domain/txnMatch';
 import { ruleFor, type CategoryRule } from './domain/categoryRules';
 import { enrichmentParams, plaidEnrichment } from './plaidEnrichment';
+import { linkFreshRows } from './giftStore';
+import { giftLinkedSql } from './giftReadPath';
 // Reused rather than re-written: node-postgres hands back a DATE column as a JS Date at local
 // midnight, and toISOString() would shift it a day earlier at any UTC+ offset. That trap is
 // already solved (and tested) there; duplicating the logic here is how the two drift apart.
 import { toDateInputValue as toDateOnly } from './domain/property';
 
 const log = createLogger('sync');
+
+/** A stored row linked to a gift — whose category no rule and no Plaid revision may move. */
+const HELD_BY_GIFT = giftLinkedSql('transactions');
 
 type RuleMap = CategoryRule[];
 
@@ -129,76 +134,182 @@ async function syncItem(
   }
   const netRemoved = new Set([...lastEvent].filter(([, e]) => e === 'removed').map(([id]) => id));
 
-  if (!reauthWalk) {
-    const delivered = new Set<string>();
-    const claimants: TransactionsSyncResponse['added'] = [];
-    for (const page of walk) {
-      for (const t of [...page.added, ...page.modified]) {
-        if (knownIds.has(t.account_id) && !t.pending) delivered.add(t.transaction_id);
-      }
-    }
-    const removedInWalk = new Set(walk.flatMap((page) => page.removed.map((r) => r.transaction_id)));
-    const retired = [...removedInWalk]
-      // An id Plaid both retires and still sends in the same walk is not retired for this purpose.
-      .filter((id) => !delivered.has(id));
-    if (retired.length > 0) {
-      // First occurrence of each posted new id, in walk order — page order, then in-page order —
-      // which is the delivery order the pairing law is stated in. A repeat claims nothing.
-      //
-      // An id that is itself in this walk's `removed` claims nothing either (P6-40f cycle 2, N1). Plaid
-      // reissuing twice in one walk — old-1 to new-1, then new-1 to new-2 — would otherwise rename the
-      // owner's row to new-1, and new-1's own removal would then delete it, owner fields and all, while
-      // new-2 arrived as a bare insert. Skipping new-1 leaves the row for new-2, the id Plaid ends on.
-      const firstSeen = new Set<string>();
+  // ─── ONE TRANSACTION FROM THE FIRST WRITE TO THE GIFT LINK (P7-41b) ─────────────────────────────
+  //
+  // Every write this walk makes — the renames, the upserts, the removals — and the linking of fresh
+  // rows to the gifts waiting for them commit TOGETHER, on one client. Until COMMIT no other
+  // connection can see any of it; at COMMIT a row a gift claims is already linked, filed and masked.
+  // So there is no instant at which the recipient's page, the digest, the suggester or a push could
+  // read a gift's real merchant (SPEC.md S2). Inserting with the pool and linking afterwards would
+  // leave exactly that instant, and a Plaid reissue would leave a longer one: the replacement row
+  // would be visible from its INSERT until the end of the walk.
+  //
+  // It also tightens what was already true of a failed walk. The cursor is written only after this
+  // commits, so a walk that throws half way is fetched again from the same cursor — and now it has
+  // left nothing half-written behind either, rather than the rows of its first pages.
+  const client = await db.connect();
+  const q = client;
+  const freshIds: number[] = [];
+  try {
+    await q.query('BEGIN');
+
+    if (!reauthWalk) {
+      const delivered = new Set<string>();
+      const claimants: TransactionsSyncResponse['added'] = [];
       for (const page of walk) {
-        for (const t of page.added) {
-          if (!knownIds.has(t.account_id) || t.pending || firstSeen.has(t.transaction_id)) continue;
-          if (removedInWalk.has(t.transaction_id)) continue;
-          firstSeen.add(t.transaction_id);
-          claimants.push(t);
+        for (const t of [...page.added, ...page.modified]) {
+          if (knownIds.has(t.account_id) && !t.pending) delivered.add(t.transaction_id);
         }
       }
-      // Tombstoned ids take no part in either role, for the reasons given at the per-page block below.
-      const { rows: tombRows } = await db.query<{ plaid_transaction_id: string }>(
-        'SELECT plaid_transaction_id FROM transaction_tombstones WHERE plaid_transaction_id = ANY($1)',
-        [[...claimants.map((t) => t.transaction_id), ...retired]]
-      );
-      const tombstoned = new Set(tombRows.map((r) => r.plaid_transaction_id));
-      // A new id already stored somewhere is the upsert's to refresh, not a claimant. The matcher
-      // checks that only against the rows it is handed, and it is handed the retired rows alone here.
-      const { rows: storedRows } = await db.query<{ plaid_transaction_id: string }>(
-        'SELECT plaid_transaction_id FROM transactions WHERE plaid_transaction_id = ANY($1)',
-        [claimants.map((t) => t.transaction_id)]
-      );
-      const alreadyStored = new Set(storedRows.map((r) => r.plaid_transaction_id));
-      const eligible = claimants.filter((t) => !tombstoned.has(t.transaction_id) && !alreadyStored.has(t.transaction_id));
+      const removedInWalk = new Set(walk.flatMap((page) => page.removed.map((r) => r.transaction_id)));
+      const retired = [...removedInWalk]
+        // An id Plaid both retires and still sends in the same walk is not retired for this purpose.
+        .filter((id) => !delivered.has(id));
+      if (retired.length > 0) {
+        // First occurrence of each posted new id, in walk order — page order, then in-page order —
+        // which is the delivery order the pairing law is stated in. A repeat claims nothing.
+        //
+        // An id that is itself in this walk's `removed` claims nothing either (P6-40f cycle 2, N1). Plaid
+        // reissuing twice in one walk — old-1 to new-1, then new-1 to new-2 — would otherwise rename the
+        // owner's row to new-1, and new-1's own removal would then delete it, owner fields and all, while
+        // new-2 arrived as a bare insert. Skipping new-1 leaves the row for new-2, the id Plaid ends on.
+        const firstSeen = new Set<string>();
+        for (const page of walk) {
+          for (const t of page.added) {
+            if (!knownIds.has(t.account_id) || t.pending || firstSeen.has(t.transaction_id)) continue;
+            if (removedInWalk.has(t.transaction_id)) continue;
+            firstSeen.add(t.transaction_id);
+            claimants.push(t);
+          }
+        }
+        // Tombstoned ids take no part in either role, for the reasons given at the per-page block below.
+        const { rows: tombRows } = await q.query<{ plaid_transaction_id: string }>(
+          'SELECT plaid_transaction_id FROM transaction_tombstones WHERE plaid_transaction_id = ANY($1)',
+          [[...claimants.map((t) => t.transaction_id), ...retired]]
+        );
+        const tombstoned = new Set(tombRows.map((r) => r.plaid_transaction_id));
+        // A new id already stored somewhere is the upsert's to refresh, not a claimant. The matcher
+        // checks that only against the rows it is handed, and it is handed the retired rows alone here.
+        const { rows: storedRows } = await q.query<{ plaid_transaction_id: string }>(
+          'SELECT plaid_transaction_id FROM transactions WHERE plaid_transaction_id = ANY($1)',
+          [claimants.map((t) => t.transaction_id)]
+        );
+        const alreadyStored = new Set(storedRows.map((r) => r.plaid_transaction_id));
+        const eligible = claimants.filter((t) => !tombstoned.has(t.transaction_id) && !alreadyStored.has(t.transaction_id));
+        if (eligible.length > 0) {
+          // The candidate pool is exactly the stored rows Plaid retired in this walk, on this item's
+          // accounts — no date range, because the licence is the id, not the page the row fell in.
+          const retiredRows = await q.query<{
+            id: number; plaid_transaction_id: string; account_id: string; date: Date; amount: string; name: string | null;
+          }>(
+            `SELECT id, plaid_transaction_id, account_id, date, amount, name
+               FROM transactions
+              WHERE account_id = ANY($1) AND plaid_transaction_id = ANY($2)`,
+            [accountIds, retired.filter((id) => !tombstoned.has(id))]
+          );
+          const { reidentify } = matchReissuedTransactions(
+            eligible.map((t) => ({
+              plaidTransactionId: t.transaction_id, accountId: t.account_id,
+              date: t.date, amount: t.amount, name: t.name ?? null,
+            })),
+            retiredRows.rows.map((r) => ({
+              id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id,
+              date: toDateOnly(r.date), amount: Number(r.amount), name: r.name,
+            }))
+          );
+          // Renamed before any page is applied, so the retired id's DELETE below finds no row: the
+          // row it would have deleted now carries the new id, and the licence cannot destroy what it
+          // licensed. The upsert for the new id then refreshes the Plaid-sourced fields, as it does
+          // after every rename.
+          for (const m of reidentify) {
+            await q.query('UPDATE transactions SET plaid_transaction_id = $1 WHERE id = $2', [
+              m.newPlaidTransactionId, m.existingId,
+            ]);
+            reidentified.add(m.newPlaidTransactionId);
+          }
+          if (reidentify.length > 0) {
+            log.info('re-identified transactions after item change', { count: reidentify.length });
+          }
+        }
+      }
+    }
+
+    for (const page of walk) {
+      const { added: newTxns, modified, removed } = page;
+
+
+      // A re-auth gives the bank a new Plaid Item, and transaction_id is scoped to the Item — so
+      // the same real transactions arrive with brand-new ids and the upsert below, keyed on
+      // plaid_transaction_id, sees no conflict and stores history twice. Before inserting, pair
+      // each incoming row against a stored one that Plaid no longer refers to by id and update
+      // that row's id in place instead: the transaction keeps its row, and with it whatever
+      // category, hidden flag and transfer group it had.
+      //
+      // A TOMBSTONED INCOMING ID TAKES NO PART IN THIS, IN EITHER ROLE. As a claimant it would rename
+      // a live stored row to an id the owner deleted — the row survives, but now under an id the
+      // upsert below refuses to touch, so it can never be updated again — and its claim would also
+      // use up a stored row that a legitimate page-mate with the same account, date, amount and name
+      // should have claimed, turning that page-mate into a duplicate. So it is removed from the
+      // incoming list before matching, not merely blocked at the UPDATE: a refused UPDATE would still
+      // have spent the claim. And a stored row still bearing that id (re-created by a CSV re-import,
+      // say) is kept out of the candidate pool, exactly as the matcher already does for any id Plaid
+      // is still sending: Plaid still knows it, so it is not a row Plaid has stopped referring to.
+      //
+      // WHY A READ IS ACCEPTABLE HERE, when the writes below insist on checking inside the statement.
+      // This read is per page, not once per sync, and the only race it can lose is the owner deleting
+      // a row while this page is processed. A tombstone can only newly appear for an id that is stored
+      // — there is no row to delete otherwise — and an incoming id the matcher can see stored (same
+      // accounts, inside this page's date range) is never a claimant: it is handed to the ordinary
+      // upsert path, whose write-time check below catches it. What remains is an id stored OUTSIDE
+      // that range (Plaid moved its date) deleted in the milliseconds between this read and the
+      // UPDATE below — a window this narrow is accepted rather than locked against.
+      //
+      // Empty in a stored-cursor walk (see `reauthWalk`; its one licensed exception ran above), which
+      // skips this whole block: no claimants, no read, no rename. The upserts below still apply the tombstone guard and the
+      // pending skip to every id exactly as before. An id already handled earlier in this walk is not
+      // a claimant either; it is the upsert's, which finds its row by conflict.
+      const pageCandidates = reauthWalk
+        ? newTxns.filter((t) => knownIds.has(t.account_id) && !t.pending && !seenInWalk.has(t.transaction_id))
+        : [];
+      const tombstoned = new Set<string>();
+      if (pageCandidates.length > 0) {
+        const { rows } = await q.query<{ plaid_transaction_id: string }>(
+          'SELECT plaid_transaction_id FROM transaction_tombstones WHERE plaid_transaction_id = ANY($1)',
+          [pageCandidates.map((t) => t.transaction_id)]
+        );
+        for (const r of rows) tombstoned.add(r.plaid_transaction_id);
+      }
+      const eligible = pageCandidates.filter((t) => !tombstoned.has(t.transaction_id));
       if (eligible.length > 0) {
-        // The candidate pool is exactly the stored rows Plaid retired in this walk, on this item's
-        // accounts — no date range, because the licence is the id, not the page the row fell in.
-        const retiredRows = await db.query<{
+        const dates = eligible.map((t) => t.date);
+        const existingRows = await q.query<{
           id: number; plaid_transaction_id: string; account_id: string; date: Date; amount: string; name: string | null;
         }>(
           `SELECT id, plaid_transaction_id, account_id, date, amount, name
              FROM transactions
-            WHERE account_id = ANY($1) AND plaid_transaction_id = ANY($2)`,
-          [accountIds, retired.filter((id) => !tombstoned.has(id))]
+            WHERE account_id = ANY($1) AND date BETWEEN $2 AND $3`,
+          [accountIds, dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b))]
         );
+
         const { reidentify } = matchReissuedTransactions(
           eligible.map((t) => ({
             plaidTransactionId: t.transaction_id, accountId: t.account_id,
             date: t.date, amount: t.amount, name: t.name ?? null,
           })),
-          retiredRows.rows.map((r) => ({
+          // A row bearing an id this walk already handled is excluded the way a tombstoned one is:
+          // it was renamed, inserted or refreshed on an earlier page, so Plaid still refers to it.
+          // Excluded by its id rather than by a list of primary keys written, because every write in
+          // the walk is keyed on an id that `seenInWalk` already holds.
+          existingRows.rows.filter((r) =>
+            !tombstoned.has(r.plaid_transaction_id) && !seenInWalk.has(r.plaid_transaction_id)
+          ).map((r) => ({
             id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id,
             date: toDateOnly(r.date), amount: Number(r.amount), name: r.name,
           }))
         );
-        // Renamed before any page is applied, so the retired id's DELETE below finds no row: the
-        // row it would have deleted now carries the new id, and the licence cannot destroy what it
-        // licensed. The upsert for the new id then refreshes the Plaid-sourced fields, as it does
-        // after every rename.
+
         for (const m of reidentify) {
-          await db.query('UPDATE transactions SET plaid_transaction_id = $1 WHERE id = $2', [
+          await q.query('UPDATE transactions SET plaid_transaction_id = $1 WHERE id = $2', [
             m.newPlaidTransactionId, m.existingId,
           ]);
           reidentified.add(m.newPlaidTransactionId);
@@ -207,248 +318,201 @@ async function syncItem(
           log.info('re-identified transactions after item change', { count: reidentify.length });
         }
       }
-    }
-  }
 
-  for (const page of walk) {
-    const { added: newTxns, modified, removed } = page;
-
-
-    // A re-auth gives the bank a new Plaid Item, and transaction_id is scoped to the Item — so
-    // the same real transactions arrive with brand-new ids and the upsert below, keyed on
-    // plaid_transaction_id, sees no conflict and stores history twice. Before inserting, pair
-    // each incoming row against a stored one that Plaid no longer refers to by id and update
-    // that row's id in place instead: the transaction keeps its row, and with it whatever
-    // category, hidden flag and transfer group it had.
-    //
-    // A TOMBSTONED INCOMING ID TAKES NO PART IN THIS, IN EITHER ROLE. As a claimant it would rename
-    // a live stored row to an id the owner deleted — the row survives, but now under an id the
-    // upsert below refuses to touch, so it can never be updated again — and its claim would also
-    // use up a stored row that a legitimate page-mate with the same account, date, amount and name
-    // should have claimed, turning that page-mate into a duplicate. So it is removed from the
-    // incoming list before matching, not merely blocked at the UPDATE: a refused UPDATE would still
-    // have spent the claim. And a stored row still bearing that id (re-created by a CSV re-import,
-    // say) is kept out of the candidate pool, exactly as the matcher already does for any id Plaid
-    // is still sending: Plaid still knows it, so it is not a row Plaid has stopped referring to.
-    //
-    // WHY A READ IS ACCEPTABLE HERE, when the writes below insist on checking inside the statement.
-    // This read is per page, not once per sync, and the only race it can lose is the owner deleting
-    // a row while this page is processed. A tombstone can only newly appear for an id that is stored
-    // — there is no row to delete otherwise — and an incoming id the matcher can see stored (same
-    // accounts, inside this page's date range) is never a claimant: it is handed to the ordinary
-    // upsert path, whose write-time check below catches it. What remains is an id stored OUTSIDE
-    // that range (Plaid moved its date) deleted in the milliseconds between this read and the
-    // UPDATE below — a window this narrow is accepted rather than locked against.
-    //
-    // Empty in a stored-cursor walk (see `reauthWalk`; its one licensed exception ran above), which
-    // skips this whole block: no claimants, no read, no rename. The upserts below still apply the tombstone guard and the
-    // pending skip to every id exactly as before. An id already handled earlier in this walk is not
-    // a claimant either; it is the upsert's, which finds its row by conflict.
-    const pageCandidates = reauthWalk
-      ? newTxns.filter((t) => knownIds.has(t.account_id) && !t.pending && !seenInWalk.has(t.transaction_id))
-      : [];
-    const tombstoned = new Set<string>();
-    if (pageCandidates.length > 0) {
-      const { rows } = await db.query<{ plaid_transaction_id: string }>(
-        'SELECT plaid_transaction_id FROM transaction_tombstones WHERE plaid_transaction_id = ANY($1)',
-        [pageCandidates.map((t) => t.transaction_id)]
-      );
-      for (const r of rows) tombstoned.add(r.plaid_transaction_id);
-    }
-    const eligible = pageCandidates.filter((t) => !tombstoned.has(t.transaction_id));
-    if (eligible.length > 0) {
-      const dates = eligible.map((t) => t.date);
-      const existingRows = await db.query<{
-        id: number; plaid_transaction_id: string; account_id: string; date: Date; amount: string; name: string | null;
-      }>(
-        `SELECT id, plaid_transaction_id, account_id, date, amount, name
-           FROM transactions
-          WHERE account_id = ANY($1) AND date BETWEEN $2 AND $3`,
-        [accountIds, dates.reduce((a, b) => (a < b ? a : b)), dates.reduce((a, b) => (a > b ? a : b))]
-      );
-
-      const { reidentify } = matchReissuedTransactions(
-        eligible.map((t) => ({
-          plaidTransactionId: t.transaction_id, accountId: t.account_id,
-          date: t.date, amount: t.amount, name: t.name ?? null,
-        })),
-        // A row bearing an id this walk already handled is excluded the way a tombstoned one is:
-        // it was renamed, inserted or refreshed on an earlier page, so Plaid still refers to it.
-        // Excluded by its id rather than by a list of primary keys written, because every write in
-        // the walk is keyed on an id that `seenInWalk` already holds.
-        existingRows.rows.filter((r) =>
-          !tombstoned.has(r.plaid_transaction_id) && !seenInWalk.has(r.plaid_transaction_id)
-        ).map((r) => ({
-          id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id,
-          date: toDateOnly(r.date), amount: Number(r.amount), name: r.name,
-        }))
-      );
-
-      for (const m of reidentify) {
-        await db.query('UPDATE transactions SET plaid_transaction_id = $1 WHERE id = $2', [
-          m.newPlaidTransactionId, m.existingId,
-        ]);
-        reidentified.add(m.newPlaidTransactionId);
+      for (const txn of newTxns) {
+        if (!knownIds.has(txn.account_id)) {
+          unmatchedAccountIds.add(txn.account_id); // unrecognized even after reconciliation — surfaced, not silently dropped
+          continue;
+        }
+        // Pending transactions (e.g. a restaurant auth hold before the tip is added) are
+        // frequently reissued under a brand-new transaction_id once they post — storing the
+        // pending one creates a permanent duplicate alongside the posted one. Wait for it to
+        // post (pending: false) before saving it; the posted version arrives later as its own
+        // `added` or `modified` event.
+        if (txn.pending) continue;
+        // Recorded before the write, whatever it does: an id the tombstone guard refuses is still one
+        // Plaid sent in this walk, and must neither claim on a later page nor leave a stored row
+        // bearing it in the candidate pool there.
+        seenInWalk.add(txn.transaction_id);
+        const plaidCategory = txn.personal_finance_category?.primary ?? null;
+        const { mapped, ruleApplied } = applyRule(
+          { plaidCategory, merchantName: txn.merchant_name ?? null }, rules);
+        // Re-identified rows now carry this id, so the upsert below finds them by conflict and
+        // refreshes their Plaid-sourced fields — deliberately without touching mapped_category,
+        // which the DO UPDATE clause already leaves alone.
+        //
+        // THE TOMBSTONE CHECK IS INSIDE THE WRITE, and that placement is the rule rather than a
+        // style. `INSERT ... SELECT ... WHERE NOT EXISTS` proposes no row at all for an id the owner
+        // deleted, so there is nothing to insert and nothing to conflict with — the DO UPDATE never
+        // fires either. A SELECT of tombstones up front, then a plain upsert, would be deciding on a
+        // reading that a delete landing mid-sync (or between two pages) has already made stale, and
+        // the row would come back. Asked here, the question is answered at the moment it matters.
+        // A skipped id is not counted: `rowCount` is 0 when the guard proposed nothing.
+        //
+        // THE ENRICHMENT (P6-40b) IS PLAID'S LATEST STATEMENT, OVERWRITTEN WHOLE. Each of the eleven
+        // columns is set from EXCLUDED with no COALESCE against the stored value: when Plaid stops
+        // sending a logo or a city, the row stops claiming one. Keeping the old value would make a
+        // row a blend of statements Plaid made at different times, true of none of them. The owner's
+        // own fields (mapped_category here, and hidden, watched_at, note, transfer_group_id,
+        // property_id everywhere) are still never named in the DO UPDATE. This is also the statement
+        // that fills in a row the re-identification above just renumbered: the UPDATE there moves the
+        // id only, and the conflict here refreshes everything Plaid-sourced, enrichment included —
+        // so there is one write path for Plaid's fields, not a second one that could skip the
+        // tombstone guard or forget a column. The values come from `plaidEnrichment`, which both
+        // loops share, and `$12::date` takes Plaid's zone-less string with no Date in between.
+        const written = await q.query<{ inserted: boolean; id: number }>(
+          `INSERT INTO transactions
+             (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied,
+              plaid_category_detailed, plaid_category_confidence, authorized_date, payment_channel,
+              merchant_entity_id, logo_url, website, location_city, location_region, location_country, plaid_raw)
+           SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                  $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20::jsonb
+            WHERE NOT EXISTS (SELECT 1 FROM transaction_tombstones tt WHERE tt.plaid_transaction_id = $1)
+           ON CONFLICT (plaid_transaction_id) DO UPDATE
+             SET account_id = EXCLUDED.account_id,
+                 date = EXCLUDED.date,
+                 amount = EXCLUDED.amount,
+                 name = EXCLUDED.name,
+                 merchant_name = EXCLUDED.merchant_name,
+                 plaid_category = EXCLUDED.plaid_category,
+                 plaid_category_detailed   = EXCLUDED.plaid_category_detailed,
+                 plaid_category_confidence = EXCLUDED.plaid_category_confidence,
+                 authorized_date           = EXCLUDED.authorized_date,
+                 payment_channel           = EXCLUDED.payment_channel,
+                 merchant_entity_id        = EXCLUDED.merchant_entity_id,
+                 logo_url                  = EXCLUDED.logo_url,
+                 website                   = EXCLUDED.website,
+                 location_city             = EXCLUDED.location_city,
+                 location_region           = EXCLUDED.location_region,
+                 location_country          = EXCLUDED.location_country,
+                 plaid_raw                 = EXCLUDED.plaid_raw
+           RETURNING (xmax = 0) AS inserted, id`,
+          [txn.transaction_id, txn.account_id, txn.date, txn.amount,
+           txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied,
+           ...enrichmentParams(plaidEnrichment(txn))]
+        );
+        // A re-identified row is not new to the ledger, only newly-numbered — counting it as
+        // added would report a re-auth as hundreds of fresh transactions.
+        //
+        // ONLY A TRUE INSERT COUNTS (P6-40f cycle 2). `rowCount` is 1 for the DO UPDATE branch too, so a
+        // walk from no cursor that re-delivers rows already stored under the same id counted every one
+        // of them — and the held-cursor phase re-walks from no cursor every night until Plaid reports
+        // history complete, which would report the same history as new each time. `xmax = 0` is
+        // Postgres's mark of a row version this statement inserted rather than updated.
+        if (written.rowCount === 0) skippedTombstoned++;
+        else if (
+          written.rows[0]?.inserted && !reidentified.has(txn.transaction_id) && !netRemoved.has(txn.transaction_id)
+        ) added++;
+        // A gift may claim only a row this statement INSERTED: not a conflict-refresh of a stored row,
+        // not one the re-identification above renumbered. Removed-later ids are simply gone by the time
+        // the gifts are matched below.
+        if (written.rows[0]?.inserted && !reidentified.has(txn.transaction_id)) freshIds.push(written.rows[0].id);
       }
-      if (reidentify.length > 0) {
-        log.info('re-identified transactions after item change', { count: reidentify.length });
+
+      for (const txn of modified) {
+        if (!knownIds.has(txn.account_id)) {
+          unmatchedAccountIds.add(txn.account_id);
+          continue;
+        }
+        // Same pending skip as above — some institutions post-in-place (same transaction_id,
+        // `modified` event flips pending false) rather than reissuing a new id. Upsert instead
+        // of a plain UPDATE so that case still creates the row the first time it posts, even
+        // though we never stored it while pending.
+        if (txn.pending) continue;
+        // Seen for the rest of the walk, like the `added` loop: a row this upsert inserts or refreshes
+        // is not a re-identification candidate for a later page's same-key id (P6-40f, R3).
+        seenInWalk.add(txn.transaction_id);
+        const plaidCategory = txn.personal_finance_category?.primary ?? null;
+        const { mapped, ruleApplied } = applyRule(
+          { plaidCategory, merchantName: txn.merchant_name ?? null }, rules);
+        // The same in-statement tombstone guard as the `added` loop, and this is the loop that
+        // needs it most: `modified` is how a deleted row actually comes back in practice, because
+        // Plaid keeps revising a transaction it has no idea the owner deleted. With no row proposed,
+        // the guard also leaves alone a row that still bears a tombstoned id — it is not refreshed,
+        // re-categorised, or resurrected, whichever of those this upsert would otherwise have done.
+        // The enrichment columns are overwritten exactly as in the `added` loop, for the same reason;
+        // a `modified` event that drops a field is the case that reason exists for.
+        const written = await q.query<{ inserted: boolean; id: number }>(
+          `INSERT INTO transactions
+             (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied,
+              plaid_category_detailed, plaid_category_confidence, authorized_date, payment_channel,
+              merchant_entity_id, logo_url, website, location_city, location_region, location_country, plaid_raw)
+           SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                  $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20::jsonb
+            WHERE NOT EXISTS (SELECT 1 FROM transaction_tombstones tt WHERE tt.plaid_transaction_id = $1)
+           ON CONFLICT (plaid_transaction_id) DO UPDATE
+             SET account_id = EXCLUDED.account_id,
+                 date = EXCLUDED.date,
+                 amount = EXCLUDED.amount,
+                 name = EXCLUDED.name,
+                 merchant_name = EXCLUDED.merchant_name,
+                 plaid_category = EXCLUDED.plaid_category,
+                 -- A row a gift holds keeps its category through every Plaid revision (P7-41b): it is
+                 -- the gift's, even when the gift category was deleted and the row sits unfiled.
+                 mapped_category = CASE WHEN (transactions.mapped_category IS NULL OR transactions.rule_applied = TRUE) AND NOT ${HELD_BY_GIFT} THEN EXCLUDED.mapped_category ELSE transactions.mapped_category END,
+                 rule_applied    = CASE WHEN (transactions.mapped_category IS NULL OR transactions.rule_applied = TRUE) AND NOT ${HELD_BY_GIFT} THEN EXCLUDED.rule_applied    ELSE transactions.rule_applied    END,
+                 plaid_category_detailed   = EXCLUDED.plaid_category_detailed,
+                 plaid_category_confidence = EXCLUDED.plaid_category_confidence,
+                 authorized_date           = EXCLUDED.authorized_date,
+                 payment_channel           = EXCLUDED.payment_channel,
+                 merchant_entity_id        = EXCLUDED.merchant_entity_id,
+                 logo_url                  = EXCLUDED.logo_url,
+                 website                   = EXCLUDED.website,
+                 location_city             = EXCLUDED.location_city,
+                 location_region           = EXCLUDED.location_region,
+                 location_country          = EXCLUDED.location_country,
+                 plaid_raw                 = EXCLUDED.plaid_raw
+           RETURNING (xmax = 0) AS inserted, id`,
+          [txn.transaction_id, txn.account_id, txn.date, txn.amount,
+           txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied,
+           ...enrichmentParams(plaidEnrichment(txn))]
+        );
+        if (written.rowCount === 0) skippedTombstoned++;
+        // A first-time `modified` (a row that posted in place) is an insert like any `added` one, and
+        // a gift may claim it; a refresh of a stored row may not (SPEC.md S1, S5).
+        else if (written.rows[0]?.inserted && !reidentified.has(txn.transaction_id)) freshIds.push(written.rows[0].id);
       }
-    }
 
-    for (const txn of newTxns) {
-      if (!knownIds.has(txn.account_id)) {
-        unmatchedAccountIds.add(txn.account_id); // unrecognized even after reconciliation — surfaced, not silently dropped
-        continue;
+      // NO TOMBSTONE HERE, deliberately, and this DELETE is not to be routed through the route's
+      // delete. Plaid removing a transaction (usually a pending one replaced by its posted form) is
+      // Plaid's view changing, not the owner deciding; if the same id came back later it would be
+      // Plaid changing its mind again, which is not something to override. Only the owner's delete
+      // writes a tombstone. For an id that is already tombstoned this matches no row and is a no-op.
+      // An id that licensed a rename above also matches no row: that row already carries its new id.
+      for (const txn of removed) {
+        await q.query('DELETE FROM transactions WHERE plaid_transaction_id = $1', [txn.transaction_id]);
       }
-      // Pending transactions (e.g. a restaurant auth hold before the tip is added) are
-      // frequently reissued under a brand-new transaction_id once they post — storing the
-      // pending one creates a permanent duplicate alongside the posted one. Wait for it to
-      // post (pending: false) before saving it; the posted version arrives later as its own
-      // `added` or `modified` event.
-      if (txn.pending) continue;
-      // Recorded before the write, whatever it does: an id the tombstone guard refuses is still one
-      // Plaid sent in this walk, and must neither claim on a later page nor leave a stored row
-      // bearing it in the candidate pool there.
-      seenInWalk.add(txn.transaction_id);
-      const plaidCategory = txn.personal_finance_category?.primary ?? null;
-      const { mapped, ruleApplied } = applyRule(
-        { plaidCategory, merchantName: txn.merchant_name ?? null }, rules);
-      // Re-identified rows now carry this id, so the upsert below finds them by conflict and
-      // refreshes their Plaid-sourced fields — deliberately without touching mapped_category,
-      // which the DO UPDATE clause already leaves alone.
-      //
-      // THE TOMBSTONE CHECK IS INSIDE THE WRITE, and that placement is the rule rather than a
-      // style. `INSERT ... SELECT ... WHERE NOT EXISTS` proposes no row at all for an id the owner
-      // deleted, so there is nothing to insert and nothing to conflict with — the DO UPDATE never
-      // fires either. A SELECT of tombstones up front, then a plain upsert, would be deciding on a
-      // reading that a delete landing mid-sync (or between two pages) has already made stale, and
-      // the row would come back. Asked here, the question is answered at the moment it matters.
-      // A skipped id is not counted: `rowCount` is 0 when the guard proposed nothing.
-      //
-      // THE ENRICHMENT (P6-40b) IS PLAID'S LATEST STATEMENT, OVERWRITTEN WHOLE. Each of the eleven
-      // columns is set from EXCLUDED with no COALESCE against the stored value: when Plaid stops
-      // sending a logo or a city, the row stops claiming one. Keeping the old value would make a
-      // row a blend of statements Plaid made at different times, true of none of them. The owner's
-      // own fields (mapped_category here, and hidden, watched_at, note, transfer_group_id,
-      // property_id everywhere) are still never named in the DO UPDATE. This is also the statement
-      // that fills in a row the re-identification above just renumbered: the UPDATE there moves the
-      // id only, and the conflict here refreshes everything Plaid-sourced, enrichment included —
-      // so there is one write path for Plaid's fields, not a second one that could skip the
-      // tombstone guard or forget a column. The values come from `plaidEnrichment`, which both
-      // loops share, and `$12::date` takes Plaid's zone-less string with no Date in between.
-      const written = await db.query<{ inserted: boolean }>(
-        `INSERT INTO transactions
-           (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied,
-            plaid_category_detailed, plaid_category_confidence, authorized_date, payment_channel,
-            merchant_entity_id, logo_url, website, location_city, location_region, location_country, plaid_raw)
-         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20::jsonb
-          WHERE NOT EXISTS (SELECT 1 FROM transaction_tombstones tt WHERE tt.plaid_transaction_id = $1)
-         ON CONFLICT (plaid_transaction_id) DO UPDATE
-           SET account_id = EXCLUDED.account_id,
-               date = EXCLUDED.date,
-               amount = EXCLUDED.amount,
-               name = EXCLUDED.name,
-               merchant_name = EXCLUDED.merchant_name,
-               plaid_category = EXCLUDED.plaid_category,
-               plaid_category_detailed   = EXCLUDED.plaid_category_detailed,
-               plaid_category_confidence = EXCLUDED.plaid_category_confidence,
-               authorized_date           = EXCLUDED.authorized_date,
-               payment_channel           = EXCLUDED.payment_channel,
-               merchant_entity_id        = EXCLUDED.merchant_entity_id,
-               logo_url                  = EXCLUDED.logo_url,
-               website                   = EXCLUDED.website,
-               location_city             = EXCLUDED.location_city,
-               location_region           = EXCLUDED.location_region,
-               location_country          = EXCLUDED.location_country,
-               plaid_raw                 = EXCLUDED.plaid_raw
-         RETURNING (xmax = 0) AS inserted`,
-        [txn.transaction_id, txn.account_id, txn.date, txn.amount,
-         txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied,
-         ...enrichmentParams(plaidEnrichment(txn))]
-      );
-      // A re-identified row is not new to the ledger, only newly-numbered — counting it as
-      // added would report a re-auth as hundreds of fresh transactions.
-      //
-      // ONLY A TRUE INSERT COUNTS (P6-40f cycle 2). `rowCount` is 1 for the DO UPDATE branch too, so a
-      // walk from no cursor that re-delivers rows already stored under the same id counted every one
-      // of them — and the held-cursor phase re-walks from no cursor every night until Plaid reports
-      // history complete, which would report the same history as new each time. `xmax = 0` is
-      // Postgres's mark of a row version this statement inserted rather than updated.
-      if (written.rowCount === 0) skippedTombstoned++;
-      else if (
-        written.rows[0]?.inserted && !reidentified.has(txn.transaction_id) && !netRemoved.has(txn.transaction_id)
-      ) added++;
+
     }
 
-    for (const txn of modified) {
-      if (!knownIds.has(txn.account_id)) {
-        unmatchedAccountIds.add(txn.account_id);
-        continue;
-      }
-      // Same pending skip as above — some institutions post-in-place (same transaction_id,
-      // `modified` event flips pending false) rather than reissuing a new id. Upsert instead
-      // of a plain UPDATE so that case still creates the row the first time it posts, even
-      // though we never stored it while pending.
-      if (txn.pending) continue;
-      // Seen for the rest of the walk, like the `added` loop: a row this upsert inserts or refreshes
-      // is not a re-identification candidate for a later page's same-key id (P6-40f, R3).
-      seenInWalk.add(txn.transaction_id);
-      const plaidCategory = txn.personal_finance_category?.primary ?? null;
-      const { mapped, ruleApplied } = applyRule(
-        { plaidCategory, merchantName: txn.merchant_name ?? null }, rules);
-      // The same in-statement tombstone guard as the `added` loop, and this is the loop that
-      // needs it most: `modified` is how a deleted row actually comes back in practice, because
-      // Plaid keeps revising a transaction it has no idea the owner deleted. With no row proposed,
-      // the guard also leaves alone a row that still bears a tombstoned id — it is not refreshed,
-      // re-categorised, or resurrected, whichever of those this upsert would otherwise have done.
-      // The enrichment columns are overwritten exactly as in the `added` loop, for the same reason;
-      // a `modified` event that drops a field is the case that reason exists for.
-      const written = await db.query(
-        `INSERT INTO transactions
-           (plaid_transaction_id, account_id, date, amount, name, merchant_name, plaid_category, mapped_category, rule_applied,
-            plaid_category_detailed, plaid_category_confidence, authorized_date, payment_channel,
-            merchant_entity_id, logo_url, website, location_city, location_region, location_country, plaid_raw)
-         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12::date, $13, $14, $15, $16, $17, $18, $19, $20::jsonb
-          WHERE NOT EXISTS (SELECT 1 FROM transaction_tombstones tt WHERE tt.plaid_transaction_id = $1)
-         ON CONFLICT (plaid_transaction_id) DO UPDATE
-           SET account_id = EXCLUDED.account_id,
-               date = EXCLUDED.date,
-               amount = EXCLUDED.amount,
-               name = EXCLUDED.name,
-               merchant_name = EXCLUDED.merchant_name,
-               plaid_category = EXCLUDED.plaid_category,
-               mapped_category = CASE WHEN transactions.mapped_category IS NULL OR transactions.rule_applied = TRUE THEN EXCLUDED.mapped_category ELSE transactions.mapped_category END,
-               rule_applied    = CASE WHEN transactions.mapped_category IS NULL OR transactions.rule_applied = TRUE THEN EXCLUDED.rule_applied    ELSE transactions.rule_applied    END,
-               plaid_category_detailed   = EXCLUDED.plaid_category_detailed,
-               plaid_category_confidence = EXCLUDED.plaid_category_confidence,
-               authorized_date           = EXCLUDED.authorized_date,
-               payment_channel           = EXCLUDED.payment_channel,
-               merchant_entity_id        = EXCLUDED.merchant_entity_id,
-               logo_url                  = EXCLUDED.logo_url,
-               website                   = EXCLUDED.website,
-               location_city             = EXCLUDED.location_city,
-               location_region           = EXCLUDED.location_region,
-               location_country          = EXCLUDED.location_country,
-               plaid_raw                 = EXCLUDED.plaid_raw`,
-        [txn.transaction_id, txn.account_id, txn.date, txn.amount,
-         txn.name ?? null, txn.merchant_name ?? null, plaidCategory, mapped, ruleApplied,
-         ...enrichmentParams(plaidEnrichment(txn))]
-      );
-      if (written.rowCount === 0) skippedTombstoned++;
-    }
 
-    // NO TOMBSTONE HERE, deliberately, and this DELETE is not to be routed through the route's
-    // delete. Plaid removing a transaction (usually a pending one replaced by its posted form) is
-    // Plaid's view changing, not the owner deciding; if the same id came back later it would be
-    // Plaid changing its mind again, which is not something to override. Only the owner's delete
-    // writes a tombstone. For an id that is already tombstoned this matches no row and is a no-op.
-    // An id that licensed a rename above also matches no row: that row already carries its new id.
-    for (const txn of removed) {
-      await db.query('DELETE FROM transactions WHERE plaid_transaction_id = $1', [txn.transaction_id]);
-    }
+    // The rows this walk first inserted, real, read inside the transaction for the gift matcher. The
+    // one place outside the read path that reads ledger text for a viewer-independent decision; its
+    // output is links and a count, never the text (lib/giftSurfaceWiring.test.ts, W3).
+    const { rows: freshRows } = await q.query<{
+      id: number; plaid_transaction_id: string; account_id: string; date: string; amount: string;
+      name: string | null; merchant_name: string | null; mapped_category: string | null;
+      rule_applied: boolean; linked: boolean;
+    }>(
+      `SELECT t.id, t.plaid_transaction_id, t.account_id, t.date::text AS date, t.amount::text AS amount,
+              t.name, t.merchant_name, t.mapped_category, t.rule_applied,
+              EXISTS (SELECT 1 FROM gift_transactions gt WHERE gt.transaction_id = t.id) AS linked
+         FROM transactions t WHERE t.id = ANY($1::int[])`,
+      [freshIds]
+    );
+    const giftLinked = await linkFreshRows(q, freshRows.map((r) => ({
+      id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id, date: r.date,
+      amount: r.amount, name: r.name, merchantName: r.merchant_name, pending: false, linked: r.linked,
+      mapped_category: r.mapped_category, rule_applied: r.rule_applied,
+    })));
+    if (giftLinked > 0) log.info('rows held for gifts', { count: giftLinked });
 
+    await q.query('COMMIT');
+  } catch (err) {
+    await q.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
   }
 
   // What Plaid says about ITS OWN refresh of the institution, recorded beside our cursor.

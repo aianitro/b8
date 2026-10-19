@@ -4,6 +4,8 @@ import { recordCashTransfer, type CashTransferArgs } from '@/lib/cashTransferSto
 
 const STATUS: Record<string, number> = {
   NOT_FOUND: 404, NOT_COUNTABLE: 400, ALREADY_GROUPED: 409, INVALID: 400, UNBALANCED: 400,
+  // A withdrawal a gift holds (P7-41b) — the locked-write status every other route gives it.
+  GIFT_LOCKED: 409,
 };
 
 /**

@@ -6,8 +6,19 @@ export const dynamic = 'force-dynamic';
 import db from '@/lib/db';
 import type { BudgetCategory } from '@b8/contracts/types';
 import RulesManager, { type MerchantRuleRow, type RuleRow } from '@/components/RulesManager';
+import { visibleTransactions, type GiftViewer } from '@/lib/giftReadPath';
+import { pageViewer } from '@/lib/giftViewer';
 
-async function getData() {
+/**
+ * AS `viewer` SEES THE LEDGER (P7-41b). The three counts below describe row CONTENT — how many rows
+ * carry a Plaid category, a payee, a pending re-file — so each is counted over
+ * `visibleTransactions(viewer)`. A row a gift holds for someone else has no Plaid category and no
+ * merchant there, and so is in none of them: a count would otherwise be an oracle ("the rule for
+ * that payee covers one more row than I can see"). The giver's counts include it. These are the only
+ * figures in the app allowed to differ between viewers; every sum is read from `transactions`.
+ */
+async function getData(viewer: GiftViewer) {
+  const rowsSource = visibleTransactions(viewer);
   const [rows, merchants, cats, pending] = await Promise.all([
     db.query<RuleRow>(`
       SELECT t.plaid_category,
@@ -29,7 +40,7 @@ async function getData() {
                WHERE t.mapped_category IS NULL AND t.hidden = FALSE
              )::int AS uncategorized,
              cr.mapped_category
-      FROM transactions t
+      FROM ${rowsSource} t
       -- Same scoping as the payee counts above, for the same reason: these describe the ledger,
       -- and the ledger is what /transactions shows.
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions
@@ -44,7 +55,7 @@ async function getData() {
     db.query<MerchantRuleRow>(`
       SELECT cr.merchant_name, cr.mapped_category, COUNT(a.id)::int AS count
       FROM category_rules cr
-      LEFT JOIN transactions t
+      LEFT JOIN ${rowsSource} t
         ON LOWER(TRIM(t.merchant_name)) = LOWER(TRIM(cr.merchant_name)) AND NOT t.hidden
       -- SCOPED TO THE LEDGER, because this figure is a link now and must equal the list it opens.
       -- Without it the count included a row on an untracked account, which /transactions filters
@@ -66,7 +77,7 @@ async function getData() {
     // what the operation touches.
     db.query<{ count: string }>(`
       SELECT COUNT(DISTINCT t.id)::text AS count
-      FROM transactions t
+      FROM ${rowsSource} t
       JOIN category_rules cr
         ON (cr.plaid_category IS NOT NULL AND cr.plaid_category = t.plaid_category)
         OR (cr.merchant_name IS NOT NULL
@@ -83,7 +94,7 @@ async function getData() {
 }
 
 export default async function RulesPage() {
-  const { rows, merchantRules, categories, pendingApply } = await getData();
+  const { rows, merchantRules, categories, pendingApply } = await getData(await pageViewer('/rules'));
   return (
     <div className="p-4 sm:p-8 max-w-3xl mx-auto">
       <div className="mb-8">

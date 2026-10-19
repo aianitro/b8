@@ -9,6 +9,8 @@ import { parseBearer } from '@/lib/bearerAuth';
 import { credentialFrom } from '@/lib/requestAuth';
 import { isNoop } from '@/lib/domain/proposal';
 import { canonicalCategory, createProposal, loadSubject, type ProposalActor, type ProposalView } from '@/lib/proposalStore';
+import { visibleTransactions, type GiftViewer } from '@/lib/giftReadPath';
+import { GIFT_LOCKED_ERROR } from '@/lib/giftLock';
 
 const log = createLogger('chat');
 
@@ -112,6 +114,12 @@ interface ToolContext {
   now: Date;
   /** The proposing session and its person, recorded together on every proposal (P7-41a). */
   actor: ProposalActor | null;
+  /**
+   * Who is asking (P7-41b) — the session's person, bearer or cookie, or null. Every tool that returns
+   * row text reads through `visibleTransactions(viewer)`, so what reaches the model, and the reply it
+   * writes, never holds a gift's real details for anyone but its giver. Null is a non-giver.
+   */
+  viewer: GiftViewer;
   /** Proposals created during this request, collected for the response. */
   proposals: ProposalView[];
 }
@@ -140,8 +148,11 @@ async function runTool(
       }
       const proposedCategory = typeof category === 'string' ? category : null;
 
-      const subject = await loadSubject(transaction_id);
+      const subject = await loadSubject(transaction_id, ctx.viewer);
       if (!subject) return { error: `No transaction with id ${transaction_id}` };
+      // A row an unrevealed gift holds cannot be re-filed by anyone (P7-41b), so no proposal is made
+      // for it — for the giver either. The refusal is the locked-write message, with no row text.
+      if (subject.held) return { error: GIFT_LOCKED_ERROR.message };
 
       // Canonicalised here so the card, the stored row and the eventual write all carry the same
       // spelling as the budget line. The model may say "GROCERIES"; the ledger must say "Groceries"
@@ -249,7 +260,9 @@ async function runTool(
                t.mapped_category AS category,
                COUNT(*)::int AS transactions,
                SUM(t.amount)::numeric(12,2) AS total_spent
-        FROM transactions t
+        -- As the asker sees it: a gift held for someone else is merchant 'Gift' here, so every such
+        -- row falls into one 'Gift' bucket whose total is exactly theirs (P7-41b).
+        FROM ${visibleTransactions(ctx.viewer)} t
         WHERE ${conds.join(' AND ')}
         GROUP BY merchant, t.mapped_category
         ORDER BY total_spent DESC
@@ -276,7 +289,7 @@ async function runTool(
         -- ordinary conversation until this line existed: only an id the OWNER typed could be used.
         SELECT t.id, t.date::text, t.amount::numeric(12,2), COALESCE(t.merchant_name, t.name) AS merchant,
                t.mapped_category AS category, a.name AS account
-        FROM transactions t
+        FROM ${visibleTransactions(ctx.viewer)} t
         JOIN accounts a ON a.id = t.account_id
         WHERE 1=1 ${where}
         ORDER BY t.date DESC
@@ -515,6 +528,7 @@ export async function POST(req: NextRequest) {
     const run = await runAgentLoop(messages, {
       now: new Date(),
       actor: session ? { tokenHash: session.tokenHash, userId: session.userId } : null,
+      viewer: session?.userId ?? null,
       proposals: [],
     });
     // `reply` keeps its place and its meaning, so the web chat is untouched; everything else is

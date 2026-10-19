@@ -2,6 +2,7 @@ import db from './db';
 import { loadYearEnd } from './yearEndRead';
 import { loadMonthOutlook } from './monthOutlookRead';
 import { loadWatchlist } from './watchlistRead';
+import { visibleTransactions } from './giftReadPath';
 import { loadJobHealth } from './jobHealthRead';
 import { loadValuationFindings } from './valuationStalenessRead';
 import { valuationFindingText } from './domain/valuationStaleness';
@@ -71,6 +72,17 @@ function toTxn(r: TxnRow): DigestTxn {
  */
 const LABEL = `COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed')`;
 
+/**
+ * WHO THE DIGEST IS FOR: NOBODY IN PARTICULAR (P7-41b, SPEC.md Open question 3). The mail goes to
+ * one mailbox, `settings.to`, with no rendering per reader, and nothing guarantees that mailbox is
+ * only the giver's. So the digest reads as the `null` viewer, which masks every gift not yet
+ * revealed — for everyone, the owner included even when the owner is the giver. Its row lists
+ * (arrivals, the unfiled sample, the watchlist) come from `visibleTransactions(null)`; its totals
+ * are still summed from `transactions` and are the figures the screen shows.
+ */
+const DIGEST_VIEWER = null;
+const DIGEST_ROWS = visibleTransactions(DIGEST_VIEWER);
+
 /** Tracked accounts only, visible rows only — the filter every figure in this app is built on. */
 const VISIBLE = `JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE`;
 
@@ -98,7 +110,7 @@ export async function loadDigest(now: Date): Promise<DigestData> {
     // history where that cost $2,175 of phantom income.
     db.query<TxnRow>(`
       SELECT t.date::text, ${LABEL} AS label, t.amount::text, t.mapped_category AS category
-        FROM transactions t ${VISIBLE}
+        FROM ${DIGEST_ROWS} t ${VISIBLE}
        WHERE t.mapped_category IS NULL AND t.hidden = FALSE
          AND EXTRACT(YEAR FROM t.date) = $1 AND EXTRACT(MONTH FROM t.date) = $2
        ORDER BY ABS(t.amount) DESC, t.id
@@ -126,14 +138,14 @@ export async function loadDigest(now: Date): Promise<DigestData> {
     // again: the question is "what is new", not "what counts against a budget".
     db.query<TxnRow>(`
       SELECT t.date::text, ${LABEL} AS label, t.amount::text, t.mapped_category AS category
-        FROM transactions t ${VISIBLE}
+        FROM ${DIGEST_ROWS} t ${VISIBLE}
        WHERE t.created_at > $1 AND t.hidden = FALSE
        ORDER BY ABS(t.amount) DESC, t.id
     `, [since.toISOString()]),
 
     // Through the shared reader, so the mail and the dashboard cannot disagree about what is on
     // the list, how it is ordered, or how old an entry is.
-    loadWatchlist(),
+    loadWatchlist(DIGEST_VIEWER),
 
     // Only surfaced when the job has been missing. See DigestData.jobGap.
     loadJobHealth(now),

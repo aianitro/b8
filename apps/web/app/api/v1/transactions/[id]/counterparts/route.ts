@@ -4,6 +4,8 @@ import type { ApiResponse } from '@b8/contracts/types';
 import {
   COUNTERPART_WINDOW_DAYS, isCounterpart, type CounterpartRow,
 } from '@/lib/transferValidation';
+import { giftHeldSql, visibleTransactions } from '@/lib/giftReadPath';
+import { viewerOf } from '@/lib/giftViewer';
 
 /**
  * AN EMPTY LIST MEANT TWO DIFFERENT THINGS and the caller could not tell them apart: "this row is
@@ -38,11 +40,13 @@ interface CounterpartsResult {
  * without a database, and the two cannot disagree because only one of them is allowed to be the
  * answer. The SQL is deliberately the LOOSER of the two.
  */
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const viewer = await viewerOf(req);
 
-  const subject = await db.query<{ amount: string; date: string; transfer_group_id: number | null }>(
-    'SELECT amount::text, date::text, transfer_group_id FROM transactions WHERE id = $1',
+  const subject = await db.query<{ amount: string; date: string; transfer_group_id: number | null; held: boolean }>(
+    `SELECT t.amount::text, t.date::text, t.transfer_group_id, ${giftHeldSql('t')} AS held
+       FROM transactions t WHERE t.id = $1`,
     [id]
   );
   const me = subject.rows[0];
@@ -60,6 +64,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     );
   }
 
+  // NO PAIRING OFFER FOR A ROW A GIFT HOLDS (P7-41b). Pairing is refused for it until the reveal, so
+  // offering a counterpart would offer a button that cannot work — and the offer itself would name
+  // other rows of the same amount around a date, a hint about what the row was.
+  if (me.held) {
+    return Response.json(
+      { success: true, data: { paired: false, candidates: [] } } satisfies ApiResponse<CounterpartsResult>
+    );
+  }
+
   const amount = Number(me.amount);
   const { rows } = await db.query<{
     id: number; date: string; label: string; amount: string;
@@ -68,9 +81,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     SELECT t.id, t.date::text, t.amount::text, t.transfer_group_id,
            COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label,
            a.name AS account
-      FROM transactions t
+      FROM ${visibleTransactions(viewer)} t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
      WHERE t.id <> $1
+       -- A held row cannot be the other side either; it is not offered, masked or not.
+       AND NOT ${giftHeldSql('t')}
        AND t.hidden = FALSE
        AND t.transfer_group_id IS NULL
        AND ABS(t.amount + $2::numeric) <= 0.01

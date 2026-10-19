@@ -1158,3 +1158,100 @@ CREATE TABLE IF NOT EXISTS device_handoffs (
 
 CREATE INDEX IF NOT EXISTS device_handoffs_unclaimed
   ON device_handoffs (expires_at) WHERE claimed_at IS NULL;
+
+-- ══ Gifts between the two people (migration 1792400000000, P7-41b) ═══════════════════════════
+--
+-- Placed after the authentication section because gifts reference users. Three tables, and no
+-- existing column changed: a gift row's mapped_category means what it means on any other row, so
+-- totals, budgets, year-end and P/L sum it exactly as if it had been filed by hand. Masking is a
+-- question about who is looking, which no transactions column can answer, so it lives on the link
+-- and the reveal date — never on mapped_category, hidden, or a stored "masked" flag.
+--
+-- THE MASKING PREDICATE, stated once. A transaction t is masked for viewer V exactly when
+--
+--     EXISTS (SELECT 1 FROM gift_transactions gt JOIN gifts g ON g.id = gt.gift_id
+--              WHERE gt.transaction_id = t.id
+--                AND g.reveal_date > CURRENT_DATE
+--                AND g.giver_user_id IS DISTINCT FROM V)
+--
+-- evaluated by Postgres on its own calendar in the statement that reads the row; reveal is inclusive.
+-- IS DISTINCT FROM makes a NULL viewer a non-giver, so the predicate fails closed with no special
+-- case. Gift state is not a conjunct: a link row exists only while its gift holds the row.
+
+-- Which category a matched gift is filed in. One row, ever (singleton PK + CHECK). By id, never by
+-- name, so a rename does not break matching; a match is filed under the category's name at match
+-- time. NULL = no category designated, and creating a gift is refused (GIFT_CATEGORY_UNSET). ON
+-- DELETE SET NULL so a category delete behaves exactly as before; rows already linked stay linked and
+-- masked where they are. Seeded once by the migration from the operational category of the owner's
+-- gift name, NULL on a database without it; never designated by any route or UI.
+CREATE TABLE IF NOT EXISTS gift_settings (
+  singleton    BOOLEAN PRIMARY KEY DEFAULT TRUE
+                 CONSTRAINT gift_settings_singleton CHECK (singleton),
+  category_id  INTEGER REFERENCES budget_categories(id) ON DELETE SET NULL
+);
+
+-- One purchase marked in advance for the other person. Criteria are never edited (cancel and
+-- re-create). NULL on any criterion means ANY, never 0 and never '': a 0 amount would match nothing
+-- and a '' merchant would match everything, so both are refused here.
+--   amount     — exact price, positive magnitude, NUMERIC(12,2) like transactions.amount; matched by
+--                exact decimal equality against rows with amount > 0 only (money out). Never negated.
+--   merchant   — case-insensitive LITERAL substring of merchant_name, or of name when merchant_name
+--                is NULL. Stored trimmed (the CHECK refuses an untrimmed value; \x0B is vertical
+--                tab), 3 to 200 characters.
+--   account_id — narrows matching to one account. ON UPDATE CASCADE (reconciliation remaps ids in
+--                place); no ON DELETE action, since SET NULL would widen "this card" to "any card".
+--                That the account has a Plaid access token is the route's check at creation.
+--   window_start / window_end — inclusive calendar DATEs on the server's calendar.
+--   reveal_date — revealed when reveal_date <= CURRENT_DATE (Postgres, never a JS clock); not before
+--                the window opens.
+--   state      — awaiting (matching live) · choose (two or more candidates, all linked, filed and
+--                masked until the giver picks; later arrivals added) · matched (final) · unmatched
+--                (giver told nothing matched; no row linked) · cancelled (rows restored, unlinked).
+--   notice_at  — when the giver was told; NULL = NOT TOLD (knowledge, as auth_sessions.revoked_at).
+--                Set once by the daily sweep. 'unmatched' requires it.
+--   created_at — also the tie-break when two gifts compete for one row: earlier gift, then lower id.
+CREATE TABLE IF NOT EXISTS gifts (
+  id                 SERIAL PRIMARY KEY,
+  giver_user_id      INTEGER NOT NULL REFERENCES users(id),   -- no ON DELETE: users rows are never deleted
+  recipient_user_id  INTEGER NOT NULL REFERENCES users(id),
+  amount             NUMERIC(12, 2)
+                       CONSTRAINT gifts_amount_positive CHECK (amount IS NULL OR amount > 0),
+  merchant           TEXT
+                       CONSTRAINT gifts_merchant_criterion CHECK (
+                         merchant IS NULL
+                         OR (merchant = btrim(merchant, E' \t\n\r\f\x0B')
+                             AND char_length(merchant) BETWEEN 3 AND 200)),
+  account_id         TEXT REFERENCES accounts(id) ON UPDATE CASCADE,
+  window_start       DATE NOT NULL,
+  window_end         DATE NOT NULL,
+  reveal_date        DATE NOT NULL,
+  state              TEXT NOT NULL DEFAULT 'awaiting'
+                       CONSTRAINT gifts_state_check
+                         CHECK (state IN ('awaiting', 'choose', 'matched', 'unmatched', 'cancelled')),
+  notice_at          TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT gifts_giver_not_recipient CHECK (giver_user_id <> recipient_user_id),
+  CONSTRAINT gifts_has_criterion CHECK (amount IS NOT NULL OR merchant IS NOT NULL),
+  CONSTRAINT gifts_window_ordered CHECK (window_start <= window_end),
+  CONSTRAINT gifts_reveal_not_before_window CHECK (reveal_date >= window_start),
+  CONSTRAINT gifts_unmatched_was_told CHECK (state <> 'unmatched' OR notice_at IS NOT NULL)
+);
+
+-- Which ledger rows a gift holds RIGHT NOW: its matched row, or each candidate while 'choose'. A
+-- rejected candidate, a released row and an expired gift's candidates are restored from the two
+-- prior_ columns and unlinked in one transaction. Keyed on transactions.id, which neither
+-- re-identification nor the re-key script ever changes (a Plaid-id key would break at both).
+-- transaction_id is the PRIMARY KEY: one row, one gift, and a LEFT JOIN cannot duplicate a row or
+-- inflate a sum. ON DELETE CASCADE from transactions, so a Plaid removal leaves no dangling link and
+-- raises no error. prior_mapped_category NULL is a real value (the row was uncategorised) and
+-- restores to NULL. prior_rule_applied has no DEFAULT: the linker read it. While linked, the row
+-- itself holds rule_applied = FALSE so rule writes skip it.
+CREATE TABLE IF NOT EXISTS gift_transactions (
+  transaction_id         INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
+  gift_id                INTEGER NOT NULL REFERENCES gifts(id),  -- no ON DELETE: gifts are never deleted
+  prior_mapped_category  TEXT,
+  prior_rule_applied     BOOLEAN NOT NULL,
+  linked_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS gift_transactions_gift ON gift_transactions (gift_id);

@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import type { ApiResponse } from '@b8/contracts/types';
+import { viewerOf } from '@/lib/giftViewer';
+import { giftLockedResponse, giftLockSql, lockedFor } from '@/lib/giftLock';
 import {
   isValidTransferIds,
   invalidTransferIdsError,
@@ -24,6 +26,12 @@ export async function POST(req: NextRequest) {
 
   if (!isValidTransferIds(ids)) return errorResponse(invalidTransferIdsError);
 
+  // A row a gift holds cannot be paired (P7-41b): pairing re-files it as Transfer, out of the gift
+  // category, which nobody may do before the reveal. Refused before anything is validated against it,
+  // with the locked refusal, so the answer says nothing about the row's amount or group.
+  const viewer = await viewerOf(req);
+  if (await lockedFor(ids, 'transfer', viewer)) return giftLockedResponse();
+
   const rows = await db.query<{ id: number; amount: string; transfer_group_id: number | null }>(
     'SELECT id, amount, transfer_group_id FROM transactions WHERE id = ANY($1)',
     [ids]
@@ -35,7 +43,8 @@ export async function POST(req: NextRequest) {
   const group = await db.query<{ id: number }>('INSERT INTO transfer_groups DEFAULT VALUES RETURNING id');
   const groupId = group.rows[0].id;
   await db.query(
-    `UPDATE transactions SET transfer_group_id = $1, mapped_category = 'Transfer' WHERE id = ANY($2)`,
+    `UPDATE transactions SET transfer_group_id = $1, mapped_category = 'Transfer'
+      WHERE id = ANY($2) AND NOT ${giftLockSql('transactions', 'transfer', viewer)}`,
     [groupId, ids]
   );
 
@@ -45,6 +54,11 @@ export async function POST(req: NextRequest) {
 // Unlink a transfer group — clears every member, given any one member's id
 export async function DELETE(req: NextRequest) {
   const { id } = await req.json();
+
+  // Unlinking touches every member of the group; a held row is never in one (pairing refuses it), but
+  // the lock is asked anyway so this route cannot be the way around it.
+  const viewer = await viewerOf(req);
+  if (await lockedFor([Number(id)], 'transfer', viewer)) return giftLockedResponse();
 
   const group = await db.query<{ transfer_group_id: number | null }>(
     'SELECT transfer_group_id FROM transactions WHERE id = $1',

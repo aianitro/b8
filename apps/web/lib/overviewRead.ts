@@ -53,6 +53,7 @@ import { loadFeedHealth } from './feedHealthRead';
 import { loadMonthOutlook } from './monthOutlookRead';
 import { loadYearEnd, type YearEndRead } from './yearEndRead';
 import { MONTHS } from './drilldown';
+import { visibleTransactions, type GiftViewer } from './giftReadPath';
 import type { Assert, Equals } from '@b8/contracts/exact';
 import type { OverviewData } from '@b8/contracts/overview';
 
@@ -669,7 +670,7 @@ async function readStats(asOf: AsOf): Promise<OverviewSources['stats']> {
  * budget". Only `hidden = FALSE` applies. Copying the other sections' predicate onto it by
  * resemblance is one of the failure modes this endpoint was specified to avoid.
  */
-async function readRecentArrivals(): Promise<{
+async function readRecentArrivals(viewer: GiftViewer): Promise<{
   rows: OverviewSources['recentArrivals'];
   total: number;
 }> {
@@ -692,7 +693,7 @@ async function readRecentArrivals(): Promise<{
            (t.watched_at IS NOT NULL) AS watched,
            t.note,
            COUNT(*) OVER ()::text AS total
-      FROM transactions t
+      FROM ${visibleTransactions(viewer)} t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
      WHERE t.created_at > NOW() - INTERVAL '36 hours'
        AND t.hidden = FALSE
@@ -712,7 +713,7 @@ async function readRecentArrivals(): Promise<{
 }
 
 /** Today, against the same weekday's recent average — rendered by the dashboard and served by the API. */
-async function readToday(): Promise<OverviewSources['today']> {
+async function readToday(viewer: GiftViewer): Promise<OverviewSources['today']> {
   const [todayResult, avgResult, txnsResult] = await Promise.all([
     db.query<{ spent: string }>(`
       SELECT COALESCE(SUM(t.amount) FILTER (WHERE t.amount > 0), 0)::text AS spent
@@ -750,7 +751,7 @@ async function readToday(): Promise<OverviewSources['today']> {
     `),
     db.query<{ name: string | null; merchant_name: string | null; amount: string; total_count: string }>(`
       SELECT t.name, t.merchant_name, t.amount::text, COUNT(*) OVER()::text AS total_count
-      FROM transactions t
+      FROM ${visibleTransactions(viewer)} t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
       WHERE t.date = CURRENT_DATE AND t.hidden = FALSE AND t.amount > 0
       ORDER BY t.amount DESC
@@ -834,7 +835,7 @@ async function readWeek(): Promise<OverviewSources['week']> {
  * than a glance, and the row worth filing first is the one carrying the most money, whenever it
  * happened to land. `t.id` breaks ties so the order is total and a re-read cannot reshuffle.
  */
-async function readUncategorized(): Promise<OverviewSources['uncategorized']> {
+async function readUncategorized(viewer: GiftViewer): Promise<OverviewSources['uncategorized']> {
   const { rows } = await db.query<{
     id: number; date: string; amount: string; label: string; merchant: string | null;
     watched: boolean; note: string | null;
@@ -844,7 +845,7 @@ async function readUncategorized(): Promise<OverviewSources['uncategorized']> {
            NULLIF(t.merchant_name, '') AS merchant,
            (t.watched_at IS NOT NULL) AS watched,
            t.note
-      FROM transactions t
+      FROM ${visibleTransactions(viewer)} t
       JOIN accounts a ON a.id = t.account_id AND a.track_transactions = TRUE
      WHERE t.mapped_category IS NULL AND t.hidden = FALSE
      ORDER BY t.amount DESC, t.id
@@ -981,11 +982,17 @@ export async function loadMonthCategories(asOf: AsOf) {
  * different directions. `data.asOf` and `data.monthOutlook.asOf` are the same value for this reason,
  * and the fixtures assert it.
  *
+ * WHO IS LOOKING (P7-41b). `viewer` decides only what the row lists show — arrivals, today's top
+ * three, the unfiled sample and the watchlist read through `visibleTransactions(viewer)`, so a gift
+ * held for this viewer is `Gift` and nothing else. Every figure is still summed from `transactions`
+ * itself and is the same for every viewer. Not optional, and not defaulted: a caller that does not
+ * know who is looking passes `null` and gets the masked lists.
+ *
  * The four shared readers are CALLED, not reimplemented. `findBalanceDrift` and `loadFeedHealth` are
  * kicked off first and awaited last, matching the page: neither feeds anything else, so making them
  * serial would add a round trip to every request for no ordering benefit.
  */
-export async function loadOverview(now: Date = new Date()): Promise<OverviewData> {
+export async function loadOverview(viewer: GiftViewer, now: Date = new Date()): Promise<OverviewData> {
   const asOf = asOfFromDate(now);
 
   const driftPromise = findBalanceDrift();
@@ -996,12 +1003,12 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
     await Promise.all([
       readStats(asOf),
       loadMonthOutlook(asOf),
-      readToday(),
+      readToday(viewer),
       readWeek(),
       readMonthlySpending(asOf),
       readBudgetVsActual(asOf),
-      readRecentArrivals(),
-      readUncategorized(),
+      readRecentArrivals(viewer),
+      readUncategorized(viewer),
       // Operational, matching the dashboard and /budget's default tab. The capital year is lumpy by
       // construction — a remodel draws $40,000 in one month — and averaging it in would give a P/L
       // nobody is steering by.
@@ -1009,7 +1016,7 @@ export async function loadOverview(now: Date = new Date()): Promise<OverviewData
     ]);
 
   const [driftFindings, feedHealth, watchlist, jobHealth, wallets] = await Promise.all([
-    driftPromise, feedPromise, loadWatchlist(), loadJobHealth(now), walletStatuses(),
+    driftPromise, feedPromise, loadWatchlist(viewer), loadJobHealth(now), walletStatuses(),
   ]);
 
   return composeOverview({

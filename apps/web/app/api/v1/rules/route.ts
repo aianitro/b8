@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import db from '@/lib/db';
 import type { ApiResponse } from '@b8/contracts/types';
+import { giftLinkedSql } from '@/lib/giftReadPath';
 
 /**
  * Create or replace a rule, of either kind, and report what it changed behind it.
@@ -15,6 +16,13 @@ import type { ApiResponse } from '@b8/contracts/types';
  * MANUAL FILING IS NEVER OVERWRITTEN. The WHERE below touches rows that are unfiled or were filed
  * by a rule, and leaves `rule_applied = FALSE` alone — the same guarantee `/rules/apply` gives, and
  * the reason the owner's 114 hand-corrections survived the rule that caused them.
+ *
+ * A ROW A GIFT HOLDS IS NEVER RE-FILED, AND NEVER COUNTED (P7-41b). Its category is the gift's, and
+ * `rule_applied = FALSE` already keeps it out of the WHERE below; the explicit `NOT linked` says so
+ * outright, and also covers the one case the flag does not — a held row left uncategorised because
+ * the gift category had been deleted. Because the row is never touched, `refiled` cannot count it,
+ * so a merchant rule for a gift's merchant answers exactly what a rule for an unseen merchant answers
+ * — the count is not a way to learn what a masked row was.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -54,6 +62,7 @@ export async function POST(req: NextRequest) {
           WHERE LOWER(TRIM(merchant_name)) = LOWER($1)
             AND (mapped_category IS NULL OR rule_applied = TRUE)
             AND mapped_category IS DISTINCT FROM $2
+            AND NOT ${giftLinkedSql('transactions')}
           RETURNING id
        ) SELECT COUNT(*)::text AS count FROM updated`,
       [name, mapped]
@@ -76,6 +85,7 @@ export async function POST(req: NextRequest) {
         WHERE plaid_category = $1
           AND (mapped_category IS NULL OR rule_applied = TRUE)
           AND mapped_category IS DISTINCT FROM $2
+          AND NOT ${giftLinkedSql('transactions')}
         RETURNING id
      ) SELECT COUNT(*)::text AS count FROM updated`,
     [category, mapped]

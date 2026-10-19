@@ -1,4 +1,5 @@
 import db from './db';
+import { visibleTransactions } from './giftReadPath';
 import { createLogger } from './logger';
 import { stepEpisodes, stepForecasts, watchedBalance, type CashObservation, type WatchSettings } from './domain/overdraft';
 import { detectCashSeries, projectBalance, type CashProjection, type CashTxn } from './domain/cashForecast';
@@ -124,8 +125,14 @@ async function project(
   const out = new Map<string, CashProjection>();
   if (balances.size === 0) return out;
   const { rows } = await db.query<{ account_id: string; date: string; amount: string; label: string }>(
-    `SELECT account_id, date::text, amount::text, COALESCE(NULLIF(merchant_name, ''), name, '') AS label
-       FROM transactions WHERE account_id = ANY($1) AND date > $2::date - ${HISTORY_DAYS} AND date <= $2::date`,
+    // No gift row, for any viewer (P7-41b): the charges found here are STORED in
+    // `overdraft_forecasts.charges` with their labels and shown to whoever opens the dashboard, so a
+    // gift's real merchant must never become one. `visibleTransactions(null)` masks every unrevealed
+    // gift and `gift_masked` drops exactly those rows from the history.
+    `SELECT t.account_id, t.date::text, t.amount::text, COALESCE(NULLIF(t.merchant_name, ''), t.name, '') AS label
+       FROM ${visibleTransactions(null)} t
+      WHERE t.account_id = ANY($1) AND t.date > $2::date - ${HISTORY_DAYS} AND t.date <= $2::date
+        AND NOT t.gift_masked`,
     [[...balances.keys()], today]);
   const byAccount = new Map<string, CashTxn[]>();
   for (const r of rows) byAccount.set(r.account_id, [...(byAccount.get(r.account_id) ?? []), { date: r.date, amount: Number(r.amount), label: r.label }]);

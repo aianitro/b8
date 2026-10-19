@@ -8,6 +8,8 @@ import CategoryNameEdit from '@/components/CategoryNameEdit';
 import CategoryMonthlyBudget from '@/components/CategoryMonthlyBudget';
 import CategorySelect from '@/components/CategorySelect';
 import type { BudgetCategory } from '@b8/contracts/types';
+import { visibleTransactions } from '@/lib/giftReadPath';
+import { pageViewer } from '@/lib/giftViewer';
 
 const fmtAbs = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Math.abs(n));
@@ -48,6 +50,9 @@ export default async function CategoryStatementPage({
   const { name: rawName } = await params;
   const name = decodeURIComponent(rawName);
   const year = new Date().getFullYear();
+  // Who is looking (P7-41b): the ledger below lists a gift held for someone else as `Gift`. Amounts
+  // are not masked, so the running totals are the same for every viewer.
+  const viewer = await pageViewer(`/categories/${rawName}`);
   const currentMonth = new Date().getMonth(); // 0-indexed
 
   const [categoryRes, balanceRes, txRes, categoriesRes] = await Promise.all([
@@ -65,7 +70,7 @@ export default async function CategoryStatementPage({
     db.query<TxRow>(
       `SELECT t.id, t.date::text, t.amount::text, t.name, t.merchant_name,
               a.name AS account_name, a.landscape AS account_landscape
-       FROM transactions t
+       FROM ${visibleTransactions(viewer)} t
        JOIN accounts a ON a.id = t.account_id
        WHERE t.mapped_category = $1 AND EXTRACT(YEAR FROM t.date) = $2 AND a.track_transactions = TRUE
        ORDER BY t.date ASC, t.id ASC`,
