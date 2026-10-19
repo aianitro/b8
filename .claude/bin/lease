@@ -3,7 +3,7 @@
 #
 # The lease IS the contract-freeze protocol (BUILD.md §6), made mechanical. The orchestrator
 # opens it immediately before dispatching contract-guardian and closes it the moment G1
-# passes. Outside that window, shared/types.ts, shared/contracts/**, migrations/** and
+# passes. Outside that window, packages/contracts/**, migrations/** and
 # db/schema.sql are frozen for every agent — the guardian included.
 #
 #   .claude/bin/lease open <task-id>   # begin the G1 window

@@ -94,7 +94,8 @@ or `ESCALATED` when the cycle counter hits 3.
 
 ## Holds — things blocking a dispatch, recorded rather than carried in someone's head
 
-**H8 — OPEN 2026-10-07: the scope-guard hook protects a path that no longer exists.**
+**H8 — RESOLVED 2026-10-19 (P-maint-H4-H8): the scope-guard hook now protects `packages/contracts/**`.** Proven by command first: with the tests repointed at the real paths, the old hook failed 6 of them (Edit and shell writes to `packages/contracts/` allowed with the lease closed). `CONTRACT_PREFIXES` is now `packages/contracts/` + `migrations/`, `CONTRACT_FILES` is `db/schema.sql`; the test carve-out still applies; a lookalike-path false-positive test was added (A3). 42/42 hook tests. Agent definitions, `.claude/bin/lease` and BUILD.md §2/§5 name the new paths. Original entry:
+**H8 — was OPEN 2026-10-07: the scope-guard hook protects a path that no longer exists.**
 `.claude/hooks/scope-guard.mjs` guards `shared/contracts/` (CONTRACT_PREFIXES), but the contracts
 moved to `packages/contracts/` in P1-10a. So BUILD.md I2's single-writer rule is enforced for
 `migrations/` and `db/schema.sql` but not for the contract package. Hook changes need a
@@ -122,7 +123,8 @@ sync should sanitise base columns too.
 same migration's `transactions.property_id` was fixed under P6-40b's G1 (#10 compares only
 `transactions`). A one-file doc-drift fix for the guardian; blocks nothing.
 
-**H4 — OPEN 2026-10-07: the integration suite fails 2 tests on a freshly migrated scratch DB.**
+**H4 — RESOLVED 2026-10-19 (P-maint-H4-H8): both tests were stale, neither was a regression.** Causes established by command: (1) `proxy.test.ts`'s asset loop expected 401 for `/<asset>/anything`, a PAGE path, which `proxy.ts`'s two-shape rule (in place since 09-21, a day before the loop was written on 09-22) answers with 307 to /login — the loop never passed; it now asserts the redirect, and the assertions after it run for the first time and pass. (2) the overview test listed 14 sections; `OverviewDataSchema` defines 17, three added 09-21/09-22/09-29. Full integration suite on a fresh DB, twice: 236 tests, 0 failed. Future gates' KNOWN list is just RC-03 (H9). Original entry:
+**H4 — was OPEN 2026-10-07: the integration suite fails 2 tests on a freshly migrated scratch DB.**
 `proxy.test.ts` ("the pre-auth ceremony endpoints remain reachable with no session cookie at all":
 307 where 401 is expected) and `app/api/v1/overview/route.test.ts` ("the response validates end to
 end…": the payload's key list grew from 12 to 15 without the test following). Neither suite runs in

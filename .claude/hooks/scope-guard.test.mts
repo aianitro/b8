@@ -112,7 +112,12 @@ describe('generated output', () => {
 });
 
 describe('contract surface', () => {
-  it.each(['shared/types.ts', 'db/schema.sql', 'shared/contracts/account.ts'])(
+  it.each([
+    'db/schema.sql',
+    'packages/contracts/overview.ts',
+    'packages/contracts/index.ts',
+    'packages/contracts/package.json',
+  ])(
     'blocks Edit of %s with no lease open',
     (file) => {
       expect(edit(file)).toBe(2);
@@ -121,12 +126,12 @@ describe('contract surface', () => {
 
   it('allows the same edits while the lease is open', () => {
     openLease();
-    expect(edit('shared/types.ts')).toBe(0);
+    expect(edit('packages/contracts/overview.ts')).toBe(0);
     expect(edit('db/schema.sql')).toBe(0);
   });
 
   it('blocks a shell write to the contract surface with no lease', () => {
-    expect(bash("sed -i '' 's/foo/bar/' shared/types.ts")).toBe(2);
+    expect(bash("sed -i '' 's/foo/bar/' packages/contracts/overview.ts")).toBe(2);
     expect(bash('echo "ALTER TABLE accounts;" >> db/schema.sql')).toBe(2);
   });
 
@@ -136,19 +141,29 @@ describe('contract surface', () => {
   // implementation exactly as §7.2 demands, made the natural home for a contract's tests
   // unwritable by the only role allowed to write tests, and G2 was unreachable.
   it('still blocks a contract MODULE under the surface with no lease (true positive)', () => {
-    expect(edit('shared/contracts/shapes.ts')).toBe(2);
-    expect(bash('printf x >> shared/contracts/shapes.ts')).toBe(2);
+    expect(edit('packages/contracts/shapes.ts')).toBe(2);
+    expect(bash('printf x >> packages/contracts/shapes.ts')).toBe(2);
   });
 
   it('allows a contract TEST under the surface with no lease (false positive fixed)', () => {
-    expect(edit('shared/contracts/shapes.test.ts')).toBe(0);
-    expect(bash('printf x >> shared/contracts/shapes.test.ts')).toBe(0);
+    expect(edit('packages/contracts/shapes.test.ts')).toBe(0);
+    expect(bash('printf x >> packages/contracts/shapes.test.ts')).toBe(0);
   });
 
   // The carve-out is a lookahead on the path, not a licence for the whole command: writing a real
   // contract file stays blocked even when the same command also names a test path.
   it('blocks a real contract write that merely mentions a test path alongside it', () => {
-    expect(bash('printf x >> shared/contracts/shapes.ts; echo shared/contracts/ok.test.ts')).toBe(2);
+    expect(bash('printf x >> packages/contracts/shapes.ts; echo packages/contracts/ok.test.ts')).toBe(2);
+  });
+
+  // H8 (plan/QUEUE.md): the contracts moved from `shared/contracts/` to `packages/contracts/` in
+  // P1-10a and this guard kept protecting the old, empty path for weeks, so the frozen contract
+  // package had no mechanical protection through P7-41a and P7-41b. The true positive above is the
+  // regression; these false positives keep the fix from over-reaching.
+  it('does not treat a lookalike path outside the contract package as contract', () => {
+    expect(edit('apps/web/lib/contractsHelper.ts')).toBe(0);
+    expect(edit('docs/packages/contracts/notes.md')).toBe(0);
+    expect(edit('packages/contracts-legacy/old.ts')).toBe(0);
   });
 
   it('blocks creating a migration outside the G1 window', () => {
@@ -162,7 +177,9 @@ describe('contract surface', () => {
 
   // The reviewer and the orchestrator read these files constantly at every gate.
   it('allows reading the contract surface with no lease', () => {
-    expect(bash('cat shared/types.ts')).toBe(0);
+    expect(bash('cat packages/contracts/overview.ts')).toBe(0);
+    expect(bash('grep -rn "strictObject" packages/contracts/ 2>/dev/null')).toBe(0);
+    expect(bash('shasum -a 256 packages/contracts/gifts.ts packages/contracts/index.ts')).toBe(0);
     expect(bash('grep -rn "valuation_mode" migrations/ 2>/dev/null')).toBe(0);
     expect(bash('git diff --stat -- db/schema.sql')).toBe(0);
   });
@@ -259,7 +276,7 @@ describe('heredoc bodies are data, not commands', () => {
   // FALSE POSITIVES — the defect. A document that merely quotes a command is not that command.
   it('allows writing a document that mentions destructive commands', () => {
     expect(bash(doc('To clear a stale build cache, run `rm -rf .next`.'))).toBe(0);
-    expect(bash(doc('Never run `sed -i s/a/b/ shared/types.ts` by hand.'))).toBe(0);
+    expect(bash(doc('Never run `sed -i s/a/b/ packages/contracts/overview.ts` by hand.'))).toBe(0);
     expect(bash(doc('The baseline is migrations/1786029579465_baseline-schema.sql — do not edit it.'))).toBe(0);
     expect(bash(doc('Regenerate with `npm ci`, which rewrites package-lock.json.'))).toBe(0);
   });
@@ -270,20 +287,20 @@ describe('heredoc bodies are data, not commands', () => {
 
   it('allows a multi-line heredoc whose body names every protected path', () => {
     expect(
-      bash(doc('rm migrations/x.sql\nsed -i "" s/a/b/ db/schema.sql\necho hi > shared/types.ts')),
+      bash(doc('rm migrations/x.sql\nsed -i "" s/a/b/ db/schema.sql\necho hi > packages/contracts/index.ts')),
     ).toBe(0);
   });
 
   // TRUE POSITIVES — stripping the body must not blind the guard to the redirect that opens it.
   // The `>` sits BEFORE the `<<`, so it survives and must still be caught.
   it('still blocks a heredoc written INTO a protected path', () => {
-    expect(bash("cat > shared/types.ts <<'EOF'\nexport type X = 1;\nEOF")).toBe(2);
+    expect(bash("cat > packages/contracts/overview.ts <<'EOF'\nexport type X = 1;\nEOF")).toBe(2);
     expect(bash("cat > db/schema.sql <<'EOF'\nCREATE TABLE x ();\nEOF")).toBe(2);
     expect(bash("cat >> package-lock.json <<'EOF'\n{}\nEOF")).toBe(2);
   });
 
   it('still blocks a real mutation that appears after a heredoc ends', () => {
-    expect(bash("cat > notes.md <<'EOF'\nharmless text\nEOF\nsed -i '' s/a/b/ shared/types.ts")).toBe(2);
+    expect(bash("cat > notes.md <<'EOF'\nharmless text\nEOF\nsed -i '' s/a/b/ packages/contracts/overview.ts")).toBe(2);
   });
 });
 
@@ -299,7 +316,7 @@ describe('deleting generated output is allowed; deleting the contract surface is
   // TRUE POSITIVE — deletion here destroys history that exists nowhere else.
   it('still blocks removing the contract surface with no lease', () => {
     expect(bash('rm migrations/1786029579465_baseline-schema.sql')).toBe(2);
-    expect(bash('rm -rf shared/contracts')).toBe(2);
+    expect(bash('rm -rf packages/contracts')).toBe(2);
     expect(bash('rm db/schema.sql')).toBe(2);
   });
 

@@ -19,8 +19,8 @@ dirty.
 
 ## Contracts are read-only inputs
 
-Import types from `shared/types.ts`. Never define a local shape for something the shared type
-already describes, and never widen one at the call site.
+Import types from `@b8/contracts/*` (`packages/contracts/`). Never define a local shape for something
+a shared type already describes, and never widen one at the call site.
 
 **If a type or a column is wrong, STOP and report it.** Do not work around it locally. A local
 workaround is exactly how this codebase got two independent "pick the latest valuation"
@@ -28,7 +28,7 @@ reducers. The orchestrator will unfreeze contracts, route the fix to contract-gu
 restart implementation from a known-good interface. Restarting is cheap; a divergent local
 shape is not.
 
-A `PreToolUse` hook blocks writes to `shared/types.ts`, `shared/contracts/**`, `migrations/**`
+A `PreToolUse` hook blocks writes to `packages/contracts/**` (test files excepted), `migrations/**`
 and `db/schema.sql`. If you hit it, that is the architecture working — report the flaw upward.
 
 ## Rules

@@ -210,9 +210,14 @@ describe('the request boundary', () => {
 
     // THE NEW ONES CARRY NOTHING. Asserted rather than described, so a future edit that points one
     // of these at something privileged fails here.
+    // An extension of an asset path is a PAGE request, so it is refused the way every page is: a
+    // redirect to /login, not a 401 (proxy.ts, "TWO SHAPES, ONE DECISION"). This loop expected 401
+    // from the day it was written, a day after that rule existed, and never ran in CI (H4).
     for (const asset of ['/manifest.webmanifest', '/apple-icon.png', '/icon-192.png', '/sw.js', '/offline']) {
       expect(PRE_AUTH_PATHS.has(asset)).toBe(true);
-      expect((await proxy(requestFor(`${asset}/anything`))).status).toBe(401);
+      const extended = await proxy(requestFor(`${asset}/anything`));
+      expect({ asset, through: letsThrough(extended), status: extended.status }).toEqual({ asset, through: false, status: 307 });
+      expect(getRedirectUrl(extended)).toBe(`${ORIGIN}/login`);
     }
     expect((await proxy(requestFor('/api/v1/auth/logout'))).status).toBe(401);
     // Nor does a path that merely extends an allowlisted one.

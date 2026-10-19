@@ -138,12 +138,14 @@ describe('GET /api/v1/overview, against a seeded scratch database', () => {
     const parsed = OverviewResponseSchema.parse(body);
     expect(parsed.success).toBe(true);
 
-    // Fourteen sections, all present, none optional. Eleven at P1-11; P1-11a added
-    // `monthCategories`, `watchlist` and `jobHealth`, which the dashboard could not be fed without.
+    // Seventeen sections, all present, none optional. Eleven at P1-11; P1-11a added
+    // `monthCategories`, `watchlist` and `jobHealth`, which the dashboard could not be fed without;
+    // then `uncategorized` (2026-09-21), `recentArrivalsTotal` (09-22) and `walletFindings` (09-29)
+    // joined the contract without this list following, because this suite does not run in CI (H4).
     expect(Object.keys(payload).sort()).toEqual([
       'asOf', 'budgetVsActual', 'driftFindings', 'feedHealth', 'jobHealth', 'monthCategories',
-      'monthOutlook', 'monthlySpending', 'recentArrivals', 'stats', 'today', 'watchlist', 'week',
-      'yearEnd',
+      'monthOutlook', 'monthlySpending', 'recentArrivals', 'recentArrivalsTotal', 'stats', 'today',
+      'uncategorized', 'walletFindings', 'watchlist', 'week', 'yearEnd',
     ].sort());
 
     // The one clock read, reaching both places that state it.

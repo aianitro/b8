@@ -4,7 +4,7 @@
 // A `tools:` allowlist in an agent definition grants TOOLS, not PATHS. `tools: Read, Edit`
 // lets contract-guardian edit *any* file in the repo; "contract surface only" is a prompt
 // instruction, and prompt instructions are not enforcement. Nothing in the tool grant stops
-// the implementer from editing `migrations/` or `shared/types.ts` either. This hook closes
+// the implementer from editing `migrations/` or `packages/contracts/` either. This hook closes
 // both holes at the filesystem level.
 //
 // Rules (BUILD.md §13.2):
@@ -13,8 +13,7 @@
 //                               (.next/**, next-env.d.ts, tsconfig.tsbuildinfo,
 //                                package-lock.json, node_modules/**)
 //   2. Contract surface         Writable only while a contract lease is open — the G1 window.
-//                               (shared/types.ts, shared/contracts/**, migrations/**,
-//                                db/schema.sql)
+//                               (packages/contracts/**, migrations/**, db/schema.sql)
 //   3. Committed migrations     Immutable, lease or no lease. A migration that is tracked in
 //                               git may already have been applied somewhere; editing it makes
 //                               `migrate:up` on a fresh database produce a different schema
@@ -60,15 +59,22 @@ const GENERATED_FILES = [
 
 // The contract surface: the type shapes and the database schema that every route, component,
 // and query in the app agrees on. Single-writer per BUILD.md I2.
-const CONTRACT_PREFIXES = ['shared/contracts/', 'migrations/'];
-const CONTRACT_FILES = ['shared/types.ts', 'db/schema.sql'];
+//
+// `packages/contracts/` since H8 (plan/QUEUE.md): the zod contracts moved there from
+// `shared/contracts/` in P1-10a, and `shared/types.ts` went with them, but this list kept naming
+// the old paths — so for weeks the contract package had no guard while `migrations/` and
+// `db/schema.sql` did, and G2 had to stand in with digests. The trailing slash keeps an Edit of a
+// lookalike such as `packages/contracts-legacy/` out; the shell route is deliberately broader (see
+// TEST_EXEMPT_LOOKAHEAD below).
+const CONTRACT_PREFIXES = ['packages/contracts/', 'migrations/'];
+const CONTRACT_FILES = ['db/schema.sql'];
 
 // A test file under the contract surface is NOT contract, and the lease must not cover it.
 //
 // The surface is single-writer because a shape every route, component and query agrees on must
 // not fork. A test that validates one of those shapes cannot fork it — it has no consumers — and
 // its writer is the implementer, per the roster. `vitest.config.mts` already expects tests beside
-// the module they check (`shared/**/*.test.ts`), which is this repo's convention without
+// the module they check (`packages/contracts/**/*.test.ts`), which is this repo's convention without
 // exception: every test in lib/ and lib/domain/ sits next to its module.
 //
 // Without this carve-out the guard produced a false positive that deadlocked the documented
@@ -80,11 +86,11 @@ const CONTRACT_FILES = ['shared/types.ts', 'db/schema.sql'];
 const isTestFile = (rel) => /\.test\.m?tsx?$/.test(rel);
 
 // The Bash route sees a command string rather than a resolved path, so the same carve-out is a
-// negative lookahead appended to the protected path: match `shared/contracts` only when what
+// negative lookahead appended to the protected path: match `packages/contracts` only when what
 // follows is not a `*.test.ts`. The character class stops at whitespace and at shell operators,
 // so a later unrelated test path in the same command cannot excuse a write to a real contract
 // file. Both routes need it: `mutates()` strips the trailing slash before building its pattern,
-// which is why the shell route protects any path merely BEGINNING `shared/contracts`.
+// which is why the shell route protects any path merely BEGINNING `packages/contracts`.
 const TEST_EXEMPT_LOOKAHEAD = String.raw`(?![^\s;&|>]*\.test\.m?tsx?\b)`;
 
 // The blessed producers of the generated set. Recognised so the hook does not block the very
@@ -129,7 +135,7 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * build output, and blocked. That is the false-positive shape amendment A3 was written about, and
  * it reappeared here the first time the orchestrator wrote a gate log.
  *
- * The redirect that OPENS a heredoc (`cat > shared/types.ts <<'EOF'`) sits before the operator and
+ * The redirect that OPENS a heredoc (`cat > db/schema.sql <<'EOF'`) sits before the operator and
  * survives stripping, so the write itself is still caught — only the payload stops being scanned.
  * An unterminated heredoc is stripped to end-of-input rather than left intact: leaving it would
  * restore exactly the false positive this removes.

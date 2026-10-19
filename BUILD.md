@@ -34,11 +34,10 @@ This mirrors b8's own product ethos. `ROADMAP.md` §4 argues that an AI feature 
 
 ## 2. The contract surface
 
-b8 has no `contracts/` directory yet — Phase 1 step 10 will add `shared/contracts/` with zod. Until then, and after, the **contract surface** is the set of files that define shapes every other file agrees on:
+The **contract surface** is the set of files that define shapes every other file agrees on. (It began as `shared/types.ts` plus `shared/contracts/`; both moved into the `packages/contracts/` workspace package in P1-10a, imported as `@b8/contracts/*`. The scope guard kept the old paths until H8, 2026-10-19.)
 
 ```
-shared/types.ts          # the shared TypeScript surface: Account, Property, BudgetCategory, …
-shared/contracts/**      # zod contracts (ROADMAP §5 step 10; empty today)
+packages/contracts/**    # the shared zod contracts and the types inferred from them (test files are not contract)
 migrations/*.sql         # the schema's forward history — node-pg-migrate
 db/schema.sql            # the readable reference schema
 ```
@@ -142,7 +141,7 @@ Good: `npx vitest run lib/domain/propertyPnl.test.ts` → `14 passed`; and a fix
 **Tools:** Read, Edit — scoped to the contract surface by hook (§13.2), and only while the lease is open. **Mandate.** Sole owner of the type surface and the schema, and of how they change.
 
 **Responsibilities**
-- Author and amend `shared/types.ts`, `shared/contracts/**`, and migrations
+- Author and amend `packages/contracts/**`, `db/schema.sql`, and migrations
 - Classify each change per §9.2 and state the rationale, not just the delta
 - Enforce forward-only migration history (§9.3) — the hard constraint
 - Reject contract requests that encode implementation convenience rather than domain truth
@@ -165,7 +164,7 @@ Good: `npx vitest run lib/domain/propertyPnl.test.ts` → `14 passed`; and a fix
 
 **Operating rules**
 - **Read `node_modules/next/dist/docs/` before writing Next-facing code.** This is Next 16; most training data describes a different framework.
-- **Contracts are read-only inputs.** Import from `shared/types.ts`. If a type or a column is wrong, **stop and report** — never work around it locally.
+- **Contracts are read-only inputs.** Import from `@b8/contracts/*`. If a type or a column is wrong, **stop and report** — never work around it locally.
 - **Tests accompany code in the same task.** There is no follow-up "add tests" task; the reviewer treats untested behavior as unverified behavior.
 - **Run the acceptance commands before declaring done**, and include verbatim output in `EVIDENCE.md`.
 - **Report honestly.** A green summary over a red suite is the single most damaging failure available to this role, because it corrupts the evidence the orchestrator adjudicates on.
