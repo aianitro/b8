@@ -21,8 +21,12 @@ import {
   SeveritySchema,
   SubjectSchema,
   calendarMonth,
+  FreshnessBasisSchema,
+  FreshnessSchema,
+  FreshnessStateSchema,
   type Finding,
   type FindingKind,
+  type Freshness,
 } from './findings';
 
 /** A fabricated amount as the two-decimal string the vocabulary carries. */
@@ -34,6 +38,16 @@ const institution = { type: 'institution', name: 'Fabricated Credit Union' } as 
 const category = { type: 'category', id: 7, name: 'Fixture Category' } as const;
 
 /**
+ * A freshness value per state (P5-35). The P5-34 fixtures below gained only the now-required
+ * `freshness` key — each kind given one coherent value, so no T34 scenario's own rule is touched.
+ */
+const fr = (
+  state: Freshness['state'], basis: Freshness['basis'], lastObserved: string | null, ageDays: number | null, undatedInputs: number,
+): Freshness => ({ state, basis, lastObserved, ageDays, undatedInputs });
+const F_UNDATED = fr('undated', 'none', null, null, 1);
+const F_SYNC_FRESH = fr('fresh', 'sync', '2026-03-05T06:00:00.000Z', 0, 0);
+
+/**
  * One valid fixture per kind, each in the state that makes as many of its nullable fields null as
  * the member's never/null refinements allow. A second fixture per refined kind, in the other state,
  * covers the non-null side. Typed as `Finding` so a fixture that drifts from the contract's own
@@ -42,12 +56,12 @@ const category = { type: 'category', id: 7, name: 'Fixture Category' } as const;
 const VALID: Record<FindingKind, Finding> = {
   'budget-breach': {
     kind: 'budget-breach', severity: 'warning', confidence: 'inferred', subject: category,
-    period: { type: 'month', month: '2026-12' }, scored: true,
+    period: { type: 'month', month: '2026-12' }, freshness: F_UNDATED, scored: true,
     budgeted: M(0), actual: M(3), variance: M(3), ratio: null,
   },
   'budget-underspend': {
     kind: 'budget-underspend', severity: 'notice', confidence: 'inferred', subject: category,
-    period: { type: 'months', months: ['2026-03', '2026-06', '2026-07'] }, scored: false,
+    period: { type: 'months', months: ['2026-03', '2026-06', '2026-07'] }, freshness: F_UNDATED, scored: false,
     budgeted: M(30), actual: M(3), variance: M(-27),
     monthly: ['2026-03', '2026-06', '2026-07'].map((month) => ({
       month, budgeted: M(10), actual: M(1), variance: M(-9), ratio: null,
@@ -55,38 +69,46 @@ const VALID: Record<FindingKind, Finding> = {
   },
   'balance-drift': {
     kind: 'balance-drift', severity: 'warning', confidence: 'observed', subject: account, period: asOf,
+    freshness: F_SYNC_FRESH,
     ledgerBalance: M(-5), expectedBalance: M(-8), drift: M(-3), suggestedBeginningBalance: M(-3),
     observedAt: null, safeToDerive: false,
   },
   'feed-degraded': {
     kind: 'feed-degraded', severity: 'warning', confidence: 'observed', subject: institution, period: asOf,
+    freshness: fr('never', 'feed', null, null, 0),
     accountCount: 2, state: 'failing', lastSuccessfulUpdate: null, hoursStale: null,
     institutionStatus: null, institutionStatusAt: null,
   },
   'sync-stale': {
     kind: 'sync-stale', severity: 'warning', confidence: 'observed', subject: institution, period: asOf,
+    freshness: fr('never', 'sync', null, null, 0),
     key: 'acct_fixture_1', accountCount: 1, daysStale: null, status: 'never',
   },
   'job-overdue': {
     kind: 'job-overdue', severity: 'warning', confidence: 'observed',
     subject: { type: 'system', name: 'daily-job' }, period: asOf,
+    freshness: fr('never', 'job-run', null, null, 0),
     status: 'never', daysSince: null, message: 'A fabricated sentence about the job.',
   },
   'cash-uncounted': {
     kind: 'cash-uncounted', severity: 'warning', confidence: 'observed', subject: account, period: asOf,
+    freshness: fr('never', 'cash-count', null, null, 0),
     balance: M(-1), daysSinceCount: null, reason: 'never',
   },
   'valuation-stale': {
     kind: 'valuation-stale', severity: 'warning', confidence: 'observed', subject: account, period: asOf,
+    freshness: fr('never', 'valuation', null, null, 0),
     reason: 'never', daysSince: null,
   },
   'overdraft-open': {
     kind: 'overdraft-open', severity: 'critical', confidence: 'observed', subject: account, period: asOf,
+    freshness: fr('fresh', 'overdraft-sighting', '2026-03-05T06:00:00.000Z', 0, 0),
     bank: null, balance: M(-4), cushion: M(5),
     since: '2026-03-04 06:00:00+00', seenAt: '2026-03-05 06:00:00+00',
   },
   'overdraft-forecast': {
     kind: 'overdraft-forecast', severity: 'warning', confidence: 'projected', subject: account, period: asOf,
+    freshness: fr('fresh', 'overdraft-projection', '2026-03-05T06:00:00.000Z', 0, 0),
     bank: null, cushion: M(5), low: M(-2), lowOn: '2026-03-09', projectedAt: '2026-03-05 06:00:00+00',
   },
 };
@@ -279,5 +301,96 @@ describe('P5-34 finding contract', () => {
     })).toBe(false);
     // The per-month evidence and the period are one truth: a breakdown that disagrees is refused.
     expect(parses({ ...u, monthly: u.monthly.slice(1) })).toBe(false);
+  });
+});
+
+// ─── P5-35: freshness on every member (scenarios C1–C4) ──────────────────────────────────────────
+//
+// These pin the schema's self-consistency only. Which inputs a kind rests on, and which state an input
+// is in, are `apps/web/lib/domain/findingsFreshness.ts`'s and are tested there (F1–F13).
+
+const withFreshness = (f: Finding, freshness: unknown) => ({ ...f, freshness });
+const INSTANT = '2026-03-02T06:00:00.000Z';
+
+describe('P5-35 freshness contract', () => {
+  it('T35-C1: freshness is required, non-null and strict on all ten kinds', () => {
+    expect(FreshnessStateSchema.options).toEqual(['fresh', 'stale', 'never', 'undated']);
+    for (const kind of TEN) {
+      for (const fixture of [VALID[kind], VALUED[kind]].filter(Boolean) as Finding[]) {
+        expect(parses(fixture), kind).toBe(true);
+        expect(parses(omit(fixture, 'freshness')), `${kind} omitted`).toBe(false);
+        expect(parses(withFreshness(fixture, null)), `${kind} null`).toBe(false);
+        expect(parses(withFreshness(fixture, undefined)), `${kind} undefined`).toBe(false);
+        expect(parses(withFreshness(fixture, { ...fixture.freshness, note: 'CANARY' })), `${kind} extra key`).toBe(false);
+      }
+      // The member's own shape has the key, not nullable and not optional.
+      const shape = memberFor(kind).shape as Record<string, z.ZodType>;
+      expect(shape.freshness, kind).toBe(FreshnessSchema);
+    }
+    // Strict, not stripping: the extra key is refused rather than silently dropped.
+    expect(FreshnessSchema.safeParse({ ...F_UNDATED, note: 'x' }).success).toBe(false);
+  });
+
+  it('T35-C2: state and field coherence — observation and age exactly for fresh and stale, the undated count matches the state, no negative age', () => {
+    const ok = (f: Freshness | Record<string, unknown>) => FreshnessSchema.safeParse(f).success;
+    // Valid in each state.
+    expect(ok(fr('fresh', 'sync', INSTANT, 3, 0))).toBe(true);
+    expect(ok(fr('stale', 'sync', INSTANT, 3, 2))).toBe(true);
+    expect(ok(fr('never', 'cash-count', null, null, 0))).toBe(true);
+    expect(ok(fr('never', 'feed', null, null, 2))).toBe(true);
+    expect(ok(fr('undated', 'none', null, null, 1))).toBe(true);
+    expect(ok(fr('undated', 'feed', null, null, 3))).toBe(true);
+    // fresh / stale without an observation or an age.
+    for (const state of ['fresh', 'stale'] as const) {
+      expect(ok(fr(state, 'sync', null, null, 0)), `${state} neither`).toBe(false);
+      expect(ok(fr(state, 'sync', INSTANT, null, 0)), `${state} no age`).toBe(false);
+      expect(ok(fr(state, 'sync', null, 3, 0)), `${state} no observation`).toBe(false);
+    }
+    // never / undated with an observation or an age. `never` is not zero days.
+    for (const state of ['never', 'undated'] as const) {
+      expect(ok(fr(state, 'sync', INSTANT, 3, 1)), `${state} both`).toBe(false);
+      expect(ok(fr(state, 'sync', null, 0, 1)), `${state} age 0`).toBe(false);
+      expect(ok(fr(state, 'sync', INSTANT, null, 1)), `${state} observation`).toBe(false);
+    }
+    // fresh hiding an undated input; undated with nothing undated.
+    expect(ok(fr('fresh', 'sync', INSTANT, 0, 1))).toBe(false);
+    expect(ok(fr('undated', 'none', null, null, 0))).toBe(false);
+    // Negative or fractional ages and counts.
+    expect(ok(fr('stale', 'sync', INSTANT, -1, 0))).toBe(false);
+    expect(ok(fr('stale', 'sync', INSTANT, 1.5, 0))).toBe(false);
+    expect(ok(fr('never', 'sync', null, null, -1))).toBe(false);
+    // Outside the closed lists; `none` names no dated basis.
+    expect(ok({ ...fr('fresh', 'sync', INSTANT, 0, 0), state: 'unknown' })).toBe(false);
+    expect(ok({ ...fr('fresh', 'sync', INSTANT, 0, 0), basis: 'plaid-balance' })).toBe(false);
+    expect(ok(fr('fresh', 'none', INSTANT, 0, 0))).toBe(false);
+    expect(ok(fr('never', 'none', null, null, 0))).toBe(false);
+    // Through a member, not only the sub-schema.
+    expect(parses(withFreshness(VALID['balance-drift'], fr('fresh', 'sync', INSTANT, 0, 1)))).toBe(false);
+  });
+
+  it('T35-C3: the N3 contract side is unchanged — job-overdue daysSince -1 still fails, 0 and 3 pass', () => {
+    const late = {
+      ...VALID['job-overdue'], status: 'late', message: 'A fabricated sentence about the job.',
+      freshness: fr('stale', 'job-run', INSTANT, 0, 0),
+    };
+    expect(parses({ ...late, daysSince: 0 })).toBe(true);
+    expect(parses({ ...late, daysSince: 3 })).toBe(true);
+    expect(parses({ ...late, daysSince: -1 })).toBe(false);
+    expect(parses({ ...VALUED['job-overdue'], daysSince: -1 })).toBe(false);
+  });
+
+  it('T35-C4: precision — a valuation is a calendar date, every other basis an ISO instant', () => {
+    const ok = (f: Freshness) => FreshnessSchema.safeParse(f).success;
+    expect(ok(fr('stale', 'valuation', '2025-11-05', 120, 0))).toBe(true);
+    expect(ok(fr('stale', 'valuation', '2025-11-05T00:00:00.000Z', 120, 0))).toBe(false);
+    expect(ok(fr('stale', 'valuation', '2026-02-30', 5, 0))).toBe(false);
+    for (const basis of FreshnessBasisSchema.options.filter((b) => b !== 'valuation' && b !== 'none')) {
+      expect(ok(fr('stale', basis, INSTANT, 3, 0)), `${basis} instant`).toBe(true);
+      expect(ok(fr('stale', basis, '2026-03-02', 3, 0)), `${basis} bare date`).toBe(false);
+      expect(ok(fr('stale', basis, '2026-03-02 06:00:00+00', 3, 0)), `${basis} pg text`).toBe(false);
+      expect(ok(fr('stale', basis, '2026-03-02T06:00:00+00:00', 3, 0)), `${basis} offset`).toBe(false);
+    }
+    expect(parses(withFreshness(VALUED['valuation-stale']!, fr('stale', 'valuation', '2025-11-05T00:00:00.000Z', 120, 0)))).toBe(false);
+    expect(parses(withFreshness(VALUED['valuation-stale']!, fr('stale', 'valuation', '2025-11-05', 120, 0)))).toBe(true);
   });
 });

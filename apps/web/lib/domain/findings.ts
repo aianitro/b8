@@ -33,6 +33,12 @@
 // NOTHING EXISTING IMPORTS THIS YET. Step 35 (freshness) and step 36 (the composed digest) are its
 // first consumers; the overview payload deliberately does not carry the list in this step (SPEC.md,
 // "Decision on the overview payload").
+//
+// FRESHNESS (step 35). Every conversion takes an optional `FreshnessContext` and attaches the
+// finding's `freshness`, computed by `findingsFreshness.ts` from the producer finding it converts —
+// the producer's `Date` objects, never the strings this module renders them into. Without a context
+// the finding is `undated`; a conversion never invents a fresh one. The rules live in that module and
+// not here, so this file stays the one place severity is decided and that one the one place age is.
 
 import { roundCents } from '../budgetMath';
 import { withoutNegativeZero } from './adherence';
@@ -49,6 +55,7 @@ import type { ValuationFinding } from './valuationStaleness';
 // value import would make this pure module load a connection pool (W4 enforces the distinction).
 import type { ForecastFinding, OverdraftFinding } from '../overdraftWatch';
 import type { Finding, FindingKind, Severity } from '@b8/contracts/findings';
+import { assertContextMatchesAsOf, freshnessOf, type FreshnessContext } from './findingsFreshness';
 
 /** The member of the union for one kind. */
 export type FindingOf<K extends FindingKind> = Extract<Finding, { kind: K }>;
@@ -141,13 +148,14 @@ const asOfPeriod = (asOf: AsOf) => ({ type: 'asOf' as const, date: asOfDate(asOf
  * The year is the as-of year: the caller contract `AdherenceInput` already states (pacing.ts) is that
  * one adherence run covers one calendar year, and that year is the as-of point's.
  */
-export function fromBreach(f: BreachFinding, asOf: AsOf): FindingOf<'budget-breach'> {
+export function fromBreach(f: BreachFinding, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'budget-breach'> {
   return {
     kind: 'budget-breach',
     severity: f.scored ? 'warning' : 'notice',
     confidence: 'inferred',
     subject: { type: 'category', id: f.categoryId, name: f.category },
     period: { type: 'month', month: calendarMonthOf(asOf.year, f.month) },
+    freshness: freshnessOf('budget-breach', f, asOf, freshness),
     scored: f.scored,
     budgeted: findingMoney(f.budgeted),
     actual: findingMoney(f.actual),
@@ -175,13 +183,14 @@ function monthlyOf(year: number, m: MonthVariance) {
  * contiguous — $0-budget months are absent by construction. The window totals are the producer's,
  * not re-summed here, and `monthly` carries its per-month evidence (CONTRACT.md ambiguity 1).
  */
-export function fromChronicUnderspend(f: ChronicUnderspendFinding, asOf: AsOf): FindingOf<'budget-underspend'> {
+export function fromChronicUnderspend(f: ChronicUnderspendFinding, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'budget-underspend'> {
   return {
     kind: 'budget-underspend',
     severity: 'notice',
     confidence: 'inferred',
     subject: { type: 'category', id: f.categoryId, name: f.category },
     period: { type: 'months', months: f.months.map((m) => calendarMonthOf(asOf.year, m.month)) },
+    freshness: freshnessOf('budget-underspend', f, asOf, freshness),
     scored: f.scored,
     budgeted: findingMoney(f.budgeted),
     actual: findingMoney(f.actual),
@@ -196,13 +205,14 @@ export function fromChronicUnderspend(f: ChronicUnderspendFinding, asOf: AsOf): 
  * matters. All four figures keep the producer's sign; nothing here re-applies the owed-as-positive
  * flip.
  */
-export function fromDrift(f: DriftFinding, asOf: AsOf): FindingOf<'balance-drift'> {
+export function fromDrift(f: DriftFinding, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'balance-drift'> {
   return {
     kind: 'balance-drift',
     severity: 'warning',
     confidence: 'observed',
     subject: { type: 'account', id: f.accountId, name: f.name },
     period: asOfPeriod(asOf),
+    freshness: freshnessOf('balance-drift', f, asOf, freshness),
     ledgerBalance: findingMoney(f.ledgerBalance),
     expectedBalance: findingMoney(f.expectedBalance),
     drift: findingMoney(f.drift),
@@ -219,13 +229,14 @@ export function fromDrift(f: DriftFinding, asOf: AsOf): FindingOf<'balance-drift
  * connection, which is a reason to report it, not to soften it. Timestamps become ISO strings as
  * `wireFeedFinding` renders them.
  */
-export function fromFeed(f: FeedFinding, asOf: AsOf): FindingOf<'feed-degraded'> {
+export function fromFeed(f: FeedFinding, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'feed-degraded'> {
   return {
     kind: 'feed-degraded',
     severity: f.state === 'failing' ? 'warning' : 'notice',
     confidence: 'observed',
     subject: { type: 'institution', name: f.institution },
     period: asOfPeriod(asOf),
+    freshness: freshnessOf('feed-degraded', f, asOf, freshness),
     accountCount: f.accountCount,
     state: f.state,
     lastSuccessfulUpdate: f.lastSuccessfulUpdate === null ? null : f.lastSuccessfulUpdate.toISOString(),
@@ -245,7 +256,7 @@ export function fromFeed(f: FeedFinding, asOf: AsOf): FindingOf<'feed-degraded'>
  * `Unknown` when the bank is null. That substitution is inherited, not introduced (CONTRACT.md
  * ambiguity 11; recorded for step 35).
  */
-export function fromSync(h: SyncItemHealth, asOf: AsOf): FindingOf<'sync-stale'> | null {
+export function fromSync(h: SyncItemHealth, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'sync-stale'> | null {
   if (h.status === 'ok') return null;
   return {
     kind: 'sync-stale',
@@ -253,6 +264,7 @@ export function fromSync(h: SyncItemHealth, asOf: AsOf): FindingOf<'sync-stale'>
     confidence: 'observed',
     subject: { type: 'institution', name: h.bank },
     period: asOfPeriod(asOf),
+    freshness: freshnessOf('sync-stale', h, asOf, freshness),
     key: h.key,
     accountCount: h.accountCount,
     daysStale: h.daysStale,
@@ -266,7 +278,7 @@ export function fromSync(h: SyncItemHealth, asOf: AsOf): FindingOf<'sync-stale'>
  * happened yet, a missed one is a day that did not happen. The producer's sentence is carried
  * verbatim — this step composes no wording.
  */
-export function fromJob(h: JobHealth, asOf: AsOf): FindingOf<'job-overdue'> | null {
+export function fromJob(h: JobHealth, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'job-overdue'> | null {
   if (h.status === 'fresh') return null;
   return {
     kind: 'job-overdue',
@@ -274,6 +286,7 @@ export function fromJob(h: JobHealth, asOf: AsOf): FindingOf<'job-overdue'> | nu
     confidence: 'observed',
     subject: { type: 'system', name: 'daily-job' },
     period: asOfPeriod(asOf),
+    freshness: freshnessOf('job-overdue', h, asOf, freshness),
     status: h.status,
     daysSince: h.daysSince,
     message: h.message,
@@ -284,13 +297,14 @@ export function fromJob(h: JobHealth, asOf: AsOf): FindingOf<'job-overdue'> | nu
  * A cash wallet nobody has confirmed. `never` is `warning` (a balance no human has ever verified),
  * `stale` is `notice`. `daysSinceCount` stays null for `never`; zero would read as "counted today".
  */
-export function fromWallet(f: WalletFinding, asOf: AsOf): FindingOf<'cash-uncounted'> {
+export function fromWallet(f: WalletFinding, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'cash-uncounted'> {
   return {
     kind: 'cash-uncounted',
     severity: f.reason === 'never' ? 'warning' : 'notice',
     confidence: 'observed',
     subject: { type: 'account', id: f.accountId, name: f.name },
     period: asOfPeriod(asOf),
+    freshness: freshnessOf('cash-uncounted', f, asOf, freshness),
     balance: findingMoney(f.balance),
     daysSinceCount: f.daysSinceCount,
     reason: f.reason,
@@ -302,13 +316,14 @@ export function fromWallet(f: WalletFinding, asOf: AsOf): FindingOf<'cash-uncoun
  * `notice`. The producer's `never` variant has no `daysSince` key at all; here the key is present and
  * null, so "no count" cannot be read as "the converter forgot the field".
  */
-export function fromValuation(f: ValuationFinding, asOf: AsOf): FindingOf<'valuation-stale'> {
+export function fromValuation(f: ValuationFinding, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'valuation-stale'> {
   return {
     kind: 'valuation-stale',
     severity: f.reason === 'never' ? 'warning' : 'notice',
     confidence: 'observed',
     subject: { type: 'account', id: f.id, name: f.name },
     period: asOfPeriod(asOf),
+    freshness: freshnessOf('valuation-stale', f, asOf, freshness),
     reason: f.reason,
     daysSince: f.reason === 'never' ? null : f.daysSince,
   };
@@ -318,13 +333,14 @@ export function fromValuation(f: ValuationFinding, asOf: AsOf): FindingOf<'valua
  * An open overdraft episode — the only `critical` in the vocabulary. The producer pushes it at `high`
  * priority and calls an overdraft fee "the one cost that is pure waste": money is being lost now.
  */
-export function fromOverdraft(f: OverdraftFinding, asOf: AsOf): FindingOf<'overdraft-open'> {
+export function fromOverdraft(f: OverdraftFinding, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'overdraft-open'> {
   return {
     kind: 'overdraft-open',
     severity: 'critical',
     confidence: 'observed',
     subject: { type: 'account', id: f.accountId, name: f.account },
     period: asOfPeriod(asOf),
+    freshness: freshnessOf('overdraft-open', f, asOf, freshness),
     bank: f.bank,
     balance: findingMoney(f.balance),
     cushion: findingMoney(f.cushion),
@@ -343,13 +359,14 @@ export function fromOverdraft(f: OverdraftFinding, asOf: AsOf): FindingOf<'overd
  * the producer-field exactness check in `findings.test.ts` fails `tsc` until somebody decides
  * whether it is carried or dropped.
  */
-export function fromForecast(f: ForecastFinding, asOf: AsOf): FindingOf<'overdraft-forecast'> {
+export function fromForecast(f: ForecastFinding, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'overdraft-forecast'> {
   return {
     kind: 'overdraft-forecast',
     severity: 'warning',
     confidence: 'projected',
     subject: { type: 'account', id: f.accountId, name: f.account },
     period: asOfPeriod(asOf),
+    freshness: freshnessOf('overdraft-forecast', f, asOf, freshness),
     bank: f.bank,
     cushion: findingMoney(f.cushion),
     low: findingMoney(f.low),
@@ -359,8 +376,12 @@ export function fromForecast(f: ForecastFinding, asOf: AsOf): FindingOf<'overdra
 }
 
 /** Either adherence kind, dispatched on the producer's own `kind`. */
-export function fromAdherence(f: AdherenceFinding, asOf: AsOf): FindingOf<'budget-breach' | 'budget-underspend'> {
-  return f.kind === 'breach' ? fromBreach(f, asOf) : fromChronicUnderspend(f, asOf);
+export function fromAdherence(
+  f: AdherenceFinding,
+  asOf: AsOf,
+  freshness?: FreshnessContext,
+): FindingOf<'budget-breach' | 'budget-underspend'> {
+  return f.kind === 'breach' ? fromBreach(f, asOf, freshness) : fromChronicUnderspend(f, asOf, freshness);
 }
 
 // ─── The registries ────────────────────────────────────────────────────────────────────────────
@@ -436,6 +457,13 @@ export interface FindingSources {
 export interface FindingsInput extends FindingSources {
   /** The overview's as-of triple: month 0-based (January = 0), never a clock read. */
   asOf: AsOf;
+  /**
+   * The instant and the facts every finding's freshness is judged from (step 35). Omitted, every
+   * finding is `undated` with one undated input — never fresh by default. Supplied, `asOf` must be
+   * `asOfFromDate(freshness.now)` or the assembler throws `RangeError`. Not a source: it is never
+   * listed in `notEvaluated`, and it changes no finding's severity, order or existence.
+   */
+  freshness?: FreshnessContext;
 }
 
 export interface AssembledFindings {
@@ -449,28 +477,33 @@ export interface AssembledFindings {
 const SEVERITY_RANK: Record<Severity, number> = { critical: 0, warning: 1, notice: 2 };
 
 /** One source's findings, converted, in the producer's order, unreportable items removed. */
-function convertSource(sources: FindingSources, source: FindingSource, asOf: AsOf): Finding[] {
+function convertSource(
+  sources: FindingSources,
+  source: FindingSource,
+  asOf: AsOf,
+  ctx: FreshnessContext | undefined,
+): Finding[] {
   const present = <T>(xs: T | undefined): xs is T => xs !== undefined;
   const keep = <T>(xs: (T | null)[]): T[] => xs.filter((x): x is T => x !== null);
   switch (source) {
     case 'adherence':
-      return present(sources.adherence) ? sources.adherence.map((f) => fromAdherence(f, asOf)) : [];
+      return present(sources.adherence) ? sources.adherence.map((f) => fromAdherence(f, asOf, ctx)) : [];
     case 'drift':
-      return present(sources.drift) ? sources.drift.map((f) => fromDrift(f, asOf)) : [];
+      return present(sources.drift) ? sources.drift.map((f) => fromDrift(f, asOf, ctx)) : [];
     case 'feed':
-      return present(sources.feed) ? sources.feed.map((f) => fromFeed(f, asOf)) : [];
+      return present(sources.feed) ? sources.feed.map((f) => fromFeed(f, asOf, ctx)) : [];
     case 'sync':
-      return present(sources.sync) ? keep(sources.sync.map((h) => fromSync(h, asOf))) : [];
+      return present(sources.sync) ? keep(sources.sync.map((h) => fromSync(h, asOf, ctx))) : [];
     case 'job':
-      return present(sources.job) ? keep([fromJob(sources.job, asOf)]) : [];
+      return present(sources.job) ? keep([fromJob(sources.job, asOf, ctx)]) : [];
     case 'wallets':
-      return present(sources.wallets) ? sources.wallets.map((f) => fromWallet(f, asOf)) : [];
+      return present(sources.wallets) ? sources.wallets.map((f) => fromWallet(f, asOf, ctx)) : [];
     case 'valuations':
-      return present(sources.valuations) ? sources.valuations.map((f) => fromValuation(f, asOf)) : [];
+      return present(sources.valuations) ? sources.valuations.map((f) => fromValuation(f, asOf, ctx)) : [];
     case 'overdrafts':
-      return present(sources.overdrafts) ? sources.overdrafts.map((f) => fromOverdraft(f, asOf)) : [];
+      return present(sources.overdrafts) ? sources.overdrafts.map((f) => fromOverdraft(f, asOf, ctx)) : [];
     case 'forecasts':
-      return present(sources.forecasts) ? sources.forecasts.map((f) => fromForecast(f, asOf)) : [];
+      return present(sources.forecasts) ? sources.forecasts.map((f) => fromForecast(f, asOf, ctx)) : [];
   }
 }
 
@@ -489,15 +522,22 @@ function convertSource(sources: FindingSources, source: FindingSource, asOf: AsO
  *
  * PURE. Inputs are read, never written; the sort runs on a fresh array of fresh objects, and no
  * returned object shares a reference with an input. The as-of date is validated (and a bad one
- * throws `RangeError`) before any source is read.
+ * throws `RangeError`) before any source is read, and so is the freshness context: an instant whose
+ * local date is not the as-of date throws `RangeError` too, rather than judging one day's findings
+ * against another day's clock.
+ *
+ * FRESHNESS RIDES ALONG, IT DOES NOT STEER. Each finding's `freshness` is computed inside its
+ * conversion and is not a key of the sort below; severity, source rank and producer position are the
+ * whole ordering, exactly as before step 35 (T35-F13).
  */
 export function assembleFindings(input: FindingsInput): AssembledFindings {
-  const { asOf } = input;
+  const { asOf, freshness } = input;
   asOfDate(asOf);
+  if (freshness !== undefined) assertContextMatchesAsOf(freshness, asOf);
 
   const notEvaluated = FINDING_SOURCES.filter((s) => input[s] === undefined);
   const ranked = FINDING_SOURCES.flatMap((source, sourceRank) =>
-    convertSource(input, source, asOf).map((finding, position) => ({ finding, sourceRank, position })),
+    convertSource(input, source, asOf, freshness).map((finding, position) => ({ finding, sourceRank, position })),
   );
   ranked.sort((a, b) =>
     SEVERITY_RANK[a.finding.severity] - SEVERITY_RANK[b.finding.severity]

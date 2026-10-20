@@ -53,10 +53,20 @@ function daysBetween(then: Date, now: Date): number {
  * state from "it ran a long time ago": a fresh checkout has never run the job, and telling that
  * owner it has been "4,000 days" would be nonsense.
  */
-export function jobHealth(lastRun: Date | null, now: Date, scheduledHour = 6): JobHealth {
-  if (lastRun === null) {
+export function jobHealth(recordedRun: Date | null, now: Date, scheduledHour = 6): JobHealth {
+  if (recordedRun === null) {
     return { status: 'never', daysSince: null, message: 'The daily job has never run on this machine.' };
   }
+
+  // A run stamped LATER than `now` is read as a run at `now` (P5-35, N3). The row is evidence that
+  // the job ran; what is wrong is one of the two clocks, and nothing here can say which. Before this,
+  // a run stamped one hour after `now` across midnight floored to `daysSince: -1` and fell through to
+  // `fresh` or `late` with a negative count — a number of days since an event cannot be below zero,
+  // and the finding vocabulary rightly refuses one. Clamping the instant, rather than special-casing
+  // the result, means the verdict is exactly the one an ordinary run at `now` gets ("ran today"),
+  // and every run at or before `now` takes the unchanged path below. Accepted consequence (SPEC.md
+  // Q2): a badly skewed clock can mask a dead job until `now` catches up with the stamped run.
+  const lastRun = recordedRun.getTime() > now.getTime() ? now : recordedRun;
 
   const days = daysBetween(lastRun, now);
 

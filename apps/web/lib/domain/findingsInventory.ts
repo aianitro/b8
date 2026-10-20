@@ -92,4 +92,17 @@ export const PRODUCER_INVENTORY = {
     file: 'lib/domain/txnMatch.ts', disposition: 'excluded',
     reason: 'Ingest re-identification of transactions, not anything worth telling the owner.',
   },
+
+  // ─── Decided in P5-35 (carry-in N2): deferred, each for a stated reason ──────────────────────
+  //
+  // Neither name ends in `Finding` or `Health`, so the W3 heuristic would never surface them; they
+  // are hand-read entries, and W6 checks that each file exists and exports the type it names.
+  CountMismatch: {
+    file: 'lib/backupPlan.ts', disposition: 'excluded',
+    reason: 'A backup-rehearsal mismatch is thrown inside scripts/backup.ts and leaves no record the app can read later; a kind would need a persisted outcome, which is a migration this step does not make.',
+  },
+  StoredProposal: {
+    file: 'lib/domain/proposal.ts', disposition: 'excluded',
+    reason: 'A pending agent proposal is a workflow item awaiting a decision, not a detection, and its expiry is not the staleness of any believed fact.',
+  },
 } as const satisfies Record<string, InventoryEntry>;

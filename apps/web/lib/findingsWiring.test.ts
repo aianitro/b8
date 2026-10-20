@@ -22,6 +22,7 @@ import { describe, expect, it } from 'vitest';
 import { FindingKindSchema } from '@b8/contracts/findings';
 import { FINDING_CONVERSIONS } from './domain/findings';
 import { PRODUCER_INVENTORY, type InventoryEntry } from './domain/findingsInventory';
+import { TRANSACTION_COLUMN_MASK } from './domain/giftMask';
 
 const WEB = fileURLToPath(new URL('..', import.meta.url));
 const REPO = join(WEB, '..', '..');
@@ -372,7 +373,11 @@ export function purityViolations(sf: ts.SourceFile, fromRel: string): string[] {
 
 describe('P5-34 wiring: the vocabulary is pure', () => {
   it('T34-W4: lib/domain/findings*.ts import only pure modules, never the scored-set predicates, and read no clock', () => {
-    expect(VOCABULARY.map(rel).sort()).toEqual(['lib/domain/findings.ts', 'lib/domain/findingsInventory.ts']);
+    // P5-35 added `findingsFreshness.ts`, which the vocabulary pattern names by design; the rule below
+    // now covers it too. Only this enumeration changed — the rule and its fabricated violators did not.
+    expect(VOCABULARY.map(rel).sort()).toEqual([
+      'lib/domain/findings.ts', 'lib/domain/findingsFreshness.ts', 'lib/domain/findingsInventory.ts',
+    ]);
     for (const f of VOCABULARY) expect(purityViolations(parse(f), rel(f)), rel(f)).toEqual([]);
 
     const from = 'lib/domain/findingsX.ts';
@@ -557,5 +562,230 @@ describe('P5-34 evidence', () => {
       'JobHealth', 'WalletFinding', 'ValuationFinding', 'OverdraftFinding', 'ForecastFinding',
     ]);
     if (process.env.T34_PRINT === '1') console.log(`\nP5-34 producer inventory\n${lines.join('\n')}\n`);
+  });
+});
+
+// ─── P5-35: freshness is pure, single-sourced, viewer-safe and unconsumed (W1–W3) ─────────────────
+
+const FRESHNESS = join(WEB, 'lib/domain/findingsFreshness.ts');
+const FRESHNESS_READ = join(WEB, 'lib/findingsFreshnessRead.ts');
+
+/** The unit constants the freshness module may write as numbers: zero, one, and ms per second, hour, day. */
+const UNIT_LITERALS = new Set([0, 1, 1000, 3_600_000, 86_400_000]);
+
+/** Each threshold, by the name it must be imported under and the module it must come from. */
+const THRESHOLD_IMPORTS: [string, string][] = [
+  ['STALE_AFTER_DAYS', './syncHealth'],
+  ['STALE_AFTER_HOURS', './feedHealth'],
+  ['STALE_AFTER_DAYS', './walletStaleness'],
+  ['VALUATION_STALE_DAYS', './valuationStaleness'],
+];
+
+const SQL_CLOCKS = /\bnow\s*\(|\bcurrent_date\b|\bcurrent_timestamp\b|\bclock_timestamp\b|\blocaltimestamp\b|\btransaction_timestamp\b|\bstatement_timestamp\b/i;
+
+/** Every string and template literal's text (template spans joined with a placeholder), outside imports. */
+function literalTexts(sf: ts.SourceFile): string[] {
+  const out: string[] = [];
+  walk(sf, (n) => {
+    if (ts.isImportDeclaration(n.parent ?? n) || ts.isExportDeclaration(n.parent ?? n)) return;
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) out.push(n.text);
+    if (ts.isTemplateExpression(n)) out.push([n.head.text, ...n.templateSpans.map((s) => s.literal.text)].join(' ${} '));
+  });
+  return out;
+}
+
+/** What in the freshness modules reads a clock, parses a float, copies a threshold or reads a SQL clock. */
+export function freshnessPurityViolations(sf: ts.SourceFile, opts: { pure: boolean }): string[] {
+  const out: string[] = [];
+  const at = (n: ts.Node, what: string) => out.push(`${lineOf(sf, n)} ${what}`);
+  walk(sf, (n) => {
+    if (ts.isCallExpression(n)) {
+      const c = n.expression;
+      if (ts.isIdentifier(c) && c.text === 'parseFloat') at(n, 'parseFloat(');
+      if (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression)) {
+        const call = `${c.expression.text}.${c.name.text}`;
+        if (['Date.now', 'Math.random', 'Number.parseFloat', 'performance.now'].includes(call)) at(n, `${call}(`);
+      }
+    }
+    if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'Date'
+        && (!n.arguments || n.arguments.length === 0)) at(n, 'new Date()');
+    if (ts.isIdentifier(n) && n.text === 'LATE_AFTER_HOURS') at(n, 'LATE_AFTER_HOURS');
+    if (opts.pure && ts.isNumericLiteral(n) && !UNIT_LITERALS.has(Number(n.text))) at(n, `numeric literal ${n.text}`);
+  });
+  if (opts.pure) {
+    for (const st of sf.statements) {
+      if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
+      const spec = st.moduleSpecifier.text;
+      if (!(spec.startsWith('./') && !spec.slice(2).includes('/')) && spec !== '@b8/contracts/findings') at(st, `import of ${spec}`);
+    }
+    const imported = new Set<string>();
+    for (const st of sf.statements) {
+      if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
+      const b = st.importClause?.namedBindings;
+      if (b && ts.isNamedImports(b)) for (const e of b.elements) imported.add(`${(e.propertyName ?? e.name).text}@${st.moduleSpecifier.text}`);
+    }
+    for (const [name, from] of THRESHOLD_IMPORTS) if (!imported.has(`${name}@${from}`)) out.push(`threshold ${name} not imported from ${from}`);
+  }
+  for (const t of literalTexts(sf)) if (SQL_CLOCKS.test(t)) out.push(`SQL clock in "${t.trim().slice(0, 40)}"`);
+  return out;
+}
+
+describe('P5-35 wiring: freshness is pure and single-sourced', () => {
+  it('T35-W1: no clock, no parseFloat, no copied threshold and no SQL clock in the freshness modules; fabricated violators are flagged', () => {
+    expect(freshnessPurityViolations(parse(FRESHNESS), { pure: true })).toEqual([]);
+    expect(freshnessPurityViolations(parse(FRESHNESS_READ), { pure: false })).toEqual([]);
+    // Not vacuous: the read module does have SQL literals, and the pure module numeric ones.
+    expect(literalTexts(parse(FRESHNESS_READ)).filter((t) => /\bfrom\b/i.test(t)).length).toBeGreaterThanOrEqual(8);
+    let numerics = 0;
+    walk(parse(FRESHNESS), (n) => { if (ts.isNumericLiteral(n)) numerics++; });
+    expect(numerics).toBeGreaterThan(0);
+
+    const imports = THRESHOLD_IMPORTS.map(([n, f], i) => `import { ${n} as T${i} } from '${f}';`).join('\n');
+    const pureViolators = [
+      `${imports}\nconst t = Date.now();`,
+      `${imports}\nconst d = new Date();`,
+      `${imports}\nconst d = new Date;`,
+      `${imports}\nconst r = Math.random();`,
+      `${imports}\nconst n = parseFloat('1.5');`,
+      `${imports}\nconst stale = days >= 2;`,
+      `${imports}\nconst stale = days >= 30;`,
+      `${imports}\nconst stale = hours > 36;`,
+      `${imports}\nconst stale = days >= 100;`,
+      `${imports}\nconst late = LATE_AFTER_HOURS;`,
+      THRESHOLD_IMPORTS.slice(1).map(([n, f], i) => `import { ${n} as T${i} } from '${f}';`).join('\n'),
+      `${imports}\nimport db from '../db';`,
+      `${imports}\nconst q = 'SELECT NOW()';`,
+    ];
+    for (const v of pureViolators) {
+      expect({ v, flagged: freshnessPurityViolations(fake(v), { pure: true }).length > 0 }).toEqual({ v, flagged: true });
+    }
+    const readViolators = [
+      'const q = `SELECT 1 FROM sync_log WHERE ran_at < NOW()`;',
+      "const q = 'SELECT CURRENT_DATE';",
+      'const q = `SELECT current_timestamp`;',
+      'const q = `SELECT clock_timestamp()`;',
+      'const t = Date.now();',
+    ];
+    for (const v of readViolators) {
+      expect({ v, flagged: freshnessPurityViolations(fake(v), { pure: false }).length > 0 }).toEqual({ v, flagged: true });
+    }
+    const clean = [
+      `${imports}\nconst ms = 86_400_000; const x = 1000 * 0 + 1;`,
+      `${imports}\nconst d = new Date(Date.UTC(2026, 0, 1));`.replace('2026, 0, 1', 'y, m, d'),
+      `${imports}\n// Date.now() and days >= 2 in a comment\nconst x = 1;`,
+    ];
+    for (const c of clean) expect({ c, v: freshnessPurityViolations(fake(c), { pure: true }) }).toEqual({ c, v: [] });
+    expect(freshnessPurityViolations(fake("const q = 'SELECT ran_at FROM sync_log ORDER BY ran_at DESC';"), { pure: false })).toEqual([]);
+  });
+
+  it('T35-W2: the backup-rehearsal mismatch and pending proposals are decided — excluded, with reasons', () => {
+    const inv = PRODUCER_INVENTORY as Record<string, InventoryEntry>;
+    for (const [name, file] of [['CountMismatch', 'lib/backupPlan.ts'], ['StoredProposal', 'lib/domain/proposal.ts']] as const) {
+      const e = inv[name];
+      expect(e, name).toBeDefined();
+      expect(e.file, name).toBe(file);
+      expect(e.disposition, name).toBe('excluded');
+      expect(e.disposition === 'excluded' && e.reason.trim().length >= 20, name).toBe(true);
+      expect(exportsName(fake(readFileSync(join(WEB, file), 'utf8'), basename(file)), name), name).toBe(true);
+    }
+    // The integrity check covers them too, and would flag an entry pointing at the wrong file.
+    expect(inventoryIntegrity(PRODUCER_INVENTORY, readWebSource)).toEqual([]);
+    expect(inventoryIntegrity({ CountMismatch: { file: 'lib/domain/proposal.ts', disposition: 'excluded', reason: 'a reason long enough to count' } }, readWebSource))
+      .toEqual(['CountMismatch: not exported by lib/domain/proposal.ts']);
+  });
+});
+
+// ─── W3: viewer safety and containment ─────────────────────────────────────────────────────────
+
+/** The columns a masked row does not carry as stored: every mask entry whose treatment is not `keep`. */
+const PROTECTED_COLUMNS = Object.entries(TRANSACTION_COLUMN_MASK).filter(([, t]) => t !== 'keep').map(([c]) => c);
+
+/** What in a read module could carry row text: a protected column in SQL that names `transactions`, or the gift read path. */
+export function viewerLeaks(sf: ts.SourceFile): string[] {
+  const out: string[] = [];
+  for (const t of literalTexts(sf)) {
+    if (!/\btransactions\b/i.test(t)) continue;
+    for (const c of PROTECTED_COLUMNS) if (new RegExp(`\\b${c}\\b`, 'i').test(t)) out.push(`${c} in a transactions literal`);
+    if (/\*/.test(t.replace(/count\s*\(\s*\*\s*\)/gi, ''))) out.push('* in a transactions literal');
+  }
+  for (const st of sf.statements) {
+    if (ts.isImportDeclaration(st) && ts.isStringLiteral(st.moduleSpecifier) && /giftReadPath/.test(st.moduleSpecifier.text)) {
+      out.push(`imports ${st.moduleSpecifier.text}`);
+    }
+  }
+  return out;
+}
+
+/** Whether a module specifier, seen from `fromRel`, names the finding vocabulary or the freshness read. */
+function namesVocabulary(fromRel: string, spec: string): boolean {
+  if (spec === '@b8/contracts/findings') return true;
+  if (fromRel.startsWith('../../packages/contracts/')) return spec === './findings' || spec === './findings.ts';
+  const target = importTarget(fromRel, spec);
+  return /^lib\/domain\/findings[A-Za-z]*$/.test(target) || target === 'lib/findingsFreshnessRead';
+}
+
+/** The declared importers: the vocabulary modules, the freshness read, and the contract itself. */
+const DECLARED_IMPORTER = (r: string) =>
+  /^lib\/domain\/findings[A-Za-z]*\.ts$/.test(r) || r === 'lib/findingsFreshnessRead.ts' || r === '../../packages/contracts/findings.ts';
+
+/** Non-test files importing the vocabulary that are not declared importers. */
+export function undeclaredImporters(files: { rel: string; sf: ts.SourceFile }[]): string[] {
+  const out: string[] = [];
+  for (const { rel: r, sf } of files) {
+    if (DECLARED_IMPORTER(r)) continue;
+    for (const st of sf.statements) {
+      if ((ts.isImportDeclaration(st) || ts.isExportDeclaration(st)) && st.moduleSpecifier && ts.isStringLiteral(st.moduleSpecifier)
+          && namesVocabulary(r, st.moduleSpecifier.text)) out.push(`${r} -> ${st.moduleSpecifier.text}`);
+    }
+    walk(sf, (n) => {
+      if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments[0]
+          && ts.isStringLiteral(n.arguments[0]) && namesVocabulary(r, n.arguments[0].text)) out.push(`${r} -> import(${n.arguments[0].text})`);
+    });
+  }
+  return out;
+}
+
+describe('P5-35 wiring: freshness is viewer-safe and has no consumer', () => {
+  it('T35-W3: no protected column in the read module SQL on transactions, no gift read path, and no undeclared importer of the vocabulary', () => {
+    // The protected set is derived from the mask, not restated; it includes the obvious ones.
+    for (const c of ['merchant_name', 'name', 'note', 'plaid_raw']) expect(PROTECTED_COLUMNS).toContain(c);
+    for (const c of ['account_id', 'date', 'mapped_category', 'hidden']) expect(PROTECTED_COLUMNS).not.toContain(c);
+
+    const read = parse(FRESHNESS_READ);
+    expect(viewerLeaks(read)).toEqual([]);
+    // Not vacuous: the read module does read `transactions`.
+    expect(literalTexts(read).some((t) => /\bfrom\s+transactions\b/i.test(t))).toBe(true);
+
+    const leaky = [
+      'const q = `SELECT t.merchant_name FROM transactions t`;',
+      "const q = 'SELECT t.account_id, t.name FROM transactions t';",
+      'const q = `SELECT 1 FROM transactions t WHERE t.note IS NULL`;',
+      'const q = `SELECT t.* FROM transactions t`;',
+      "import { visibleTransactions } from './giftReadPath';",
+      "const q = `SELECT plaid_raw FROM transactions`;",
+    ];
+    for (const v of leaky) expect({ v, flagged: viewerLeaks(fake(v)).length > 0 }).toEqual({ v, flagged: true });
+    const safe = [
+      'const q = `SELECT t.account_id, t.date FROM transactions t WHERE t.hidden = FALSE`;',
+      "const q = 'SELECT id, name FROM budget_categories';",
+      "const q = 'SELECT COUNT(*) FROM transactions';",
+    ];
+    for (const c of safe) expect({ c, v: viewerLeaks(fake(c)) }).toEqual({ c, v: [] });
+
+    // Containment: nothing outside the declared importers imports the vocabulary or the read.
+    const files = [...WEB_SOURCES, ...CONTRACT_SOURCES].map((f) => ({ rel: rel(f), sf: parse(f) }));
+    expect(undeclaredImporters(files)).toEqual([]);
+    // Not vacuous: the declared importers do import it.
+    expect(files.filter((f) => DECLARED_IMPORTER(f.rel)).length).toBeGreaterThanOrEqual(4);
+    const consumers = [
+      { rel: 'components/DigestCard.tsx', sf: fake("import { assembleFindings } from '@/lib/domain/findings';", 'DigestCard.tsx') },
+      { rel: 'app/api/v1/findings/route.ts', sf: fake("import type { Finding } from '@b8/contracts/findings';") },
+      { rel: 'lib/digestRead.ts', sf: fake("import { loadFreshnessFacts } from './findingsFreshnessRead';") },
+      { rel: 'lib/overviewRead.ts', sf: fake("export { freshnessOf } from './domain/findingsFreshness';") },
+      { rel: 'lib/x.ts', sf: fake("const m = import('./domain/findingsInventory');") },
+      { rel: '../../packages/contracts/overview.ts', sf: fake("import { FindingSchema } from './findings';") },
+    ];
+    for (const c of consumers) expect({ c: c.rel, flagged: undeclaredImporters([c]).length > 0 }).toEqual({ c: c.rel, flagged: true });
+    expect(undeclaredImporters([{ rel: 'lib/x.ts', sf: fake("import { feedFindings } from './domain/feedHealth';") }])).toEqual([]);
   });
 });

@@ -200,6 +200,138 @@ export const PeriodSchema = z.discriminatedUnion('type', [
   AsOfPeriodSchema,
 ]);
 
+// ─── Freshness: as of when the finding's worst input is believed true (step 35) ─────────────────
+//
+// WHY EVERY FINDING CARRIES IT. A finding is only as true as the oldest fact it rests on. "This
+// category is under budget" over a bank feed that stopped weeks ago is not good news; it is missing
+// data dressed as good news. Freshness says, per finding, how old that weakest fact is — or that it
+// was never observed, or that the database keeps no usable record of when it was last true.
+//
+// WHY IT IS REQUIRED AND NOT NULLABLE. Every finding rests on something. A finding with no input
+// record is not "fresh by default"; it is `undated`, said explicitly. A nullable or optional
+// freshness would let a converter that forgot it read as one that had nothing to say.
+//
+// WHAT THIS DOES NOT PIN. Which input belongs to which kind, the per-input thresholds, and the
+// aggregation order (never, then stale, then undated, then fresh) are the producers' and the
+// freshness module's (`apps/web/lib/domain/findingsFreshness.ts`), tested there. Restating a
+// threshold here would be a copy of it. This schema pins only what makes a value self-consistent.
+// Freshness never feeds severity, confidence or ordering.
+
+/**
+ * The four states, never conflated:
+ *
+ *   `fresh`   — every input is dated and none is past its producer's threshold.
+ *   `stale`   — the worst dated input is past its producer's threshold.
+ *   `never`   — a recorded absence: an input that has never been observed (no cash count, no
+ *               valuation, never synced, a feed with a failure and no success).
+ *   `undated` — the database keeps no usable record of when an input was last true (a manual ledger
+ *               account, a feed with neither success nor failure recorded, no contributing account,
+ *               an observation later than `now`, a malformed date). Never reported as `fresh`.
+ */
+export const FreshnessStateSchema = z.enum(['fresh', 'stale', 'never', 'undated']);
+
+/**
+ * Which kind of input is the worst one. A closed list.
+ *
+ *   `sync`                 — this app's last successful sync of a Plaid item.
+ *   `feed`                 — Plaid's last successful refresh of an item.
+ *   `valuation`            — the latest hand-entered valuation of an account (a calendar DATE).
+ *   `cash-count`           — the latest physical count of a cash wallet.
+ *   `job-run`              — the latest scheduled run of the daily job (manual syncs never count).
+ *   `overdraft-sighting`   — when an open overdraft episode last saw the balance below its cushion.
+ *   `overdraft-projection` — when an open overdraft forecast was projected.
+ *   `none`                 — no input of any listed kind is the worst one (only with `undated`).
+ *
+ * THE ORDER IS LOAD-BEARING: two dated inputs of equal age tie-break by their position here, so the
+ * result does not depend on the order inputs arrive in. Reordering this list is a semantic change.
+ */
+export const FreshnessBasisSchema = z.enum([
+  'sync',
+  'feed',
+  'valuation',
+  'cash-count',
+  'job-run',
+  'overdraft-sighting',
+  'overdraft-projection',
+  'none',
+]);
+
+/**
+ * An instant as `Date.prototype.toISOString` prints it: `2026-03-05T06:00:00.000Z`, UTC, no offset.
+ *
+ * Constrained, unlike `timestamptz`, because here the precision IS the meaning: an instant must be
+ * told apart from a calendar date by its shape, and Postgres's text rendering
+ * (`2026-03-05 06:00:00+00`) — which the JS date parser reads differently by engine — is refused.
+ * Zod's own ISO validator, not a new regex.
+ */
+const freshnessInstant = z.iso.datetime();
+
+/**
+ * One finding's freshness.
+ *
+ *   `state`         — see `FreshnessStateSchema`.
+ *   `basis`         — the kind of the worst input. For `fresh` and `stale` it is the worst DATED input
+ *                     (the oldest). For `never` it is the input never observed. For `undated` it may
+ *                     name the undated input's kind, or `none` when no listed kind applies.
+ *   `lastObserved`  — when the worst dated input was last believed true, in that input's own
+ *                     precision: a `valuation` is a calendar date `YYYY-MM-DD` (the date Postgres
+ *                     records, never turned into an instant at midnight, which would invent a time and
+ *                     a zone); every other basis is an instant. Null exactly for `never` and `undated`.
+ *                     NOT the same thing as `balance-drift.observedAt`, which is when the Plaid balance
+ *                     last CHANGED (a change log), not when it was last confirmed.
+ *   `ageDays`       — whole days from `lastObserved` to `now`, floored for an instant and a
+ *                     calendar-day difference for a valuation. Never negative: an observation later
+ *                     than `now` makes that input `undated`, it is never carried as a negative age or
+ *                     clamped to zero. Null exactly when `lastObserved` is.
+ *   `undatedInputs` — how many inputs could not be dated. A `stale` or `never` finding may also have
+ *                     undated inputs, and says so here. An empty input set, or an unsupplied context,
+ *                     counts as one undated input: the missing record is itself the undatable input.
+ *
+ * Coherence is enforced below, so a value that contradicts itself is refused rather than rendered.
+ */
+export const FreshnessSchema = z
+  .strictObject({
+    state: FreshnessStateSchema,
+    basis: FreshnessBasisSchema,
+    lastObserved: z.union([giftDate, freshnessInstant]).nullable(),
+    ageDays: z.int().min(0).nullable(),
+    undatedInputs: z.int().min(0),
+  })
+  .refine(
+    (f) => (f.state === 'fresh' || f.state === 'stale') === (f.lastObserved !== null),
+    {
+      message: "lastObserved is present exactly when state is 'fresh' or 'stale'",
+      path: ['lastObserved'],
+    },
+  )
+  .refine((f) => (f.lastObserved === null) === (f.ageDays === null), {
+    message: 'ageDays is present exactly when lastObserved is',
+    path: ['ageDays'],
+  })
+  .refine((f) => f.state !== 'fresh' || f.undatedInputs === 0, {
+    message: "a 'fresh' finding has no undated inputs; an undated input is never fresh",
+    path: ['undatedInputs'],
+  })
+  .refine((f) => f.state !== 'undated' || f.undatedInputs >= 1, {
+    message: "an 'undated' finding has at least one undated input",
+    path: ['undatedInputs'],
+  })
+  .refine((f) => f.basis !== 'none' || f.state === 'undated', {
+    message: "basis 'none' is only possible when state is 'undated'",
+    path: ['basis'],
+  })
+  .refine(
+    (f) =>
+      f.lastObserved === null ||
+      (f.basis === 'valuation'
+        ? giftDate.safeParse(f.lastObserved).success
+        : freshnessInstant.safeParse(f.lastObserved).success),
+    {
+      message: "lastObserved is a calendar date for basis 'valuation' and an ISO instant otherwise",
+      path: ['lastObserved'],
+    },
+  );
+
 // ─── The ten members ────────────────────────────────────────────────────────────────────────────
 //
 // Each member is: `kind`, `severity`, `confidence`, `subject` (narrowed to the one type its kind is
@@ -232,6 +364,7 @@ export const BudgetBreachFindingSchema = z.strictObject({
   ...severityAndConfidence,
   subject: CategorySubjectSchema,
   period: MonthPeriodSchema,
+  freshness: FreshnessSchema,
   scored: z.boolean(),
   budgeted: moneyString,
   actual: moneyString,
@@ -273,6 +406,7 @@ export const BudgetUnderspendFindingSchema = z
     ...severityAndConfidence,
     subject: CategorySubjectSchema,
     period: MonthsPeriodSchema,
+    freshness: FreshnessSchema,
     scored: z.boolean(),
     budgeted: moneyString,
     actual: moneyString,
@@ -301,6 +435,7 @@ export const BalanceDriftFindingSchema = z.strictObject({
   ...severityAndConfidence,
   subject: AccountSubjectSchema,
   period: AsOfPeriodSchema,
+  freshness: FreshnessSchema,
   ledgerBalance: moneyString,
   expectedBalance: moneyString,
   drift: moneyString,
@@ -329,6 +464,7 @@ export const FeedDegradedFindingSchema = z
     ...severityAndConfidence,
     subject: InstitutionSubjectSchema,
     period: AsOfPeriodSchema,
+    freshness: FreshnessSchema,
     accountCount: z.int(),
     state: FeedFindingSchema.shape.state,
     lastSuccessfulUpdate: timestamptz.nullable(),
@@ -358,6 +494,7 @@ export const SyncStaleFindingSchema = z
     ...severityAndConfidence,
     subject: InstitutionSubjectSchema,
     period: AsOfPeriodSchema,
+    freshness: FreshnessSchema,
     key: z.string(),
     accountCount: z.int(),
     daysStale: z.int().nullable(),
@@ -381,6 +518,7 @@ export const JobOverdueFindingSchema = z
     ...severityAndConfidence,
     subject: SystemSubjectSchema,
     period: AsOfPeriodSchema,
+    freshness: FreshnessSchema,
     status: z.enum(['late', 'missed', 'never']),
     daysSince: z.int().min(0).nullable(),
     message: z.string(),
@@ -404,6 +542,7 @@ export const CashUncountedFindingSchema = z
     ...severityAndConfidence,
     subject: AccountSubjectSchema,
     period: AsOfPeriodSchema,
+    freshness: FreshnessSchema,
     balance: moneyString,
     daysSinceCount: WalletFindingSchema.shape.daysSinceCount,
     reason: WalletFindingSchema.shape.reason,
@@ -426,6 +565,7 @@ export const ValuationStaleFindingSchema = z
     ...severityAndConfidence,
     subject: AccountSubjectSchema,
     period: AsOfPeriodSchema,
+    freshness: FreshnessSchema,
     reason: z.enum(['stale', 'never']),
     daysSince: z.int().nullable(),
   })
@@ -447,6 +587,7 @@ export const OverdraftOpenFindingSchema = z.strictObject({
   ...severityAndConfidence,
   subject: AccountSubjectSchema,
   period: AsOfPeriodSchema,
+  freshness: FreshnessSchema,
   bank: z.string().nullable(),
   balance: moneyString,
   cushion: moneyString,
@@ -468,6 +609,7 @@ export const OverdraftForecastFindingSchema = z.strictObject({
   ...severityAndConfidence,
   subject: AccountSubjectSchema,
   period: AsOfPeriodSchema,
+  freshness: FreshnessSchema,
   bank: z.string().nullable(),
   cushion: moneyString,
   low: moneyString,
@@ -500,6 +642,9 @@ export type Severity = z.infer<typeof SeveritySchema>;
 export type Confidence = z.infer<typeof ConfidenceSchema>;
 export type Subject = z.infer<typeof SubjectSchema>;
 export type Period = z.infer<typeof PeriodSchema>;
+export type Freshness = z.infer<typeof FreshnessSchema>;
+export type FreshnessState = z.infer<typeof FreshnessStateSchema>;
+export type FreshnessBasis = z.infer<typeof FreshnessBasisSchema>;
 
 /**
  * The kind list and the union's discriminants are the same set. Fails `npx tsc --noEmit` if a member
