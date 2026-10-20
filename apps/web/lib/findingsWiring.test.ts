@@ -91,50 +91,147 @@ const nameText = (n: ts.PropertyName | ts.Expression): string | null => {
 const SEVERITY_LITERALS = new Set(['critical', 'warning', 'notice']);
 
 /**
+ * The same-file functions, by name: `function f() {}` declarations, and `const f = () => …` or
+ * `const f = function () {}` (P5-36, widening T34-W1 per P5-34 N1).
+ */
+function functionsOf(sf: ts.SourceFile): Map<string, ts.FunctionLikeDeclaration> {
+  const fns = new Map<string, ts.FunctionLikeDeclaration>();
+  walk(sf, (n) => {
+    if (ts.isFunctionDeclaration(n) && n.name && n.body) fns.set(n.name.text, n);
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer
+        && ts.isVariableDeclarationList(n.parent) && (n.parent.flags & ts.NodeFlags.Const)) {
+      const init = unwrap(n.initializer);
+      if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) fns.set(n.name.text, init);
+    }
+  });
+  return fns;
+}
+
+/**
+ * What a function can return: an arrow's expression body, or the operand of every `return` in its
+ * body — not counting the returns of functions nested inside it, which return to somebody else.
+ */
+function returnedExpressions(fn: ts.FunctionLikeDeclaration): ts.Expression[] {
+  if (!fn.body) return [];
+  if (!ts.isBlock(fn.body)) return [fn.body];
+  const out: ts.Expression[] = [];
+  const visit = (n: ts.Node): void => {
+    if (ts.isFunctionLike(n)) return;
+    if (ts.isReturnStatement(n) && n.expression) out.push(n.expression);
+    ts.forEachChild(n, visit);
+  };
+  ts.forEachChild(fn.body, visit);
+  return out;
+}
+
+/** What a severity expression may resolve through: the file's constants and its functions. */
+interface SeverityScope {
+  consts: Map<string, ts.Expression>;
+  fns: Map<string, ts.FunctionLikeDeclaration>;
+}
+
+/** The value a same-file object literal gives one named key: an assignment's initializer, or a shorthand's constant. */
+function propertyValue(lit: ts.ObjectLiteralExpression, key: string, scope: SeverityScope): ts.Expression | undefined {
+  for (const p of lit.properties) {
+    if (ts.isPropertyAssignment(p) && nameText(p.name) === key) return p.initializer;
+    if (ts.isShorthandPropertyAssignment(p) && p.name.text === key) return scope.consts.get(key) ?? p.name;
+  }
+  return undefined;
+}
+
+/**
+ * The same-file object or array literal `e` names, if any: a constant (`M`, through `as const` and the
+ * other wrappers `unwrap` removes), or a named property of one that is itself a literal (`M.a`, `M.a.b`).
+ * Anything else — a parameter, an import, a call — is not a table this file wrote.
+ */
+function tableOf(e: ts.Expression, scope: SeverityScope, depth: number): ts.ObjectLiteralExpression | ts.ArrayLiteralExpression | undefined {
+  if (depth > 8) return undefined;
+  e = unwrap(e);
+  let target: ts.Expression | undefined;
+  if (ts.isIdentifier(e)) target = scope.consts.get(e.text);
+  else if (ts.isPropertyAccessExpression(e)) {
+    const parent = tableOf(e.expression, scope, depth + 1);
+    target = parent && ts.isObjectLiteralExpression(parent) ? propertyValue(parent, e.name.text, scope) : undefined;
+  }
+  if (!target) return undefined;
+  target = unwrap(target);
+  if (ts.isObjectLiteralExpression(target) || ts.isArrayLiteralExpression(target)) return target;
+  return ts.isIdentifier(target) || ts.isPropertyAccessExpression(target) ? tableOf(target, scope, depth + 1) : undefined;
+}
+
+/**
  * Whether `e` can evaluate to one of the three severity literals: directly, through a ternary or a
  * `??`/`||`/`&&`, through a type assertion, or through a same-file constant (recursively).
+ *
+ * Widened in P5-36 (P5-34 N1) to two more routes a literal takes to a `severity` key: element access
+ * into a same-file object or array literal any of whose values can be a severity (`M[k]`, `L[0]`),
+ * and the return value of a same-file function or arrow that can return one (`sev()`). Element access
+ * into anything that is not such a table (`input.sevs[k]`) and a helper whose returns are not
+ * literals stay clean: they read a severity somebody else wrote.
+ *
+ * Widened again at P5-36 G2 to property (dot) access into such a table (`M.high`, and a nested
+ * `M.a.b`): the orchestrator's mutation M14 wrote `{ severity: LEVELS.high }` in a script and the
+ * bracket-only check let it through. Dot access names one property, so only that property's value is
+ * judged — `M.a` is clean when `a` holds a non-severity, even if a sibling holds one.
  */
-function takesSeverityLiteral(e: ts.Expression, consts: Map<string, ts.Expression>, depth = 0): boolean {
+function takesSeverityLiteral(e: ts.Expression, scope: SeverityScope, depth = 0): boolean {
   if (depth > 8) return false;
   e = unwrap(e);
   if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return SEVERITY_LITERALS.has(e.text);
   if (ts.isConditionalExpression(e)) {
-    return takesSeverityLiteral(e.whenTrue, consts, depth + 1) || takesSeverityLiteral(e.whenFalse, consts, depth + 1);
+    return takesSeverityLiteral(e.whenTrue, scope, depth + 1) || takesSeverityLiteral(e.whenFalse, scope, depth + 1);
   }
   if (ts.isBinaryExpression(e) && [
     ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.AmpersandAmpersandToken,
   ].includes(e.operatorToken.kind)) {
-    return takesSeverityLiteral(e.left, consts, depth + 1) || takesSeverityLiteral(e.right, consts, depth + 1);
+    return takesSeverityLiteral(e.left, scope, depth + 1) || takesSeverityLiteral(e.right, scope, depth + 1);
   }
   if (ts.isIdentifier(e)) {
-    const init = consts.get(e.text);
-    return init ? takesSeverityLiteral(init, consts, depth + 1) : false;
+    const init = scope.consts.get(e.text);
+    return init ? takesSeverityLiteral(init, scope, depth + 1) : false;
+  }
+  if (ts.isPropertyAccessExpression(e)) {
+    const lit = tableOf(e.expression, scope, depth + 1);
+    const value = lit && ts.isObjectLiteralExpression(lit) ? propertyValue(lit, e.name.text, scope) : undefined;
+    return value ? takesSeverityLiteral(value, scope, depth + 1) : false;
+  }
+  if (ts.isElementAccessExpression(e)) {
+    const lit = tableOf(e.expression, scope, depth + 1);
+    if (lit && ts.isObjectLiteralExpression(lit)) {
+      return lit.properties.some((p) => ts.isPropertyAssignment(p) && takesSeverityLiteral(p.initializer, scope, depth + 1));
+    }
+    if (lit && ts.isArrayLiteralExpression(lit)) return lit.elements.some((el) => takesSeverityLiteral(el, scope, depth + 1));
+    return false;
+  }
+  if (ts.isCallExpression(e) && ts.isIdentifier(e.expression)) {
+    const fn = scope.fns.get(e.expression.text);
+    return fn ? returnedExpressions(fn).some((r) => takesSeverityLiteral(r, scope, depth + 1)) : false;
   }
   return false;
 }
 
 /** Every place `sf` writes a severity literal into something named `severity`. Reads are not writes. */
 export function severityAssignments(sf: ts.SourceFile): string[] {
-  const consts = constsOf(sf);
+  const scope: SeverityScope = { consts: constsOf(sf), fns: functionsOf(sf) };
   const out: string[] = [];
   const hit = (n: ts.Node, how: string) => out.push(`${sf.fileName}:${lineOf(sf, n)} ${how}`);
   walk(sf, (n) => {
-    if (ts.isPropertyAssignment(n) && nameText(n.name) === 'severity' && takesSeverityLiteral(n.initializer, consts)) {
+    if (ts.isPropertyAssignment(n) && nameText(n.name) === 'severity' && takesSeverityLiteral(n.initializer, scope)) {
       hit(n, ts.isComputedPropertyName(n.name) ? 'computed key' : 'property');
     }
-    if (ts.isShorthandPropertyAssignment(n) && n.name.text === 'severity' && takesSeverityLiteral(n.name, consts)) {
+    if (ts.isShorthandPropertyAssignment(n) && n.name.text === 'severity' && takesSeverityLiteral(n.name, scope)) {
       hit(n, 'shorthand');
     }
     if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       const l = n.left;
       const named = (ts.isPropertyAccessExpression(l) && l.name.text === 'severity')
         || (ts.isElementAccessExpression(l) && nameText(unwrap(l.argumentExpression)) === 'severity');
-      if (named && takesSeverityLiteral(n.right, consts)) hit(n, 'assignment');
+      if (named && takesSeverityLiteral(n.right, scope)) hit(n, 'assignment');
     }
     if (ts.isJsxAttribute(n) && ts.isIdentifier(n.name) && n.name.text === 'severity' && n.initializer) {
       const init = n.initializer;
       const lit = ts.isStringLiteral(init) ? SEVERITY_LITERALS.has(init.text)
-        : ts.isJsxExpression(init) && init.expression ? takesSeverityLiteral(init.expression, consts) : false;
+        : ts.isJsxExpression(init) && init.expression ? takesSeverityLiteral(init.expression, scope) : false;
       if (lit) hit(n, 'jsx prop');
     }
   });
@@ -375,8 +472,10 @@ describe('P5-34 wiring: the vocabulary is pure', () => {
   it('T34-W4: lib/domain/findings*.ts import only pure modules, never the scored-set predicates, and read no clock', () => {
     // P5-35 added `findingsFreshness.ts`, which the vocabulary pattern names by design; the rule below
     // now covers it too. Only this enumeration changed — the rule and its fabricated violators did not.
+    // P5-36 added `findingsDigest.ts` the same way, and the same rule covers it.
     expect(VOCABULARY.map(rel).sort()).toEqual([
-      'lib/domain/findings.ts', 'lib/domain/findingsFreshness.ts', 'lib/domain/findingsInventory.ts',
+      'lib/domain/findings.ts', 'lib/domain/findingsDigest.ts', 'lib/domain/findingsFreshness.ts',
+      'lib/domain/findingsInventory.ts',
     ]);
     for (const f of VOCABULARY) expect(purityViolations(parse(f), rel(f)), rel(f)).toEqual([]);
 
@@ -581,7 +680,20 @@ const THRESHOLD_IMPORTS: [string, string][] = [
   ['VALUATION_STALE_DAYS', './valuationStaleness'],
 ];
 
-const SQL_CLOCKS = /\bnow\s*\(|\bcurrent_date\b|\bcurrent_timestamp\b|\bclock_timestamp\b|\blocaltimestamp\b|\btransaction_timestamp\b|\bstatement_timestamp\b/i;
+/**
+ * Every way a SQL text can read Postgres's clock. Widened in P5-36 (P5-35 N1): `CURRENT_TIME`,
+ * `LOCALTIME` (a whole word, so `LOCALTIMESTAMP` still matches its own entry and a column such as
+ * `localtime_name` does not), `timeofday()`, and the special date and time input strings `'now'`,
+ * `'today'`, `'tomorrow'` and `'yesterday'` when they are cast — by `::` or `CAST(… AS …)` — since a
+ * cast is what makes Postgres read the clock for them. The same words as plain values (`label =
+ * 'today'`) are not clocks.
+ */
+const SQL_CLOCKS = new RegExp([
+  String.raw`\bnow\s*\(`, String.raw`\bcurrent_date\b`, String.raw`\bcurrent_timestamp\b`, String.raw`\bcurrent_time\b`,
+  String.raw`\bclock_timestamp\b`, String.raw`\blocaltimestamp\b`, String.raw`\blocaltime\b`, String.raw`\btimeofday\s*\(`,
+  String.raw`\btransaction_timestamp\b`, String.raw`\bstatement_timestamp\b`,
+  String.raw`'(?:now|today|tomorrow|yesterday)'\s*::`, String.raw`\bcast\s*\(\s*'(?:now|today|tomorrow|yesterday)'`,
+].join('|'), 'i');
 
 /** Every string and template literal's text (template spans joined with a placeholder), outside imports. */
 function literalTexts(sf: ts.SourceFile): string[] {
@@ -721,11 +833,18 @@ function namesVocabulary(fromRel: string, spec: string): boolean {
   if (spec === '@b8/contracts/findings') return true;
   if (fromRel.startsWith('../../packages/contracts/')) return spec === './findings' || spec === './findings.ts';
   const target = importTarget(fromRel, spec);
+  // P5-36: the findings digest's loader is part of what is contained, like the freshness read.
+  if (target === 'lib/findingsDigestRead') return true;
   return /^lib\/domain\/findings[A-Za-z]*$/.test(target) || target === 'lib/findingsFreshnessRead';
 }
 
-/** The declared importers: the vocabulary modules, the freshness read, and the contract itself. */
-const DECLARED_IMPORTER = (r: string) =>
+/**
+ * The declared importers: the vocabulary modules, the freshness read, and the contract itself; and,
+ * from P5-36, the findings digest's loader, its page and its view — the first consumer, and the only
+ * one this step declares.
+ */
+const DIGEST_IMPORTERS = new Set(['lib/findingsDigestRead.ts', 'app/digest/page.tsx', 'components/DigestView.tsx']);
+const DECLARED_IMPORTER = (r: string) => DIGEST_IMPORTERS.has(r) ||
   /^lib\/domain\/findings[A-Za-z]*\.ts$/.test(r) || r === 'lib/findingsFreshnessRead.ts' || r === '../../packages/contracts/findings.ts';
 
 /** Non-test files importing the vocabulary that are not declared importers. */
@@ -787,5 +906,349 @@ describe('P5-35 wiring: freshness is viewer-safe and has no consumer', () => {
     ];
     for (const c of consumers) expect({ c: c.rel, flagged: undeclaredImporters([c]).length > 0 }).toEqual({ c: c.rel, flagged: true });
     expect(undeclaredImporters([{ rel: 'lib/x.ts', sf: fake("import { feedFindings } from './domain/feedHealth';") }])).toEqual([]);
+  });
+});
+
+// ─── P5-36: the findings digest is pure, thin and contained (W1–W5) ──────────────────────────────
+
+const DIGEST = join(WEB, 'lib/domain/findingsDigest.ts');
+const DIGEST_READ = join(WEB, 'lib/findingsDigestRead.ts');
+const DIGEST_PAGE = join(WEB, 'app/digest/page.tsx');
+const DIGEST_VIEW = join(WEB, 'components/DigestView.tsx');
+
+/**
+ * Every non-test file under `scripts/` (`.ts` and `.mjs`) and `instrumentation.ts`: the code that
+ * runs outside a request — the daily job, the backup, the boot hook — which the P5-34 scan never
+ * read (P5-34 N1). Parsed as TypeScript, which accepts the plain JavaScript of the `.mjs` files.
+ */
+const SCRIPT_SOURCES = [
+  ...readdirSync(join(WEB, 'scripts'))
+    .filter((f) => /\.(ts|mjs)$/.test(f) && !/\.test\.ts$/.test(f))
+    .map((f) => join(WEB, 'scripts', f)),
+  join(WEB, 'instrumentation.ts'),
+];
+
+describe('P5-36 wiring: the SQL-clock check, widened', () => {
+  it('T36-W1: CURRENT_TIME, LOCALTIME, timeofday() and cast date strings are flagged; known columns and plain values are not; both read modules are clean', () => {
+    const flagged = (src: string) => freshnessPurityViolations(fake(src), { pure: false }).length > 0;
+    const newFamilies = [
+      "const q = 'SELECT CURRENT_TIME';",
+      'const q = `SELECT ran_at FROM sync_log WHERE ran_at::time < LOCALTIME`;',
+      "const q = 'SELECT timeofday()';",
+      `const q = "SELECT 1 WHERE ran_at < 'now'::timestamptz";`,
+      `const q = "SELECT 1 WHERE d = 'today'::date";`,
+      `const q = "SELECT 1 WHERE d = 'tomorrow' :: date";`,
+      `const q = "SELECT 1 WHERE d = 'yesterday'::date";`,
+      "const q = `SELECT 1 WHERE ran_at < CAST('now' AS timestamptz)`;",
+      "const q = `SELECT cast( 'today' as date)`;",
+    ];
+    for (const v of newFamilies) expect({ v, flagged: flagged(v) }).toEqual({ v, flagged: true });
+    // The families the P5-35 check already knew are still flagged, LOCALTIMESTAMP included.
+    const oldFamilies = [
+      'const q = `SELECT NOW()`;', "const q = 'SELECT CURRENT_DATE';", 'const q = `SELECT current_timestamp`;',
+      'const q = `SELECT clock_timestamp()`;', 'const q = `SELECT LOCALTIMESTAMP`;',
+      'const q = `SELECT transaction_timestamp()`;', 'const q = `SELECT statement_timestamp()`;',
+    ];
+    for (const v of oldFamilies) expect({ v, flagged: flagged(v) }).toEqual({ v, flagged: true });
+    const clean = [
+      'const q = `SELECT known_at FROM observations`;',
+      'const q = `SELECT localtime_name FROM zones`;',
+      "const q = `SELECT 1 FROM labels WHERE label = 'today'`;",
+      'const q = `SELECT today_total FROM rollups`;',
+      "const q = `SELECT 1 FROM labels WHERE label = 'now'`;",
+    ];
+    for (const c of clean) expect({ c, v: freshnessPurityViolations(fake(c), { pure: false }) }).toEqual({ c, v: [] });
+
+    // The real read modules, the freshness read and the new loader, are clean under the wider check.
+    expect(freshnessPurityViolations(parse(FRESHNESS_READ), { pure: false })).toEqual([]);
+    expect(freshnessPurityViolations(parse(DIGEST_READ), { pure: false })).toEqual([]);
+    // Not vacuous: the loader does carry SQL of its own.
+    expect(literalTexts(parse(DIGEST_READ)).some((t) => /\bfrom\s+accounts\b/i.test(t))).toBe(true);
+  });
+});
+
+describe('P5-36 wiring: severity has one home, widened', () => {
+  it('T36-W2: a severity literal reaching a severity key through a lookup table or a helper is flagged; scripts and instrumentation are scanned and clean', () => {
+    const violators: [string, string][] = [
+      ["const M = { a: 'warning' }; const f = ({ severity: M[k] });", 'q.ts'],
+      ["const L = ['notice']; const f = ({ severity: L[0] });", 'r.ts'],
+      ["function sev() { return 'warning'; } const f = ({ severity: sev() });", 's.ts'],
+      ["const sev = (x: boolean) => (x ? 'warning' : 'notice'); const f = ({ severity: sev(y) });", 't.ts'],
+      ["const sev = function () { if (a) return 'critical'; return b; }; finding.severity = sev();", 'u.ts'],
+      ["const M = { a: 'warning' } as const; export function C() { return <Badge severity={M[k]} />; }", 'v.tsx'],
+      // Dot access into a lookup table (P5-36 G2, mutation M14), plain, `as const`, nested and in JSX.
+      ["const LEVELS = { high: 'critical' } as const; export const probe = { severity: LEVELS.high };", 'zz-probe.ts'],
+      ["const M = { a: 'warning' }; const f = ({ severity: M.a });", 'da.ts'],
+      ["const M = { a: { b: 'notice' } } as const; finding.severity = M.a.b;", 'db.ts'],
+      ["const N = { b: 'notice' }; const M = { a: N }; const f = ({ severity: M.a.b });", 'dc.ts'],
+      ["const M = { a: 'warning' } as const; export function C() { return <Badge severity={M.a} />; }", 'dd.tsx'],
+    ];
+    for (const [src, file] of violators) {
+      expect({ src, flagged: severityAssignments(fake(src, file)).length > 0 }).toEqual({ src, flagged: true });
+    }
+    const clean: [string, string][] = [
+      ['const f = ({ severity: input.sevs[k] });', 'w.ts'],
+      ['function sev(f: { severity: string }) { return f.severity; } const g = ({ severity: sev(x) });', 'x.ts'],
+      ["const M = { a: 'high', b: 'low' }; const f = ({ severity: M[k] });", 'y.ts'],
+      ["function outer() { const inner = () => 'warning'; return level; } const f = ({ severity: outer() });", 'z.ts'],
+      // Dot access into a table whose values, or whose named value, are not severities.
+      ["const M = { a: 'high' } as const; const f = ({ severity: M.a });", 'ca.ts'],
+      ["const M = { a: 'high', b: 'warning' }; const f = ({ severity: M.a });", 'cb.ts'],
+      ["const M = { a: 'high' } as const; export function C() { return <Badge severity={M.a} />; }", 'cc.tsx'],
+      ['const f = ({ severity: input.levels.high });', 'cd.ts'],
+    ];
+    for (const [src, file] of clean) {
+      expect({ src, hits: severityAssignments(fake(src, file)) }).toEqual({ src, hits: [] });
+    }
+
+    // The widened scan: the P5-34 set plus every non-test script and the boot hook.
+    const scanned = [...WEB_SOURCES, ...CONTRACT_SOURCES, ...SCRIPT_SOURCES].filter((f) => !isVocabulary(f));
+    expect(scanned.flatMap((f) => severityAssignments(parse(f)).map((h) => `${rel(f)} ${h}`))).toEqual([]);
+    expect(SCRIPT_SOURCES.some((f) => rel(f).startsWith('scripts/') && f.endsWith('.ts'))).toBe(true);
+    expect(SCRIPT_SOURCES.some((f) => rel(f).startsWith('scripts/') && f.endsWith('.mjs'))).toBe(true);
+    expect(scanned.some((f) => rel(f) === 'instrumentation.ts')).toBe(true);
+    expect(SCRIPT_SOURCES.every((f) => !/\.test\.ts$/.test(f))).toBe(true);
+  });
+});
+
+describe('P5-36 wiring: the vocabulary has exactly its declared importers', () => {
+  it('T36-W3: only the declared files import the vocabulary, the freshness read or the digest loader; fabricated consumers are flagged', () => {
+    const files = [...WEB_SOURCES, ...CONTRACT_SOURCES].map((f) => ({ rel: rel(f), sf: parse(f) }));
+    expect(undeclaredImporters(files)).toEqual([]);
+
+    // The five declared consumers outside the vocabulary modules exist and do import it.
+    const importsVocabulary = (r: string, sf: ts.SourceFile) => sf.statements.some((st) =>
+      (ts.isImportDeclaration(st) || ts.isExportDeclaration(st)) && !!st.moduleSpecifier && ts.isStringLiteral(st.moduleSpecifier)
+      && namesVocabulary(r, st.moduleSpecifier.text));
+    for (const f of [DIGEST, FRESHNESS_READ, DIGEST_READ, DIGEST_PAGE, DIGEST_VIEW]) {
+      expect(existsSync(f), rel(f)).toBe(true);
+      expect(importsVocabulary(rel(f), parse(f)), rel(f)).toBe(true);
+      expect(DECLARED_IMPORTER(rel(f)), rel(f)).toBe(true);
+    }
+
+    const consumers = [
+      { rel: 'app/dashboard/page.tsx', sf: fake("import { composeDigest } from '@/lib/domain/findingsDigest';", 'page.tsx') },
+      { rel: 'components/AlertBell.tsx', sf: fake("import type { FindingsDigest } from '@/lib/domain/findingsDigest';", 'AlertBell.tsx') },
+      { rel: 'components/DigestCard.tsx', sf: fake("import { loadFindingsDigestInput } from '@/lib/findingsDigestRead';", 'DigestCard.tsx') },
+      { rel: 'lib/digestRead.ts', sf: fake("import { composeDigest } from './domain/findingsDigest';") },
+      { rel: 'lib/overviewRead.ts', sf: fake("import { loadFindingsDigestInput } from './findingsDigestRead';") },
+      { rel: 'app/api/v1/digest/route.ts', sf: fake("import { composeDigest } from '@/lib/domain/findingsDigest';") },
+      { rel: 'lib/x.ts', sf: fake("const m = import('./domain/findingsDigest');") },
+    ];
+    for (const c of consumers) expect({ c: c.rel, flagged: undeclaredImporters([c]).length > 0 }).toEqual({ c: c.rel, flagged: true });
+    // The email digest's own modules are not the vocabulary: importing them is not flagged here.
+    expect(undeclaredImporters([{ rel: 'lib/x.ts', sf: fake("import { loadDigest } from './digestRead';") }])).toEqual([]);
+  });
+});
+
+/** Literal texts that look like SQL statements. */
+const SQL_STATEMENT = /\bselect\b[\s\S]*\bfrom\b|\binsert\s+into\b|\bupdate\s+\w+\s+set\b|\bdelete\s+from\b/i;
+const THRESHOLD_NAMES = new Set(['STALE_AFTER_DAYS', 'STALE_AFTER_HOURS', 'VALUATION_STALE_DAYS', 'LATE_AFTER_HOURS']);
+
+/** What in the digest module reads a clock, judges an age, reaches outside its siblings, or writes a severity. */
+export function digestPurityViolations(sf: ts.SourceFile): string[] {
+  const out: string[] = [];
+  const at = (n: ts.Node, what: string) => out.push(`${lineOf(sf, n)} ${what}`);
+  for (const st of sf.statements) {
+    if (!(ts.isImportDeclaration(st) || ts.isExportDeclaration(st)) || !st.moduleSpecifier || !ts.isStringLiteral(st.moduleSpecifier)) continue;
+    const spec = st.moduleSpecifier.text;
+    if (!(spec.startsWith('./') && !spec.slice(2).includes('/')) && spec !== '@b8/contracts/findings') at(st, `import of ${spec}`);
+  }
+  walk(sf, (n) => {
+    if (ts.isCallExpression(n)) {
+      const c = n.expression;
+      if (c.kind === ts.SyntaxKind.ImportKeyword) at(n, 'dynamic import');
+      if (ts.isIdentifier(c) && c.text === 'parseFloat') at(n, 'parseFloat(');
+      if (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression)) {
+        const call = `${c.expression.text}.${c.name.text}`;
+        if (['Date.now', 'Math.random', 'Number.parseFloat', 'performance.now'].includes(call)) at(n, `${call}(`);
+      }
+    }
+    if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'Date'
+        && (!n.arguments || n.arguments.length === 0)) at(n, 'new Date()');
+    if (ts.isIdentifier(n) && THRESHOLD_NAMES.has(n.text)) at(n, n.text);
+    if (ts.isNumericLiteral(n) && n.text !== '0' && n.text !== '1') at(n, `numeric literal ${n.text}`);
+  });
+  for (const t of literalTexts(sf)) {
+    if (SQL_STATEMENT.test(t) || SQL_CLOCKS.test(t)) out.push(`SQL in "${t.trim().slice(0, 40)}"`);
+  }
+  for (const h of severityAssignments(sf)) out.push(`severity written: ${h}`);
+  return out;
+}
+
+describe('P5-36 wiring: the digest module is pure', () => {
+  it('T36-W4: findingsDigest.ts reads no clock, imports no threshold, has no literal but 0 and 1, no SQL, and writes no severity', () => {
+    const sf = parse(DIGEST);
+    expect(digestPurityViolations(sf)).toEqual([]);
+    expect(severityAssignments(sf)).toEqual([]);
+    // Not vacuous: the module does have numeric literals and imports, all of the allowed kind.
+    let numerics = 0;
+    walk(sf, (n) => { if (ts.isNumericLiteral(n)) numerics++; });
+    expect(numerics).toBeGreaterThan(0);
+    expect(sf.statements.filter(ts.isImportDeclaration).length).toBeGreaterThanOrEqual(2);
+
+    const violators = [
+      'const t = Date.now();',
+      'const d = new Date();',
+      'const d = new Date;',
+      'const r = Math.random();',
+      "const n = parseFloat('1.5');",
+      'const t = performance.now();',
+      "import { STALE_AFTER_DAYS } from './syncHealth';",
+      "import { STALE_AFTER_HOURS as H } from './feedHealth';",
+      "import { STALE_AFTER_DAYS as W } from './walletStaleness';",
+      "import { VALUATION_STALE_DAYS } from './valuationStaleness';",
+      "import { LATE_AFTER_HOURS } from './jobHealth';",
+      "import db from '../db';",
+      "import { x } from './sub/module';",
+      "import type { OverviewData } from '@b8/contracts/overview';",
+      'const stale = days >= 2;',
+      'const n = 9;',
+      "const q = 'SELECT id FROM accounts';",
+      "const q = `SELECT NOW()`;",
+      "const f = { severity: 'warning' };",
+      "const m = import('./findings');",
+    ];
+    for (const v of violators) expect({ v, flagged: digestPurityViolations(fake(v)).length > 0 }).toEqual({ v, flagged: true });
+    const clean = [
+      "import { FINDING_SOURCES, type FindingSource } from './findings';",
+      "import { SeveritySchema, type Finding } from '@b8/contracts/findings';",
+      'const one = n === 1 ? 0 : 1;',
+      "const rank = (f: { severity: string }) => order.indexOf(f.severity);",
+      "const s = `${n} days ago, from the last selected source`;",
+      '// Date.now() and STALE_AFTER_DAYS in a comment\nconst x = 0;',
+    ];
+    for (const c of clean) expect({ c, v: digestPurityViolations(fake(c)) }).toEqual({ c, v: [] });
+  });
+});
+
+const SEVERITY_WORD = /\b(critical|warning|notice)\b/i;
+const ALL_CLEAR = /all clear|good news|nothing to report|no issues|all good|on track|nothing wrong|healthy|up to date|up-to-date/i;
+/** What the page may import, as targets under apps/web or bare packages. */
+const PAGE_IMPORTS = new Set(['components/DigestView', 'lib/domain/findingsDigest', 'lib/domain/monthOutlook', 'lib/findingsDigestRead', 'lib/giftViewer']);
+
+/** What in the page or the view computes a figure, reads a clock, words a severity or reaches the database. */
+export function thinViolations(sf: ts.SourceFile, fromRel: string, role: 'page' | 'view' | 'loader'): string[] {
+  const out: string[] = [];
+  const at = (n: ts.Node, what: string) => out.push(`${lineOf(sf, n)} ${what}`);
+  let zeroArgDates = 0;
+  const calls = new Set<string>();
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier)) continue;
+    const spec = st.moduleSpecifier.text;
+    const target = importTarget(fromRel, spec);
+    if (/giftReadPath/.test(spec)) at(st, `imports ${spec}`);
+    const names = st.importClause?.namedBindings && ts.isNamedImports(st.importClause.namedBindings)
+      ? st.importClause.namedBindings.elements.map((e) => (e.propertyName ?? e.name).text) : [];
+    if (names.includes('visibleTransactions')) at(st, 'imports visibleTransactions');
+    if (role === 'page' && !PAGE_IMPORTS.has(target) && !/^(react|next)(\/|$)/.test(target)) at(st, `page imports ${spec}`);
+    if (role === 'view' && (target === 'lib/db' || target === 'pg' || /Read$/.test(target))) at(st, `view imports ${spec}`);
+  }
+  walk(sf, (n) => {
+    if (ts.isIdentifier(n) && n.text === 'visibleTransactions') at(n, 'visibleTransactions');
+    if (role === 'loader') return;
+    if (ts.isCallExpression(n)) {
+      const c = n.expression;
+      if (ts.isIdentifier(c)) {
+        calls.add(c.text);
+        if (c.text === 'parseFloat' || c.text === 'Number') at(n, `${c.text}(`);
+      }
+      if (ts.isPropertyAccessExpression(c)) {
+        calls.add(c.name.text);
+        if (c.name.text === 'toFixed') at(n, '.toFixed(');
+        if (ts.isIdentifier(c.expression)) {
+          const call = `${c.expression.text}.${c.name.text}`;
+          if (['Math.abs', 'Math.round', 'Date.now', 'performance.now', 'Number.parseFloat'].includes(call)) at(n, `${call}(`);
+        }
+      }
+    }
+    if (ts.isPropertyAccessExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'Intl' && n.name.text === 'NumberFormat') {
+      at(n, 'Intl.NumberFormat');
+    }
+    if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'Date') {
+      if (!n.arguments || n.arguments.length === 0) zeroArgDates++;
+      if (role === 'view') at(n, 'new Date');
+    }
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isJsxText(n) || ts.isTemplateHead(n)
+        || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) {
+      if (ts.isImportDeclaration(n.parent)) return;
+      if (SEVERITY_WORD.test(n.text)) at(n, `severity word in "${n.text.trim().slice(0, 30)}"`);
+      if (ALL_CLEAR.test(n.text)) at(n, `all-clear phrase in "${n.text.trim().slice(0, 30)}"`);
+    }
+  });
+  if (role === 'page') {
+    if (zeroArgDates !== 1) out.push(`${zeroArgDates} clock reads, expected exactly one`);
+    for (const fn of ['pageViewer', 'loadFindingsDigestInput', 'composeDigest']) if (!calls.has(fn)) out.push(`does not call ${fn}`);
+    const def = sf.statements.filter(ts.isFunctionDeclaration)
+      .find((st) => (ts.getModifiers(st) ?? []).some((m) => m.kind === ts.SyntaxKind.DefaultKeyword));
+    if (!def || !(ts.getModifiers(def) ?? []).some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) out.push('no default async export');
+    const dynamic = sf.statements.some((st) => ts.isVariableStatement(st)
+      && (ts.getModifiers(st) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+      && st.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && d.name.text === 'dynamic'
+        && !!d.initializer && ts.isStringLiteral(d.initializer) && d.initializer.text === 'force-dynamic'));
+    if (!dynamic) out.push("no export const dynamic = 'force-dynamic'");
+  }
+  return out;
+}
+
+describe('P5-36 wiring: the page and the view are thin', () => {
+  it('T36-W5: the page has one clock read, calls the viewer, the loader and composeDigest, and reaches no database; neither page nor view computes a figure or words a severity', () => {
+    expect(thinViolations(parse(DIGEST_PAGE), rel(DIGEST_PAGE), 'page')).toEqual([]);
+    expect(thinViolations(parse(DIGEST_VIEW), rel(DIGEST_VIEW), 'view')).toEqual([]);
+    // No file of the digest reads the gift read path or masks a figure per viewer.
+    for (const f of [DIGEST, DIGEST_READ]) expect(thinViolations(parse(f), rel(f), 'loader'), rel(f)).toEqual([]);
+    expect(viewerLeaks(parse(DIGEST_READ))).toEqual([]);
+
+    const page = (body: string) => `export const dynamic = 'force-dynamic';
+import DigestView from '@/components/DigestView';
+import { composeDigest } from '@/lib/domain/findingsDigest';
+import { loadFindingsDigestInput } from '@/lib/findingsDigestRead';
+import { pageViewer } from '@/lib/giftViewer';
+export default async function P() {
+  const now = new Date();
+  const { findings, notEvaluated, period } = await loadFindingsDigestInput(await pageViewer('/digest'), now);
+  ${body}
+  return <DigestView digest={composeDigest(findings, period, { notEvaluated })} />;
+}`;
+    const pageFile = 'app/digest/page.tsx';
+    const flaggedPage = (src: string) => thinViolations(fake(src, 'page.tsx'), pageFile, 'page').length > 0;
+    expect(thinViolations(fake(page(''), 'page.tsx'), pageFile, 'page')).toEqual([]);
+    const pageViolators = [
+      page('const later = new Date();'),
+      page('const t = Date.now();'),
+      page('const x = Math.abs(-1);'),
+      page("const x = Number('1');"),
+      page("const label = 'warning';"),
+      page("const label = 'all clear';"),
+      page('const f = new Intl.NumberFormat();'),
+      `import db from '@/lib/db';\n${page('')}`,
+      `import { Pool } from 'pg';\n${page('')}`,
+      `import { visibleTransactions } from '@/lib/giftReadPath';\n${page('')}`,
+      `import { loadFeedHealth } from '@/lib/feedHealthRead';\n${page('')}`,
+      `import { asOfDate } from '@/lib/domain/findings';\n${page('')}`,
+      page('').replace("export const dynamic = 'force-dynamic';", ''),
+      page('').replace('export default async function', 'export default function'),
+      page('').replace("await pageViewer('/digest')", 'null'),
+    ];
+    for (const v of pageViolators) expect({ v, flagged: flaggedPage(v) }).toEqual({ v, flagged: true });
+
+    const viewFile = 'components/DigestView.tsx';
+    const flaggedView = (src: string) => thinViolations(fake(src, 'DigestView.tsx'), viewFile, 'view').length > 0;
+    const viewViolators = [
+      'export default function V({ v }: { v: string }) { return <p>{Math.round(1.5)}</p>; }',
+      'export default function V({ v }: { v: string }) { return <p>{parseFloat(v)}</p>; }',
+      'export default function V({ v }: { v: string }) { return <p>{(1).toFixed(2)}</p>; }',
+      'export default function V() { return <p>{new Date().getFullYear()}</p>; }',
+      'export default function V() { return <p>{Date.now()}</p>; }',
+      "export default function V() { return <p>{'notice'}</p>; }",
+      'export default function V() { return <p>Nothing wrong today</p>; }',
+      "import db from '@/lib/db';\nexport default function V() { return <p />; }",
+    ];
+    for (const v of viewViolators) expect({ v, flagged: flaggedView(v) }).toEqual({ v, flagged: true });
+    const viewClean = "const T: Record<string, string> = { critical: 'border-red-200' };\nexport default function V({ s }: { s: string }) { return <p className={T[s]}>{s}</p>; }";
+    expect(thinViolations(fake(viewClean, 'DigestView.tsx'), viewFile, 'view')).toEqual([]);
+
+    const loaderLeak = "import { visibleTransactions } from './giftReadPath';\nconst rows = visibleTransactions(viewer);";
+    expect(thinViolations(fake(loaderLeak), 'lib/findingsDigestRead.ts', 'loader').length).toBeGreaterThan(0);
   });
 });

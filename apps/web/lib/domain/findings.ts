@@ -30,9 +30,9 @@
 // triple the overview already uses, so a test means the same thing in December as in March and
 // under any process time zone.
 //
-// NOTHING EXISTING IMPORTS THIS YET. Step 35 (freshness) and step 36 (the composed digest) are its
-// first consumers; the overview payload deliberately does not carry the list in this step (SPEC.md,
-// "Decision on the overview payload").
+// WHO IMPORTS THIS. Step 35 (freshness) and step 36 (the findings digest at `/digest`, through
+// `lib/findingsDigestRead.ts`) are its consumers; the overview payload deliberately does not carry
+// the list (P5-34 SPEC.md, "Decision on the overview payload").
 //
 // FRESHNESS (step 35). Every conversion takes an optional `FreshnessContext` and attaches the
 // finding's `freshness`, computed by `findingsFreshness.ts` from the producer finding it converts —
@@ -180,8 +180,9 @@ function monthlyOf(year: number, m: MonthVariance) {
  *
  * `notice` whatever `scored` says: an under-spent line is a wrong budget, not money at risk. The
  * period is the producer's qualifying months, in the producer's (calendar) order and not assumed
- * contiguous — $0-budget months are absent by construction. The window totals are the producer's,
- * not re-summed here, and `monthly` carries its per-month evidence (CONTRACT.md ambiguity 1).
+ * contiguous — months with nothing budgeted are absent by construction. The window totals are the
+ * producer's, not re-summed here, and `monthly` carries its per-month evidence (CONTRACT.md
+ * ambiguity 1).
  */
 export function fromChronicUnderspend(f: ChronicUnderspendFinding, asOf: AsOf, freshness?: FreshnessContext): FindingOf<'budget-underspend'> {
   return {

@@ -92,6 +92,8 @@ export const PAGES: Surface[] = [
   { file: 'app/categories/[name]/page.tsx', classes: ['text-bearing'], scenario: 'H2' },
   { file: 'app/categories/page.tsx', classes: ['no-transaction-data'] },
   { file: 'app/dashboard/page.tsx', classes: ['text-bearing'], scenario: 'H2' },
+  // The findings digest (P5-36): sums and counts the producers already show, no row text (T36-L4).
+  { file: 'app/digest/page.tsx', classes: ['numeric-only'] },
   { file: 'app/gifts/page.tsx', classes: ['text-bearing'], scenario: 'H10' },
   { file: 'app/import/page.tsx', classes: ['no-transaction-data'] },
   { file: 'app/insights/page.tsx', classes: ['no-transaction-data'] },

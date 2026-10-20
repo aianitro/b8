@@ -51,10 +51,13 @@ export default defineConfig({
     // keeps a future pure test placed in `scripts/` from being swept into a DB-requiring run.
     // `scripts/rekey-plaid-ids.test.ts` (P6-40e) the same way and for the same reason, and
     // `scripts/findings-freshness-read.test.ts` (P5-35) too: it pins the freshness read's SQL against
-    // seeded rows, which the pure config — no database — cannot do.
+    // seeded rows, which the pure config — no database — cannot do. `scripts/findings-digest-read.test.ts`
+    // (P5-36) likewise: it runs the findings digest's loader, and every reader it is pinned against,
+    // over rows it seeds itself.
     include: [
       'app/api/v1/**/*.test.ts', 'proxy.test.ts', 'scripts/backfill-enrichment.test.ts',
       'scripts/rekey-plaid-ids.test.ts', 'scripts/findings-freshness-read.test.ts',
+      'scripts/findings-digest-read.test.ts',
     ],
     // Two setup files, in this order and for two unrelated reasons. The guard is the control
     // described above and must stay first — it refuses before any pool exists. The second installs

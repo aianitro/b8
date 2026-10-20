@@ -23,8 +23,10 @@
 // the year it runs in.
 //
 // FABRICATED DATA ONLY. Institution, account and category names are the spec's fixtures
-// (`Fabricated Credit Union`, `Fixture Checking`, `Fixture Category`); amounts are single digits; the
-// gift canary is an alphanumeric token no real merchant carries.
+// (`Fabricated Credit Union`, `Fixture Checking`, `Fixture Category`). Amounts are small bare numbers
+// chosen to exercise no rule: most are single digits, the categories carry a twelve-unit annual
+// budget (one unit a month), and the drift world's Plaid balance is a two-digit figure chosen only so
+// the ledger cannot match it. The gift canary is an alphanumeric token no real merchant carries.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FindingSchema, type Finding } from '@b8/contracts/findings';

@@ -401,6 +401,13 @@ export function assertContextMatchesAsOf(ctx: FreshnessContext, asOf: AsOf): voi
  * The index, built once per facts object. A cache keyed by the facts' identity changes no output —
  * the same object always yields the same index — and spares a list of findings from re-indexing the
  * same facts once per finding.
+ *
+ * PRECONDITION: A FACTS OBJECT IS NEVER MUTATED AFTER IT IS PASSED IN. The key is the object's
+ * identity, not its contents, so a caller that pushed a row into `facts.items` after a first call
+ * would be judged against the index of the old contents. No caller does: `loadFreshnessFacts` builds
+ * a fresh object per read, and the findings digest (`lib/findingsDigestRead.ts`) builds one per
+ * request and discards it. The cache is kept rather than dropped (P5-36 SPEC.md Q8), and a caller
+ * that needs different facts passes a different object.
  */
 const INDEXES = new WeakMap<FreshnessFacts, Omit<Judgement, 'now' | 'asOf'>>();
 
