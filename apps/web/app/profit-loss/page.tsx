@@ -2,12 +2,14 @@ export const dynamic = 'force-dynamic';
 
 import ProfitLossChart from '@/components/charts/ProfitLossChart';
 import YearEndPathChart from '@/components/charts/YearEndPathChart';
-import { loadYearEndPath } from '@/lib/yearEndSnapshots';
+import { YearEndMovesPanel } from '@/components/YearEndMoves';
+import { loadYearEndMoves, loadYearEndPath } from '@/lib/yearEndSnapshots';
 import { asOfFromDate } from '@/lib/domain/monthOutlook';
 import { loadOverview } from '@/lib/overviewRead';
 import { pageViewer } from '@/lib/giftViewer';
 import { dashboardFromWire } from '@/lib/overviewFromWire';
 import { MONTHS } from '@/lib/drilldown';
+import db from '@/lib/db';
 
 /**
  * The year's profit and loss, off the dashboard.
@@ -34,8 +36,15 @@ export default async function ProfitLossPage() {
   // integers, so nothing here can straddle midnight.
   const now = new Date();
   const asOf = asOfFromDate(now);
-  // The projection's path, morning by morning: operational, the landscape the dashboard card shows.
-  const [overview, path] = await Promise.all([loadOverview(await pageViewer('/profit-loss'), now), loadYearEndPath('operational')]);
+  // The projection's path, morning by morning, and what moved it: operational, the landscape the
+  // dashboard card shows. `today` is Postgres's calendar date, the one the snapshots are keyed by
+  // and the one the budget page passes the same panel.
+  const [overview, path, moves, today] = await Promise.all([
+    loadOverview(await pageViewer('/profit-loss'), now),
+    loadYearEndPath('operational'),
+    loadYearEndMoves('operational'),
+    db.query<{ d: string }>('SELECT CURRENT_DATE::text AS d').then((r) => r.rows[0].d),
+  ]);
   const { monthlySpending: monthly, yearEnd } = dashboardFromWire(overview);
 
   // `pl` and `plProjected` overlap on the last settled month. Without that shared point the dashed
@@ -73,6 +82,10 @@ export default async function ProfitLossPage() {
 
       <ProfitLossChart data={plSeries} />
       <YearEndPathChart data={path} />
+      {/* Below the path it explains. Renders nothing until the first snapshot exists. */}
+      <div className="mt-6 sm:mt-8">
+        <YearEndMovesPanel moves={moves} today={today} />
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { loadYearEndMoves } from '@/lib/yearEndSnapshots';
-import { YearEndMoveLine, YearEndMovesPanel } from '@/components/YearEndMoves';
+import { YearEndMoveLine } from '@/components/YearEndMoves';
 import { cookies } from 'next/headers';
 import Link from 'next/link';
 import db from '@/lib/db';
@@ -321,7 +321,8 @@ export default async function BudgetPage({ searchParams }: PageProps) {
             />
           </div>
 
-          <YearEndMovesPanel moves={moves} today={todayIso} />
+          {/* The "What moved the year-end" breakdown lives on /profit-loss now, beside the year-end's
+              path; the one-line summary stays on the Projected P/L card above. */}
 
           {/* This tab's categories' unspent leftovers from closed months, waiting to be allocated. */}
           <UnspentBuckets

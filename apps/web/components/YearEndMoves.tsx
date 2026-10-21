@@ -47,7 +47,7 @@ const PARTS = [
 ] as const;
 
 /**
- * Why the year-end moved, on the budget page: the move split into its four parts, for each period,
+ * Why the year-end moved, on the Profit & Loss page: the move split into its four parts, for each period,
  * and the categories behind the spending part. The parts always add up to the move.
  */
 export function YearEndMovesPanel({ moves, today }: { moves: YearEndMoves; today: string }) {
