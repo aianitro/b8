@@ -122,12 +122,30 @@ function OwnerInvite({ me, pathname }: { me: Me | null; pathname: string }) {
   return <InviteControl key={pathname} />;
 }
 
+/**
+ * Everything below the wordmark, in ONE scroll area: the nav, then the invite control and the
+ * "signed in as" line. Those two used to be pinned beneath a separately scrolling list, so on a
+ * short window the menu slid under a footer that stayed put. The nav still grows (`flex-1`), so
+ * when everything fits the footer sits at the bottom as before; when it does not, it scrolls with
+ * the menu. `min-h-0` lets this column shrink inside the full-height flex parent at all.
+ */
+function NavBody({ me, pathname, onNavigate }: { me: Me | null; pathname: string; onNavigate?: () => void }) {
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+      <NavList pathname={pathname} onNavigate={onNavigate} />
+      <OwnerInvite me={me} pathname={pathname} />
+      <SignedInAs me={me} />
+    </div>
+  );
+}
+
 /** The nav itself, identical in the sidebar and in the drawer — one list, rendered twice. */
 function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
   return (
-    // ONE SCROLLING LIST, INTELLIGENCE INCLUDED. That group used to sit in a footer pinned below the
-    // scroll area; it now follows Configuration, so every group reads in one top-to-bottom order.
-    <nav className="flex-1 px-3 pb-6 space-y-0.5 overflow-y-auto">
+    // ONE LIST, INTELLIGENCE INCLUDED. That group used to sit in a footer pinned below the scroll
+    // area; it now follows Configuration, so every group reads in one top-to-bottom order. The
+    // scrolling itself is `NavBody`'s, so the footer below the list moves with it.
+    <nav className="flex-1 px-3 pb-6 space-y-0.5">
       {NAV.map((item) => <NavItem key={item.href} {...item} pathname={pathname} onNavigate={onNavigate} />)}
       <div className="border-t border-white/20 mt-3 mb-3" />
       <p className="px-3 text-[10px] font-semibold uppercase tracking-widest text-cyan-100/70 mb-2">
@@ -193,9 +211,7 @@ export default function Sidebar() {
           {/* cyan-100, NOT champagne: at 12px the mark colour is 4.05:1 and the floor is 4.5:1. */}
           <div className="text-cyan-100 text-xs mt-0.5 font-medium tracking-wider uppercase">Finance</div>
         </div>
-        <NavList pathname={pathname} />
-        <OwnerInvite me={me} pathname={pathname} />
-        <SignedInAs me={me} />
+        <NavBody me={me} pathname={pathname} />
       </aside>
 
       {/* MOBILE: a header bar that stays put, carrying the one control the page needs.
@@ -270,9 +286,7 @@ export default function Sidebar() {
                 <X size={20} />
               </button>
             </div>
-            <NavList pathname={pathname} onNavigate={() => setOpen(false)} />
-            <OwnerInvite me={me} pathname={pathname} />
-            <SignedInAs me={me} />
+            <NavBody me={me} pathname={pathname} onNavigate={() => setOpen(false)} />
           </div>
         </div>
       )}
