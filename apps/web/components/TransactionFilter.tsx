@@ -1,8 +1,9 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Search, X } from 'lucide-react';
+import { formatAmountFilter, parseAmountFilter } from '@/lib/domain/amountFilter';
 
 type AccountOption = { id: string; name: string; landscape: string };
 
@@ -27,9 +28,9 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
   const hasAmountRange = Boolean(amountMinValue || amountMaxValue);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const amountMinRef = useRef<HTMLInputElement>(null);
-  const amountMaxRef = useRef<HTMLInputElement>(null);
+  const amountRef = useRef<HTMLInputElement>(null);
   const amountDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [amountInvalid, setAmountInvalid] = useState(false);
 
   function nav(updates: Record<string, string | null>) {
     const p = new URLSearchParams(params.toString());
@@ -45,17 +46,21 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
     debounceRef.current = setTimeout(() => nav({ search: value || null }), 400);
   }
 
-  // Shared debounce for both fields, reading live DOM values at fire time (not the value from
-  // whichever field's onChange happened to schedule it) — typing into both fields within the
-  // debounce window previously raced two independent timers, each built from a stale params
-  // snapshot, and whichever fired last silently dropped the other field from the URL.
+  // One field for an exact amount, a range or a bound (`25.50`, `20-30`, `>100`, `<50`), written
+  // to the same amountMin/amountMax parameters the Min/Max pair used, so old links still work. The
+  // value is read from the DOM when the debounce fires, not when it was scheduled. Input that does
+  // not parse yet (a half-typed `20-`) is outlined and leaves the current filter alone rather than
+  // clearing the results under the person mid-keystroke.
   function handleAmountChange() {
     if (amountDebounceRef.current) clearTimeout(amountDebounceRef.current);
+    const parsed = parseAmountFilter(amountRef.current?.value ?? '');
+    if (!parsed.ok) {
+      setAmountInvalid(true);
+      return;
+    }
+    setAmountInvalid(false);
     amountDebounceRef.current = setTimeout(() => {
-      nav({
-        amountMin: amountMinRef.current?.value || null,
-        amountMax: amountMaxRef.current?.value || null,
-      });
+      nav({ amountMin: parsed.min, amountMax: parsed.max });
     }, 400);
   }
 
@@ -70,7 +75,7 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
         <input
           ref={inputRef}
           type="text"
-          placeholder="Search merchant or amount…"
+          placeholder="Search merchant…"
           defaultValue={searchValue}
           onChange={(e) => handleSearch(e.target.value)}
           className="pl-8 pr-7 py-1.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 w-full sm:w-48"
@@ -118,32 +123,34 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
 
       <div className="w-px h-5 bg-slate-200 mx-1" />
 
-      {/* Amount range */}
+      {/* Amount: exact, range or bound in one field. A text input, not type="number": the
+          notation needs -, < and >, which a number input and the phone's decimal keypad refuse. */}
       <div className="relative flex items-center gap-1">
         <input
-          ref={amountMinRef}
-          type="number"
-          inputMode="decimal"
-          placeholder="Min $"
-          defaultValue={amountMinValue}
+          ref={amountRef}
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="Amount"
+          title="An exact amount (25.50), a range (20-30), or a bound (>100, <50)"
+          aria-label="Amount: an exact amount, a range such as 20-30, or a bound such as >100"
+          aria-invalid={amountInvalid}
+          defaultValue={formatAmountFilter({ min: amountMinValue || null, max: amountMaxValue || null })}
           onChange={handleAmountChange}
-          className="py-1.5 px-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 w-20"
+          className={`py-1.5 px-2 text-xs border rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 w-24 ${
+            amountInvalid ? 'border-red-300 focus:ring-red-200' : 'border-slate-200 focus:ring-slate-900/10'
+          }`}
         />
-        <span className="text-slate-300 text-xs">–</span>
-        <input
-          ref={amountMaxRef}
-          type="number"
-          inputMode="decimal"
-          placeholder="Max $"
-          defaultValue={amountMaxValue}
-          onChange={handleAmountChange}
-          className="py-1.5 px-2 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 w-20"
-        />
-        {hasAmountRange && (
+        {(hasAmountRange || amountInvalid) && (
           <button
-            onClick={() => nav({ amountMin: null, amountMax: null })}
+            onClick={() => {
+              if (amountDebounceRef.current) clearTimeout(amountDebounceRef.current);
+              if (amountRef.current) amountRef.current.value = '';
+              setAmountInvalid(false);
+              nav({ amountMin: null, amountMax: null });
+            }}
             className="text-slate-400 hover:text-slate-600 transition-colors"
-            title="Clear amount range"
+            title="Clear amount"
           >
             <X size={13} />
           </button>
