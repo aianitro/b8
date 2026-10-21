@@ -405,6 +405,30 @@ describe('matching in the sync', () => {
     await syncAdded(...specs);
     expect(await snapshot()).toEqual(before);
   });
+
+  it('T41b-S13: a one-day window holds a row bought that day and posted the next, masked for the recipient; a row with neither date inside stays ordinary', async () => {
+    const day = await today();
+    const next = await pgDay(1);
+    const held = await giftFor('ZQ41BAUTHA', { windowStart: day, windowEnd: day });
+    const missed = await giftFor('ZQ41BAUTHN', { windowStart: day, windowEnd: day });
+    const bought: RowSpec = { canary: 'ZQ41BAUTHA', amount: 31.4, date: next, authorizedDate: day };
+    const noAuth: RowSpec = { canary: 'ZQ41BAUTHN', id: 'zq41b-s13-noauth', amount: 31.4, date: next, authorizedDate: null };
+    const before: RowSpec = { canary: 'ZQ41BAUTHN', id: 'zq41b-s13-before', amount: 31.4, date: next, authorizedDate: await pgDay(-1) };
+    await syncWith(page({ added: [bought, noAuth, before].map(plaidTxn) }));
+
+    const rid = (await rowIdOf(bought))!;
+    expect(await rowState(rid)).toEqual({ mapped_category: GIFT_CATEGORY, rule_applied: false, gift_id: held });
+    expect((await giftState(held))?.state).toBe('matched');
+    expect(holds(await detailText(w.two, rid), 'ZQ41BAUTHA')).toBe(false);
+    expect(holds(await detailText(w.owner, rid), 'ZQ41BAUTHA')).toBe(true);
+
+    expect((await giftState(missed))?.state).toBe('awaiting');
+    for (const spec of [noAuth, before]) {
+      const id = (await rowIdOf(spec))!;
+      expect({ id: spec.id, state: await rowState(id) }).toEqual({ id: spec.id, state: { mapped_category: null, rule_applied: false, gift_id: null } });
+      expect(holds(await detailText(w.two, id), 'ZQ41BAUTHN')).toBe(true);
+    }
+  });
 });
 
 describe('the daily sweep', () => {

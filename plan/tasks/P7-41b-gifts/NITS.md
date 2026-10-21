@@ -7,3 +7,8 @@ From REVIEW-1 (2026-10-19). N2 is returned to the implementer in G3 cycle 1; the
 - **N4 — watched counts differ by viewer.** When the giver watches the gift row, the recipient's watched chip and watched sums are lower, and the recipient's drill-down rows don't add up to spent plus pending. A conflict in the spec between the allowlist and identical counts.
 - **N5 — no recipient field in the gift form.** With two or more other users, every create from the UI fails with 400. The API accepts `recipientUserId`.
 - **N6 — masked `name` is `'Gift'`, not null.** An accepted deviation from the allowlist; no real text reaches any surface.
+- **N7 — a gift past its reveal date can still claim a row until the sweep runs** (found 2026-10-21 reviewing
+  the authorized-date fix; pre-existing, slightly widened by it). `linkFreshRows` selects open gifts with no
+  `reveal_date` filter, so a row arriving after the reveal date but before the daily sweep expires the gift is
+  re-filed into the gift category. Likely fix: add `AND g.reveal_date > CURRENT_DATE` to that select, with a
+  sync scenario.

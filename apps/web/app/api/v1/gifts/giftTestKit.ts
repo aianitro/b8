@@ -147,6 +147,8 @@ export interface RowSpec {
   canary: string;
   amount: number;
   date: string;
+  /** Plaid's purchase date; defaults to `date`. `null` is a row Plaid gives no authorized date. */
+  authorizedDate?: string | null;
   account?: string;
   pending?: boolean;
   /** Overrides, for the merchant-matching shapes. */
@@ -166,7 +168,7 @@ export function plaidTxn(spec: RowSpec): Record<string, unknown> {
     transaction_id: plaidIdOf(spec),
     account_id: spec.account ?? CARD,
     date: spec.date,
-    authorized_date: spec.date,
+    authorized_date: spec.authorizedDate === undefined ? spec.date : spec.authorizedDate,
     amount: spec.amount,
     name: spec.name === undefined ? `${c} POS NAME` : spec.name,
     merchant_name: spec.merchant === undefined ? `${c} Merchant` : spec.merchant,

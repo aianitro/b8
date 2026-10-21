@@ -39,6 +39,7 @@ const ROW: CandidateRow = {
   plaidTransactionId: 'plaid-zq41b-1',
   accountId: 'acct-zq41b-card',
   date: '2026-11-05',
+  authorizedDate: null,
   amount: '48.15',
   name: 'QUILLFEATHER GOODS 0042',
   merchantName: 'Quillfeather Goods',
@@ -193,6 +194,22 @@ describe('matching a stored row to a gift (M)', () => {
       expect(merchantOnly.value.amount).toBeNull();
       expect(merchantOnly.value.amount).not.toBe('0.00');
     }
+  });
+
+  it('T41b-M13: the window takes the purchase (authorized) date or the posted date, so a card posting the day after still matches', () => {
+    const oneDay = gift({ windowStart: '2026-10-19', windowEnd: '2026-10-19' });
+    // Bought on the window's day, posted the next: the case that left a row unmasked.
+    expect(isCandidate(oneDay, row({ authorizedDate: '2026-10-19', date: '2026-10-20' }))).toBe(true);
+    // Either date alone is enough, at both inclusive ends.
+    expect(isCandidate(oneDay, row({ authorizedDate: null, date: '2026-10-19' }))).toBe(true);
+    expect(isCandidate(oneDay, row({ authorizedDate: '2026-10-18', date: '2026-10-19' }))).toBe(true);
+    // Neither inside: not a candidate, whether the authorized date is missing, before or after.
+    expect(isCandidate(oneDay, row({ authorizedDate: null, date: '2026-10-20' }))).toBe(false);
+    expect(isCandidate(oneDay, row({ authorizedDate: '2026-10-18', date: '2026-10-20' }))).toBe(false);
+    expect(isCandidate(oneDay, row({ authorizedDate: '2026-10-20', date: '2026-10-21' }))).toBe(false);
+    // The authorized date widens only the window; every other criterion still applies.
+    expect(isCandidate(oneDay, row({ authorizedDate: '2026-10-19', date: '2026-10-20', amount: '48.16' }))).toBe(false);
+    expect(isCandidate(oneDay, row({ authorizedDate: '2026-10-19', date: '2026-10-20', pending: true }))).toBe(false);
   });
 });
 

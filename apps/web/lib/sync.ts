@@ -490,11 +490,12 @@ async function syncItem(
     // one place outside the read path that reads ledger text for a viewer-independent decision; its
     // output is links and a count, never the text (lib/giftSurfaceWiring.test.ts, W3).
     const { rows: freshRows } = await q.query<{
-      id: number; plaid_transaction_id: string; account_id: string; date: string; amount: string;
-      name: string | null; merchant_name: string | null; mapped_category: string | null;
+      id: number; plaid_transaction_id: string; account_id: string; date: string; authorized_date: string | null;
+      amount: string; name: string | null; merchant_name: string | null; mapped_category: string | null;
       rule_applied: boolean; linked: boolean;
     }>(
-      `SELECT t.id, t.plaid_transaction_id, t.account_id, t.date::text AS date, t.amount::text AS amount,
+      `SELECT t.id, t.plaid_transaction_id, t.account_id, t.date::text AS date,
+              t.authorized_date::text AS authorized_date, t.amount::text AS amount,
               t.name, t.merchant_name, t.mapped_category, t.rule_applied,
               EXISTS (SELECT 1 FROM gift_transactions gt WHERE gt.transaction_id = t.id) AS linked
          FROM transactions t WHERE t.id = ANY($1::int[])`,
@@ -502,7 +503,7 @@ async function syncItem(
     );
     const giftLinked = await linkFreshRows(q, freshRows.map((r) => ({
       id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id, date: r.date,
-      amount: r.amount, name: r.name, merchantName: r.merchant_name, pending: false, linked: r.linked,
+      authorizedDate: r.authorized_date, amount: r.amount, name: r.name, merchantName: r.merchant_name, pending: false, linked: r.linked,
       mapped_category: r.mapped_category, rule_applied: r.rule_applied,
     })));
     if (giftLinked > 0) log.info('rows held for gifts', { count: giftLinked });

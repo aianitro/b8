@@ -119,7 +119,10 @@ export interface CandidateRow {
   id: number;
   plaidTransactionId: string;
   accountId: string;
+  /** The posted date. */
   date: string;
+  /** Plaid's `authorized_date` — the day of the purchase — or null when Plaid gives none. */
+  authorizedDate: string | null;
   /** `amount::text`, signed the Plaid way: positive is money out. */
   amount: string;
   name: string | null;
@@ -147,7 +150,8 @@ export function merchantMatches(criterion: string, merchantName: string | null, 
 }
 
 /**
- * Whether `row` satisfies `gift`'s criteria — the matching rule of SPEC.md, conjunct by conjunct.
+ * Whether `row` satisfies `gift`'s criteria — the matching rule of SPEC.md, conjunct by conjunct,
+ * with the window taking the posted or the authorized date (SPEC.md Amendments, 2026-10-21).
  *
  * Not checked here, because the caller's query is what knows it: that the row was FIRST INSERTED by
  * the sync running now. `lib/giftStore.ts` hands this function only those rows.
@@ -162,8 +166,12 @@ export function isCandidate(gift: GiftCriteria, row: CandidateRow): boolean {
   // amount is a positive magnitude and is never negated to meet one.
   const rowCents = cents(row.amount);
   if (rowCents === null || rowCents <= BigInt(0)) return false;
-  // Inclusive at both ends, on the calendar strings.
-  if (row.date < gift.windowStart || row.date > gift.windowEnd) return false;
+  // Inclusive at both ends, on the calendar strings. EITHER date may fall in the window: the giver
+  // gives the day they bought it, which is the authorized date, while a card posts a day or three
+  // later. Checking the posted date alone missed a one-day window on its first real use (a purchase
+  // authorized on the window's day, posted the next) and left the row unmasked.
+  const inWindow = (d: string) => d >= gift.windowStart && d <= gift.windowEnd;
+  if (!inWindow(row.date) && !(row.authorizedDate !== null && inWindow(row.authorizedDate))) return false;
   if (gift.accountId !== null && gift.accountId !== row.accountId) return false;
   if (gift.amount !== null && !sameAmount(gift.amount, row.amount)) return false;
   if (gift.merchant !== null && !merchantMatches(gift.merchant, row.merchantName, row.name)) return false;
