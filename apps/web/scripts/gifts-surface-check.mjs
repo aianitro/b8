@@ -72,6 +72,7 @@ const PAGES = {
   'app/categories/page.tsx': { cls: 'no-transaction-data', url: () => '/categories' },
   'app/categories/[name]/page.tsx': { cls: 'text-bearing', url: (w) => `/categories/${encodeURIComponent(w.category)}` },
   'app/dashboard/page.tsx': { cls: 'text-bearing', url: () => '/dashboard' },
+  'app/digest/page.tsx': { cls: 'numeric-only', url: () => '/digest' },
   'app/gifts/page.tsx': { cls: 'text-bearing', url: () => '/gifts' },
   'app/import/page.tsx': { cls: 'no-transaction-data', url: () => '/import' },
   'app/insights/page.tsx': { cls: 'no-transaction-data', url: () => '/insights' },
