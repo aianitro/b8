@@ -14,7 +14,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Gift, GiftCandidateList } from '@b8/contracts/gifts';
+import type { Gift, GiftCandidate, GiftCandidateList } from '@b8/contracts/gifts';
 
 const STATE_LABEL: Record<string, string> = {
   awaiting: 'Waiting for the purchase',
@@ -68,6 +68,28 @@ export default function GiftList({ gifts }: { gifts: Gift[] }) {
     router.refresh();
   }
 
+  /**
+   * One candidate purchase: the merchant on its own line, the date and account under it, the amount
+   * always visible at the right. It was one truncated line, and on a phone the truncation took the
+   * amount — the one thing that tells two purchases from the same shop apart.
+   */
+  const candidateRow = (giftId: number, c: GiftCandidate, label: string, onPick: () => void) => (
+    <li key={c.transactionId} className="flex items-center gap-3 py-2.5 text-sm">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-slate-900">{c.label}</div>
+        <div className="truncate text-xs text-slate-400">{c.date} · {c.accountName}</div>
+      </div>
+      <span className="font-mono shrink-0 text-slate-700">${c.amount}</span>
+      <button disabled={busy === giftId} onClick={onPick}
+        className="shrink-0 min-h-11 sm:min-h-0 px-3 py-2 sm:py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm sm:text-xs disabled:opacity-50">
+        {label}
+      </button>
+    </li>
+  );
+  // The card's small text actions, padded to a full touch target below `sm` without changing how
+  // they look: the padding is invisible, the reach is not.
+  const action = 'inline-flex items-center min-h-11 sm:min-h-0 py-2 sm:py-0 text-sm sm:text-xs disabled:opacity-50';
+
   if (gifts.length === 0) {
     return <p className="text-sm text-slate-400">No gifts marked yet.</p>;
   }
@@ -76,7 +98,7 @@ export default function GiftList({ gifts }: { gifts: Gift[] }) {
     <div className="space-y-4">
       {error && <p className="text-red-500 text-sm">{error}</p>}
       {gifts.map((g) => (
-        <div key={g.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+        <div key={g.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 text-sm text-slate-700">
               <div className="font-medium text-slate-900">
@@ -101,53 +123,43 @@ export default function GiftList({ gifts }: { gifts: Gift[] }) {
           )}
           {g.state === 'choose' && (
             <ul className="mt-3 divide-y divide-slate-100">
-              {g.candidates.map((c) => (
-                <li key={c.transactionId} className="flex items-center justify-between py-2 text-sm">
-                  <span className="truncate">{c.date} · {c.label} · {c.accountName} · <span className="font-mono">${c.amount}</span></span>
-                  <button disabled={busy === g.id} onClick={() => post(g.id, 'choose', { transactionId: c.transactionId })}
-                    className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs disabled:opacity-50">
-                    This one
-                  </button>
-                </li>
-              ))}
+              {g.candidates.map((c) =>
+                candidateRow(g.id, c, 'This one', () => post(g.id, 'choose', { transactionId: c.transactionId })))}
             </ul>
           )}
-          {(g.state === 'awaiting' || g.state === 'choose') && !g.revealed && (
-            picking?.giftId === g.id ? (
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Recent purchases that fit this gift, whatever their date</span>
-                  <button onClick={() => setPicking(null)} className="text-slate-400 hover:text-slate-600">Close</button>
-                </div>
-                {picking.rows.length === 0 ? (
-                  <p className="text-sm text-slate-400 mt-2">Nothing fits this gift right now.</p>
-                ) : (
-                  <ul className="mt-1 divide-y divide-slate-100">
-                    {picking.rows.map((c) => (
-                      <li key={c.transactionId} className="flex items-center justify-between gap-3 py-2 text-sm">
-                        <span className="truncate">{c.date} · {c.label} · {c.accountName} · <span className="font-mono">${c.amount}</span></span>
-                        <button disabled={busy === g.id} onClick={() => attach(g.id, c.transactionId)}
-                          className="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs disabled:opacity-50 shrink-0">
-                          This is the gift
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+          {(g.state === 'awaiting' || g.state === 'choose') && !g.revealed && picking?.giftId === g.id && (
+            <div className="mt-3 border-t border-slate-100 pt-3">
+              <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+                <span>Recent purchases that fit this gift, whatever their date</span>
+                <button onClick={() => setPicking(null)} className={`${action} shrink-0 px-2 -mr-2 text-slate-400 hover:text-slate-600`}>
+                  Close
+                </button>
               </div>
-            ) : (
+              {picking.rows.length === 0 ? (
+                <p className="text-sm text-slate-400 mt-2">Nothing fits this gift right now.</p>
+              ) : (
+                <ul className="mt-1 divide-y divide-slate-100">
+                  {picking.rows.map((c) => candidateRow(g.id, c, 'This is the gift', () => attach(g.id, c.transactionId)))}
+                </ul>
+              )}
+            </div>
+          )}
+          {/* One row of actions, wrapping on a narrow screen, rather than two buttons that each
+              carried their own margin. */}
+          <div className="mt-2 flex flex-wrap items-center gap-x-5">
+            {(g.state === 'awaiting' || g.state === 'choose') && !g.revealed && picking?.giftId !== g.id && (
               <button disabled={busy === g.id} onClick={() => findPurchase(g.id)}
-                className="mt-3 mr-4 text-blue-600 hover:text-blue-700 text-xs disabled:opacity-50">
+                className={`${action} text-blue-600 hover:text-blue-700`}>
                 Find the purchase
               </button>
-            )
-          )}
-          {g.state !== 'cancelled' && (
-            <button disabled={busy === g.id} onClick={() => post(g.id, 'cancel')}
-              className="mt-3 text-red-400 hover:text-red-600 text-xs disabled:opacity-50">
-              Cancel gift{g.candidates.length > 0 && !g.revealed ? ' and reveal now' : ''}
-            </button>
-          )}
+            )}
+            {g.state !== 'cancelled' && (
+              <button disabled={busy === g.id} onClick={() => post(g.id, 'cancel')}
+                className={`${action} text-red-400 hover:text-red-600`}>
+                Cancel gift{g.candidates.length > 0 && !g.revealed ? ' and reveal now' : ''}
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>

@@ -26,7 +26,13 @@ import { useRouter } from 'next/navigation';
 import { localIsoDate } from '@/lib/localDate';
 import { giftFormDefaults } from '@/lib/domain/giftMatch';
 
-const input = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm';
+// `text-base` below `sm`: iOS zooms the page into any input under 16px, and in the installed app
+// there is no pinch-out to undo it. The taller padding below `sm` makes each field a full touch target.
+const input = 'mt-1 block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2.5 sm:py-2 text-base sm:text-sm text-slate-900';
+// iOS draws a date field at its own intrinsic width and centres the value, so in a one-column grid
+// it overflows the card; `appearance-none` lets it take the column's width, the value left-aligned.
+const dateInput = `${input} appearance-none min-h-11 sm:min-h-0 [&::-webkit-date-and-time-value]:text-left`;
+const label = 'block text-xs text-slate-500';
 
 /** The form's fields. A null date is one the giver has not set: it shows today's default. */
 interface GiftFormState {
@@ -81,34 +87,35 @@ export default function GiftForm({ accounts }: { accounts: { id: string; name: s
   }
 
   return (
-    <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 mb-8 space-y-4">
+    <form onSubmit={submit} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-6 sm:mb-8 space-y-4">
       <h2 className="text-lg font-semibold text-slate-900">Mark a gift</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <label className="text-xs text-slate-500">Exact amount (optional)
+        <label className={label}>Exact amount (optional)
           <input className={input} inputMode="decimal" value={form.amount} onChange={set('amount')} />
         </label>
-        <label className="text-xs text-slate-500">Merchant contains (optional)
+        <label className={label}>Merchant contains (optional)
           <input className={input} value={form.merchant} onChange={set('merchant')} />
         </label>
-        <label className="text-xs text-slate-500">Account (optional)
+        <label className={label}>Account (optional)
           <select className={input} value={form.accountId} onChange={set('accountId')}>
             <option value="">Any account</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </label>
-        <label className="text-xs text-slate-500">Reveal on
-          <input type="date" className={input} value={form.revealDate} onChange={set('revealDate')} required />
+        <label className={label}>Reveal on
+          <input type="date" className={dateInput} value={form.revealDate} onChange={set('revealDate')} required />
         </label>
-        <label className="text-xs text-slate-500">Expected from
-          <input type="date" className={input} value={windowStart} onChange={set('windowStart')} required />
+        <label className={label}>Expected from
+          <input type="date" className={dateInput} value={windowStart} onChange={set('windowStart')} required />
         </label>
-        <label className="text-xs text-slate-500">Expected until
-          <input type="date" className={input} value={windowEnd} onChange={set('windowEnd')} required />
+        <label className={label}>Expected until
+          <input type="date" className={dateInput} value={windowEnd} onChange={set('windowEnd')} required />
         </label>
       </div>
       {error && <p className="text-red-500 text-sm">{error}</p>}
+      {/* Full width below `sm`, where it sits under the thumb; its usual size above. */}
       <button type="submit" disabled={saving}
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50">
+        className="w-full sm:w-auto px-4 py-3 sm:py-2 bg-blue-600 text-white rounded-lg sm:rounded hover:bg-blue-700 text-base sm:text-sm disabled:opacity-50">
         {saving ? 'Saving…' : 'Mark gift'}
       </button>
     </form>
