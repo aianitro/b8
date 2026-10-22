@@ -29,16 +29,22 @@ import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import db from './db';
 import { createLogger } from './logger';
 import { sendWebPush } from './webPush';
-import { visibleTransactions, type GiftViewer } from './giftReadPath';
+import { giftLinkedSql, visibleTransactions, type GiftViewer } from './giftReadPath';
 import {
+  GIFT_ATTACH_LIST_CAP,
+  GIFT_ATTACH_LOOKBACK_DAYS,
+  acceptsAttach,
   assignCandidates,
+  attachFloor,
+  isAttachCandidate,
   stateAfterClaim,
   sweepDecision,
+  type AttachRow,
   type CandidateRow,
   type GiftCriteria,
   type ValidGiftRequest,
 } from './domain/giftMatch';
-import type { Gift, GiftCandidate, GiftState } from '@b8/contracts/gifts';
+import type { Gift, GiftCandidate, GiftCandidateList, GiftState } from '@b8/contracts/gifts';
 
 const log = createLogger('gifts');
 
@@ -96,6 +102,13 @@ const GIFT_SELECT = `
     JOIN users u ON u.id = g.recipient_user_id
     LEFT JOIN accounts a ON a.id = g.account_id`;
 
+/**
+ * A candidate row's label as the giver sees it: the merchant, else the raw name, else `Unnamed`.
+ * One expression for the rows a gift holds and the rows it could attach (P7-41c), so the two lists
+ * can never label the same row two ways. Read over `visibleTransactions(giver)` only.
+ */
+const CANDIDATE_LABEL = "COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed')";
+
 /** The rows each of `giftIds` holds, real, as their giver sees them. Ordered by transaction id. */
 async function candidatesOf(q: Queryable, giver: number, giftIds: number[]): Promise<Map<number, GiftCandidate[]>> {
   const out = new Map<number, GiftCandidate[]>();
@@ -106,7 +119,7 @@ async function candidatesOf(q: Queryable, giver: number, giftIds: number[]): Pro
   }>(
     `SELECT gt.gift_id, t.id AS transaction_id, t.date::text AS date, t.amount::text AS amount,
             t.account_id, a.name AS account_name,
-            COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.name, ''), 'Unnamed') AS label
+            ${CANDIDATE_LABEL} AS label
        FROM gift_transactions gt
        JOIN ${visibleTransactions(giver)} t ON t.id = gt.transaction_id
        JOIN accounts a ON a.id = t.account_id
@@ -360,6 +373,13 @@ export async function linkFreshRows(
   // `created_at <= NOW()`: NOW() is this transaction's start, so a gift created while the sync was
   // already running is not offered rows the sync had inserted before it existed (no retroactive
   // gifts), even though READ COMMITTED would let this statement see it.
+  //
+  // `reveal_date > CURRENT_DATE` (P7-41b NITS N7, closed in P7-41c): a gift whose reveal date has
+  // come is no longer a secret, even while it still says `awaiting` because the daily sweep has not
+  // run yet. Offering it a row here would file a late purchase into the gift category on the very
+  // day it should be expiring, and attach already refuses the same gift (`acceptsAttach`), so the
+  // two ways a row joins a gift agree on "revealed means closed". Postgres's calendar, in this
+  // statement, as for the mask.
   const { rows: open } = await q.query<{
     id: number; created_at: string; state: GiftState; amount: string | null; merchant: string | null;
     account_id: string | null; window_start: string; window_end: string; held: number;
@@ -370,6 +390,7 @@ export async function linkFreshRows(
             (SELECT COUNT(*) FROM gift_transactions gt WHERE gt.gift_id = g.id)::int AS held
        FROM gifts g
       WHERE g.state IN ('awaiting', 'choose') AND g.created_at <= NOW()
+        AND g.reveal_date > CURRENT_DATE
       ORDER BY g.created_at, g.id
         FOR UPDATE`,
   );
@@ -416,6 +437,251 @@ export async function linkFreshRows(
     log.warn('gift category not designated; held rows left in their category', { count: linked });
   }
   return linked;
+}
+
+// ─── Attaching a row already in the ledger (P7-41c) ────────────────────────────────────────────
+
+/**
+ * The one refusal for "this row cannot be attached", whatever the reason: no such row, linked to
+ * any gift, a `manual_`/`csv_` row, not money out, half of a transfer, before the candidate floor,
+ * or failing the amount, merchant or account criterion. Fixed text with no row detail and no
+ * criterion, so the body never tells the giver why — and a malformed request body answers it too.
+ */
+export const ATTACH_REFUSED_MESSAGE = 'That transaction cannot be attached to this gift.';
+
+const attachRefused = (): GiftFailure => ({ ok: false, code: 'INVALID_INPUT', message: ATTACH_REFUSED_MESSAGE });
+
+export type GiftCandidatesResult = { ok: true; candidates: GiftCandidateList } | GiftFailure;
+
+/** A gift as attaching reads it: its criteria, its dates as text, and Postgres's today. */
+interface AttachGiftRow {
+  id: number;
+  /** Fixed-width UTC text, as `GiftCriteria.createdAt` wants it. */
+  created_at: string;
+  /** The creation date on Postgres's calendar — the one `CURRENT_DATE` reads. */
+  created_date: string;
+  state: GiftState;
+  amount: string | null;
+  merchant: string | null;
+  account_id: string | null;
+  window_start: string;
+  window_end: string;
+  reveal_date: string;
+  today: string;
+}
+
+/**
+ * `today` and the creation date come from the same statement as the gift, so eligibility and the
+ * candidate floor are Postgres's calendar and never a JS clock (SPEC.md "Time").
+ */
+const ATTACH_GIFT_SELECT = `
+  SELECT g.id, to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') AS created_at,
+         (g.created_at::date)::text AS created_date,
+         g.state, g.amount::text AS amount, g.merchant, g.account_id,
+         g.window_start::text AS window_start, g.window_end::text AS window_end,
+         g.reveal_date::text AS reveal_date, CURRENT_DATE::text AS today
+    FROM gifts g
+   WHERE g.id = $1 AND g.giver_user_id = $2`;
+
+/** The viewer's own gift, or null — exactly as for an id that does not exist. Locked on request. */
+async function attachGift(q: Queryable, viewer: number, id: number, lock: boolean): Promise<AttachGiftRow | null> {
+  const { rows } = await q.query<AttachGiftRow>(`${ATTACH_GIFT_SELECT}${lock ? ' FOR UPDATE' : ''}`, [id, viewer]);
+  return rows[0] ?? null;
+}
+
+const criteriaOf = (g: AttachGiftRow): GiftCriteria => ({
+  id: g.id, createdAt: g.created_at, state: g.state, amount: g.amount, merchant: g.merchant,
+  accountId: g.account_id, windowStart: g.window_start, windowEnd: g.window_end,
+});
+
+/** A ledger row as the attach decision and the candidate list read it. */
+interface AttachRowRecord {
+  id: number;
+  /** NULL only when the row is masked for this viewer — held by a gift they do not give. */
+  plaid_transaction_id: string | null;
+  account_id: string;
+  account_name: string;
+  date: string;
+  authorized_date: string | null;
+  amount: string;
+  name: string | null;
+  merchant_name: string | null;
+  label: string;
+  mapped_category: string | null;
+  rule_applied: boolean;
+  linked: boolean;
+  in_transfer_group: boolean;
+}
+
+/**
+ * Rows as `viewer` sees them, through the read path like every other reader of a row's text. The
+ * filter is the caller's, and carries no criterion: whether a row qualifies is decided by
+ * `isAttachCandidate` below, never restated in SQL, so the list and the attach cannot drift from
+ * the matcher (SPEC.md "No second definition").
+ */
+async function attachRows(q: Queryable, viewer: number, where: string, values: unknown[]): Promise<AttachRowRecord[]> {
+  const { rows } = await q.query<AttachRowRecord>(
+    `SELECT t.id, t.plaid_transaction_id, t.account_id, a.name AS account_name,
+            t.date::text AS date, t.authorized_date::text AS authorized_date, t.amount::text AS amount,
+            t.name, t.merchant_name, ${CANDIDATE_LABEL} AS label, t.mapped_category, t.rule_applied,
+            ${giftLinkedSql('t')} AS linked,
+            (t.transfer_group_id IS NOT NULL) AS in_transfer_group
+       FROM ${visibleTransactions(viewer)} t
+       JOIN accounts a ON a.id = t.account_id
+      WHERE ${where}
+      ORDER BY t.date DESC, t.id DESC`,
+    values,
+  );
+  return rows;
+}
+
+/**
+ * Whether `r` may be attached to `gift`: posted on or after the floor, and `isAttachCandidate`.
+ * A row masked for this viewer (no Plaid id in their projection) is held by someone else's gift
+ * and fails closed here even before the `linked` conjunct refuses it.
+ */
+function attachable(gift: GiftCriteria, floor: string, r: AttachRowRecord): boolean {
+  if (r.plaid_transaction_id === null || r.date < floor) return false;
+  const row: AttachRow = {
+    id: r.id, plaidTransactionId: r.plaid_transaction_id, accountId: r.account_id, date: r.date,
+    authorizedDate: r.authorized_date, amount: r.amount, name: r.name, merchantName: r.merchant_name,
+    // The ledger has no pending column: the sync never stores a pending row.
+    pending: false, linked: r.linked, inTransferGroup: r.in_transfer_group,
+  };
+  return isAttachCandidate(gift, row);
+}
+
+/** Whether `viewer` gives gift `id`. The question both new routes answer first, before any body. */
+export async function ownsGift(viewer: GiftViewer, id: number): Promise<boolean> {
+  if (viewer === null || !Number.isSafeInteger(id)) return false;
+  return (await attachGift(db, viewer, id, false)) !== null;
+}
+
+/**
+ * `GET /api/v1/gifts/[id]/candidates` — the unlinked rows the giver could attach to their gift,
+ * newest first, at most `GIFT_ATTACH_LIST_CAP`.
+ *
+ * Someone else's gift is NOT_FOUND, as for every gift read. The giver's own closed gift (resolved,
+ * or its reveal date come) is ALREADY_RESOLVED, never `[]`: an empty list would read as "nothing
+ * fits", which is false for a gift that can no longer take a row (SPEC.md Open question 5).
+ *
+ * The cap is applied after `isAttachCandidate`, not as a SQL LIMIT, because the criteria are the
+ * matcher's and are evaluated here: a LIMIT before them would cut the list at fifty rows of any
+ * kind and could drop every qualifying one. The rows read are bounded by the floor.
+ */
+export async function listAttachCandidates(viewer: GiftViewer, id: number, q: Queryable = db): Promise<GiftCandidatesResult> {
+  if (viewer === null || !Number.isSafeInteger(id)) return { ok: false, code: 'NOT_FOUND' };
+  const gift = await attachGift(q, viewer, id, false);
+  if (!gift) return { ok: false, code: 'NOT_FOUND' };
+  if (!acceptsAttach(gift.state, gift.reveal_date, gift.today)) return { ok: false, code: 'ALREADY_RESOLVED' };
+  const floor = attachFloor(gift.created_date, GIFT_ATTACH_LOOKBACK_DAYS);
+  const criteria = criteriaOf(gift);
+  const rows = await attachRows(q, viewer, 't.date >= $1::date', [floor]);
+  const candidates = rows
+    .filter((r) => attachable(criteria, floor, r))
+    .slice(0, GIFT_ATTACH_LIST_CAP)
+    .map((r): GiftCandidate => ({
+      transactionId: r.id, date: r.date, amount: r.amount, accountId: r.account_id,
+      accountName: r.account_name, label: r.label,
+    }));
+  log.info('gift candidates listed', { count: candidates.length });
+  return { ok: true, candidates };
+}
+
+/**
+ * `POST /api/v1/gifts/[id]/attach` — the giver names a row already in the ledger as this gift, and
+ * it is linked exactly as `linkFreshRows` would have linked it: the row's own category and rule flag
+ * recorded, the row filed in the gift category with `rule_applied` FALSE, the gift moved by
+ * `stateAfterClaim` (`awaiting` to `matched`; `choose` stays `choose` holding one more). From the
+ * commit on, the row is masked for every non-giver — masking is keyed on the link, so no surface
+ * needs to know how the link was made.
+ *
+ * `transactionId` is null when the request body did not parse; the gift is still looked up first,
+ * so a non-giver's malformed body is the 404 a missing gift is, never a 400.
+ *
+ * ─── LOCK ORDER: THE ROW, THEN THE GIFT ───────────────────────────────────────────────────────
+ *
+ * `linkFreshRows` holds its rows (it inserted or updated them) before it locks gifts, so attach
+ * takes the row first too. `chooseGift`, `cancelGift` and the sweep go the other way — the gift,
+ * then the rows it HOLDS — which cannot meet attach's order because of the second step below: with
+ * the row locked, attach asks whether it is linked to any gift, and if it is, refuses without ever
+ * asking for a gift lock. A row attach holds while waiting for a gift is therefore unlinked, and
+ * stays unlinked while attach holds it (every other linker would need the same row lock, and the
+ * sync links only rows it has just inserted), so no gift-first transaction ever waits for it.
+ *
+ * Everything that decides is read AFTER both locks, from committed data: the gift's state and
+ * reveal date with Postgres's today, and the row's amount, account, merchant, link and transfer
+ * group. A row deleted, revised or attached elsewhere while attach waited is refused with the one
+ * 400; a gift matched by the sync meanwhile is the 409. The primary key on
+ * `gift_transactions.transaction_id` is the last word on "one link per row", and losing that race
+ * is the same 400, never a 500.
+ */
+export async function attachToGift(viewer: GiftViewer, id: number, transactionId: number | null): Promise<GiftResult> {
+  if (viewer === null || !Number.isSafeInteger(id)) return { ok: false, code: 'NOT_FOUND' };
+  if (!(await ownsGift(viewer, id))) return { ok: false, code: 'NOT_FOUND' };
+  if (transactionId === null || !Number.isSafeInteger(transactionId) || transactionId <= 0) return attachRefused();
+
+  let outcome: GiftFailure | null;
+  try {
+    outcome = await inTransaction(async (q): Promise<GiftFailure | null> => {
+      // 1. The row, locked; `id` only — its text is read through the read path in step 3.
+      const locked = await q.query('SELECT id FROM transactions WHERE id = $1 FOR UPDATE', [transactionId]);
+      const linked = locked.rows.length > 0 && (await q.query<{ linked: boolean }>(
+        'SELECT EXISTS (SELECT 1 FROM gift_transactions WHERE transaction_id = $1) AS linked',
+        [transactionId],
+      )).rows[0].linked;
+      if (locked.rows.length === 0 || linked) {
+        // Refused without a gift lock (see LOCK ORDER). A closed gift still answers as closed, so
+        // the giver hears the same thing whichever row they named.
+        const gift = await attachGift(q, viewer, id, false);
+        if (!gift) return { ok: false, code: 'NOT_FOUND' };
+        return acceptsAttach(gift.state, gift.reveal_date, gift.today) ? attachRefused() : { ok: false, code: 'ALREADY_RESOLVED' };
+      }
+
+      // 2. The gift, locked, and whether it can still take a row — Postgres's today, this statement.
+      const gift = await attachGift(q, viewer, id, true);
+      if (!gift) return { ok: false, code: 'NOT_FOUND' };
+      if (!acceptsAttach(gift.state, gift.reveal_date, gift.today)) return { ok: false, code: 'ALREADY_RESOLVED' };
+
+      // 3. The row as it is now, under both locks, against the matcher's own rule.
+      const floor = attachFloor(gift.created_date, GIFT_ATTACH_LOOKBACK_DAYS);
+      const [row] = await attachRows(q, viewer, 't.id = $1', [transactionId]);
+      if (!row || !attachable(criteriaOf(gift), floor, row)) return attachRefused();
+
+      // 4. Linked as `linkFreshRows` links: the same three writes, in the same order. Written out
+      // here rather than shared because `linkFreshRows` is the sync's and this task changes it in
+      // one respect only (N7); the integration suite pins the two to the same outcome (C1).
+      const held = await q.query<{ n: number }>('SELECT COUNT(*)::int AS n FROM gift_transactions WHERE gift_id = $1', [id]);
+      const category = await q.query<{ name: string }>(
+        `SELECT bc.name FROM gift_settings gs JOIN budget_categories bc ON bc.id = gs.category_id`,
+      );
+      const giftCategory = category.rows[0]?.name ?? null;
+      await q.query(
+        `INSERT INTO gift_transactions (transaction_id, gift_id, prior_mapped_category, prior_rule_applied)
+         VALUES ($1, $2, $3, $4)`,
+        [transactionId, id, row.mapped_category, row.rule_applied],
+      );
+      if (giftCategory !== null) {
+        await q.query(
+          'UPDATE transactions SET mapped_category = $1, rule_applied = FALSE WHERE id = $2',
+          [giftCategory, transactionId],
+        );
+      } else {
+        await q.query('UPDATE transactions SET rule_applied = FALSE WHERE id = $1', [transactionId]);
+        log.warn('gift category not designated; held rows left in their category', { count: 1 });
+      }
+      await q.query('UPDATE gifts SET state = $2 WHERE id = $1', [id, stateAfterClaim(gift.state, held.rows[0].n, 1)]);
+      log.info('gift attached', { count: 1 });
+      return null;
+    });
+  } catch (err) {
+    // A second link to the same row: the primary key refused it. The race is lost, not broken.
+    if ((err as { code?: string }).code === '23505') return attachRefused();
+    throw err;
+  }
+  if (outcome) return outcome;
+  const gift = await getGift(viewer, id);
+  return gift ? { ok: true, gift } : { ok: false, code: 'NOT_FOUND' };
 }
 
 // ─── The daily sweep ────────────────────────────────────────────────────────────────────────────

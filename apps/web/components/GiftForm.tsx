@@ -4,15 +4,52 @@
 // amount stays the string typed (the route checks it is a two-decimal figure and the database
 // compares it exactly), and the dates are the `YYYY-MM-DD` the date inputs produce — never a JS
 // Date. An empty amount or merchant is sent as null, which means "any", never as 0 or ''.
+//
+// ─── THE WINDOW OPENS ON THE GIVER'S TODAY (P7-41c) ───────────────────────────────────────────
+//
+// "Expected from" and "Expected until" start at the giver's own calendar date (`giftFormDefaults`),
+// read from this browser with `localIsoDate` — never the first ten characters of an ISO timestamp,
+// which are the UTC date and already tomorrow every evening west of Greenwich. A gift made at night with tomorrow's date
+// cannot match tonight's purchase; that is the bug this default exists to prevent.
+//
+// The date is read with `useSyncExternalStore`, whose server snapshot is null: the server renders
+// the two inputs empty, hydration agrees with it, and the browser then fills in ITS date. The
+// server's calendar never reaches the form, and there is no hydration mismatch to warn about.
+// A date the giver has typed is kept in state; until then the field follows the default, which is
+// re-read from `localIsoDate()` on every render. After a gift is saved the dates go back to unset
+// (`BLANK`), NOT to the date of the save: a pinned date would still say yesterday when the giver
+// marks a second gift after midnight with the page left open, and a one-day window on yesterday
+// misses tonight's purchase — the failure this default exists to prevent.
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
+import { localIsoDate } from '@/lib/localDate';
+import { giftFormDefaults } from '@/lib/domain/giftMatch';
 
 const input = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm';
 
+/** The form's fields. A null date is one the giver has not set: it shows today's default. */
+interface GiftFormState {
+  amount: string;
+  merchant: string;
+  accountId: string;
+  windowStart: string | null;
+  windowEnd: string | null;
+  revealDate: string;
+}
+
+const BLANK: GiftFormState = { amount: '', merchant: '', accountId: '', windowStart: null, windowEnd: null, revealDate: '' };
+
+/** Nothing to subscribe to: the date is read on every render, and a render is all that needs it. */
+const noSubscription = () => () => {};
+
 export default function GiftForm({ accounts }: { accounts: { id: string; name: string }[] }) {
   const router = useRouter();
-  const [form, setForm] = useState({ amount: '', merchant: '', accountId: '', windowStart: '', windowEnd: '', revealDate: '' });
+  const [form, setForm] = useState<GiftFormState>(BLANK);
+  const today = useSyncExternalStore(noSubscription, () => localIsoDate(), () => null);
+  const defaults = today === null ? null : giftFormDefaults(today);
+  const windowStart = form.windowStart ?? defaults?.windowStart ?? '';
+  const windowEnd = form.windowEnd ?? defaults?.windowEnd ?? '';
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
@@ -28,8 +65,8 @@ export default function GiftForm({ accounts }: { accounts: { id: string; name: s
         amount: form.amount.trim() === '' ? null : form.amount.trim(),
         merchant: form.merchant.trim() === '' ? null : form.merchant,
         accountId: form.accountId === '' ? null : form.accountId,
-        windowStart: form.windowStart,
-        windowEnd: form.windowEnd,
+        windowStart,
+        windowEnd,
         revealDate: form.revealDate,
       }),
     });
@@ -39,7 +76,7 @@ export default function GiftForm({ accounts }: { accounts: { id: string; name: s
       setError(body?.error?.message ?? 'That did not work. Try again.');
       return;
     }
-    setForm({ amount: '', merchant: '', accountId: '', windowStart: '', windowEnd: '', revealDate: '' });
+    setForm(BLANK);
     router.refresh();
   }
 
@@ -63,10 +100,10 @@ export default function GiftForm({ accounts }: { accounts: { id: string; name: s
           <input type="date" className={input} value={form.revealDate} onChange={set('revealDate')} required />
         </label>
         <label className="text-xs text-slate-500">Expected from
-          <input type="date" className={input} value={form.windowStart} onChange={set('windowStart')} required />
+          <input type="date" className={input} value={windowStart} onChange={set('windowStart')} required />
         </label>
         <label className="text-xs text-slate-500">Expected until
-          <input type="date" className={input} value={form.windowEnd} onChange={set('windowEnd')} required />
+          <input type="date" className={input} value={windowEnd} onChange={set('windowEnd')} required />
         </label>
       </div>
       {error && <p className="text-red-500 text-sm">{error}</p>}

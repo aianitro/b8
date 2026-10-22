@@ -61,6 +61,7 @@ import { POST as applyRules } from '../rules/apply/route';
 import { GET as listGifts } from './route';
 import { GET as getGift } from './[id]/route';
 import { POST as chooseGift } from './[id]/choose/route';
+import { GET as giftCandidates } from './[id]/candidates/route';
 import RulesPage from '../../../rules/page';
 import { loadOverview } from '@/lib/overviewRead';
 import { loadYearEnd } from '@/lib/yearEndRead';
@@ -133,6 +134,24 @@ async function surfaceWorld(): Promise<Surface> {
 
 type Who = EnrolledUser | { bearer: string };
 
+/**
+ * P7-41c (S29): a waiting gift of the giver's whose merchant criterion is the ordinary row's, made
+ * once per world on first use — after the world's sync, so no sync claims the row — so the giver's
+ * candidate list holds that row and a non-giver's answer can be compared against a real one.
+ */
+const candidateGifts = new WeakMap<Surface, Promise<number>>();
+function candidateGiftOf(sf: Surface): Promise<number> {
+  let id = candidateGifts.get(sf);
+  if (!id) {
+    id = (async () => seedGift({
+      giver: sf.w.two.userId, recipient: sf.w.owner.userId, merchant: 'ZQ41BXPLAIN',
+      windowStart: await pgDay(1), windowEnd: await pgDay(3),
+    }))();
+    candidateGifts.set(sf, id);
+  }
+  return id;
+}
+
 /** Every text-bearing GET route's probe: what to ask, and the canary its giver must see. */
 function probes(sf: Surface): Record<string, { call: (who: Who) => Promise<Response>; giverSees: string; nonGiverStatus: number }> {
   return {
@@ -150,6 +169,13 @@ function probes(sf: Surface): Record<string, { call: (who: Who) => Promise<Respo
     'app/api/v1/gifts/[id]/route.ts': {
       call: (who) => getGift(req(`/api/v1/gifts/${sf.gifts.matched}`, who as EnrolledUser), params(sf.gifts.matched)),
       giverSees: 'ZQ41BXGIFT', nonGiverStatus: 404,
+    },
+    'app/api/v1/gifts/[id]/candidates/route.ts': {
+      call: async (who) => {
+        const id = await candidateGiftOf(sf);
+        return giftCandidates(req(`/api/v1/gifts/${id}/candidates`, who as EnrolledUser), params(id));
+      },
+      giverSees: 'ZQ41BXPLAIN', nonGiverStatus: 404,
     },
   };
 }

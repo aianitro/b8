@@ -1,13 +1,14 @@
-// Gifts (P7-41b) — what the five gift endpoints answer, stated once so the five cannot drift.
+// Gifts (P7-41b) — what the gift endpoints answer, stated once so they cannot drift. Five in P7-41b;
+// P7-41c added `candidates` and `attach`, which answer through the same functions.
 //
 // NOT A ROUTE. Next treats only `route.ts` as an endpoint; this file adds none.
 //
 // ─── NOT_FOUND IS ONE BODY, BYTE FOR BYTE ──────────────────────────────────────────────────────
 //
-// `GET`, `choose` and `cancel` on someone else's gift answer exactly what an id that does not exist
-// answers: the same status, the same code, the same message, built by the same function. A 403, or
-// a message that differed by a word, would tell the recipient that a gift record exists — which is
-// most of the secret.
+// `GET`, `choose`, `cancel`, `candidates` and `attach` on someone else's gift answer exactly what an
+// id that does not exist answers: the same status, the same code, the same message, built by the
+// same function. A 403, or a message that differed by a word, would tell the recipient that a gift
+// record exists — which is most of the secret.
 //
 // ─── WHO IS ASKING ────────────────────────────────────────────────────────────────────────────
 //

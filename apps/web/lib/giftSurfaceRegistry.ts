@@ -58,7 +58,12 @@ export const ROUTES: Surface[] = [
   { file: 'app/api/v1/categories/reorder/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/categories/route.ts', classes: ['numeric-only'] },
   { file: 'app/api/v1/chat/route.ts', classes: ['text-bearing'], scenario: 'X6' },
+  // Attach (P7-41c): files a row the giver names into the gift category, through `lib/giftStore.ts`,
+  // which is already the registered writer; the route itself writes nothing. C1 proves the link.
+  { file: 'app/api/v1/gifts/[id]/attach/route.ts', classes: ['guarded-write'], scenario: 'C1' },
   { file: 'app/api/v1/gifts/[id]/cancel/route.ts', classes: ['guarded-write'], scenario: 'G8' },
+  // The rows a giver could attach (P7-41c): real ledger text, served to the giver alone; X1 sweeps it.
+  { file: 'app/api/v1/gifts/[id]/candidates/route.ts', classes: ['text-bearing'], scenario: 'X1' },
   { file: 'app/api/v1/gifts/[id]/choose/route.ts', classes: ['guarded-write'], scenario: 'G7' },
   { file: 'app/api/v1/gifts/[id]/route.ts', classes: ['text-bearing'], scenario: 'G2' },
   { file: 'app/api/v1/gifts/route.ts', classes: ['text-bearing'], scenario: 'G2' },

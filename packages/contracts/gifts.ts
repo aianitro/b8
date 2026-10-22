@@ -1,17 +1,22 @@
-// Gifts between the two people (P7-41b) — the five endpoints, stated once.
+// Gifts between the two people (P7-41b, attach added in P7-41c) — the seven endpoints, stated once.
 //
-//   POST /api/v1/gifts               GiftCreateRequestSchema  → GiftResponseSchema (201)
-//   GET  /api/v1/gifts               —                        → GiftListResponseSchema
-//   GET  /api/v1/gifts/[id]          —                        → GiftResponseSchema
-//   POST /api/v1/gifts/[id]/choose   GiftChooseRequestSchema  → GiftResponseSchema
-//   POST /api/v1/gifts/[id]/cancel   no body (any body is ignored) → GiftResponseSchema
+//   POST /api/v1/gifts                  GiftCreateRequestSchema  → GiftResponseSchema (201)
+//   GET  /api/v1/gifts                  —                        → GiftListResponseSchema
+//   GET  /api/v1/gifts/[id]             —                        → GiftResponseSchema
+//   POST /api/v1/gifts/[id]/choose      GiftChooseRequestSchema  → GiftResponseSchema
+//   POST /api/v1/gifts/[id]/cancel      no body (any body is ignored) → GiftResponseSchema
+//   GET  /api/v1/gifts/[id]/candidates  —                        → GiftCandidateListResponseSchema
+//   POST /api/v1/gifts/[id]/attach      GiftAttachRequestSchema  → GiftResponseSchema (200)
 //
 // WHO RECEIVES THESE SHAPES: the giver, and nobody else. A gift record is invisible to every other
-// viewer — `GET /api/v1/gifts` lists only the viewer's own gifts as giver, and `GET`, `choose` and
-// `cancel` on someone else's gift answer exactly what a nonexistent id answers (`NOT_FOUND`, 404,
-// a byte-identical body). So every field below may carry the giver's real criteria and the real
-// details of the candidate rows; there is no masked variant of a gift, because a non-giver never
-// receives one at all. Masking applies to TRANSACTION rows on the other surfaces, not here.
+// viewer — `GET /api/v1/gifts` lists only the viewer's own gifts as giver, and `GET`, `choose`,
+// `cancel`, `candidates` and `attach` on someone else's gift answer exactly what a nonexistent id
+// answers (`NOT_FOUND`, 404, a byte-identical body). So every field below may carry the giver's real
+// criteria and the real details of the candidate rows; there is no masked variant of a gift, because
+// a non-giver never receives one at all. Masking applies to TRANSACTION rows on the other surfaces,
+// not here. The candidate list is the one shape here that carries rows the gift does NOT hold: they
+// are ordinary, unmasked ledger rows the giver can already read, and the list exists only so the
+// giver can name one to attach.
 //
 // STRICT OBJECTS, P7-41a's choice for objects this app authors at both ends. A stray key on a
 // create request (`state: 'matched'`, `giverUserId: …`) is exactly the key that must be refused,
@@ -121,16 +126,30 @@ export const GiftStateSchema = z.enum(['awaiting', 'choose', 'matched', 'unmatch
  * shared `DB_ERROR` can also arrive here.
  *
  *   `INVALID_INPUT`        400 — the body failed these schemas, the recipient named is the giver,
- *                                the account has no Plaid access token, or `choose` named a row that
- *                                is not one of this gift's candidates. The message never echoes a
- *                                submitted criterion.
+ *                                the account has no Plaid access token, `choose` named a row that
+ *                                is not one of this gift's candidates, or `attach` named a row that
+ *                                cannot be attached. For `attach` that is ONE refusal with one fixed
+ *                                message whatever the reason (no such row, already linked to any
+ *                                gift, a `manual_`/`csv_` row, not money out, in a transfer group,
+ *                                failing the amount, merchant or account criterion), so the body
+ *                                never tells the giver why and never carries row text. The message
+ *                                never echoes a submitted criterion.
  *   `NOT_FOUND`            404 — no such gift FOR THIS VIEWER. Someone else's gift answers this,
- *                                byte-identically to an id that does not exist; never 403.
+ *                                byte-identically to an id that does not exist; never 403. On
+ *                                `candidates` and `attach` it is decided before the body or the
+ *                                transaction id is looked at, so a non-giver's malformed body still
+ *                                gets this 404 and not a 400.
  *   `NO_RECIPIENT`         409 — there is no other live user to give to.
  *   `GIFT_CATEGORY_UNSET`  409 — no gift category is designated (`gift_settings.category_id` NULL),
  *                                so a match would have nowhere to be filed.
- *   `ALREADY_RESOLVED`     409 — `choose` on a gift that is not in `choose`, or `cancel` on a gift
- *                                already `cancelled`.
+ *   `ALREADY_RESOLVED`     409 — `choose` on a gift that is not in `choose`, `cancel` on a gift
+ *                                already `cancelled`, or `candidates` / `attach` on a gift that can
+ *                                no longer take a row: its state is not `awaiting` or `choose`, or
+ *                                its reveal date has come (`reveal_date <= CURRENT_DATE`, evaluated
+ *                                by Postgres — on the reveal date itself the gift refuses, even
+ *                                while it is still `awaiting` because the sweep has not run). A
+ *                                closed gift's candidate list is this 409, never `[]`: an empty
+ *                                list would read as "nothing fits", which is false for a closed gift.
  *   `GIFT_LOCKED`          409 — emitted by the TRANSACTION routes, not these five: a write refused
  *                                because the row is held by an unrevealed gift (SPEC.md Q5). Its
  *                                message carries no row text.
@@ -195,15 +214,36 @@ export const GiftChooseRequestSchema = z.strictObject({
   transactionId: GiftTransactionIdSchema,
 });
 
+/**
+ * `POST /api/v1/gifts/[id]/attach` — the body: which ledger row the giver says is this gift.
+ *
+ * The same shape as `choose`, and deliberately a separate schema: the two mean different things
+ * (`choose` picks among rows the gift already holds; `attach` brings in a row it does not), and a
+ * later change to one must not silently change the other.
+ *
+ * One field, strict. The giver names a row and nothing else: no criterion, no category, no state.
+ * Whether the row qualifies (money out, a Plaid row, not linked to any gift, not in a transfer
+ * group, the gift's amount, merchant and account criteria with the window ignored) is decided by the
+ * handler against committed data under lock, never trusted from the request or from an earlier
+ * candidate list.
+ *
+ * On success the response is `GiftResponseSchema` (200) carrying the refreshed gift: `awaiting`
+ * becomes `matched` with that one row; `choose` stays `choose` with one more candidate.
+ */
+export const GiftAttachRequestSchema = z.strictObject({
+  transactionId: GiftTransactionIdSchema,
+});
+
 // ─── Responses ──────────────────────────────────────────────────────────────────────────────────
 
 /**
- * One ledger row a gift currently holds, with its REAL details — the giver is the only reader.
+ * One ledger row a gift currently holds, or (in `GiftCandidateListSchema`) one unlinked row the giver
+ * may attach, with its REAL details — the giver is the only reader.
  *
  * `amount` is the row's stored `transactions.amount`, byte-identical to `amount::text`, and keeps
  * the ledger's sign: it was positive when it matched, and a later Plaid `modified` may change it,
  * so it is `moneyString` rather than `giftAmount`. `label` is the row's merchant, falling back to
- * its raw name, as the ledger shows it to the giver.
+ * its raw name, then to `Unnamed`, as the ledger shows it to the giver.
  */
 export const GiftCandidateSchema = z.strictObject({
   transactionId: GiftTransactionIdSchema,
@@ -278,15 +318,62 @@ export const GiftSchema = z
  */
 export const GiftListSchema = z.array(GiftSchema);
 
-/** `POST /api/v1/gifts`, `GET /api/v1/gifts/[id]`, `POST …/choose`, `POST …/cancel`. */
+/**
+ * `GET /api/v1/gifts/[id]/candidates` — the unlinked rows the giver may attach to this gift.
+ *
+ * WHICH ROWS: those the gift's amount, merchant and account criteria accept with the window ignored
+ * (the `isCandidate` rule minus the window, never a second definition), money out (`amount > 0`),
+ * Plaid rows only (no `manual_`/`csv_` id), linked to no gift at all, in no transfer group, and
+ * posted on or after the gift's creation date (Postgres's calendar) minus 7 days, with no upper
+ * bound. A `hidden` row is listed. Nothing here is masked: these rows are not held by any gift.
+ *
+ * ORDER: `date` descending, then `transactionId` descending — newest first, so the cap drops the
+ * oldest rows and never the likeliest. This is NOT the order of `GiftSchema.candidates` (ascending
+ * id); the two lists answer different questions. The order is part of the shape, so a strictly
+ * descending (date, id) sequence is enforced here, which also refuses a duplicated row.
+ *
+ * AT MOST 50 ROWS, the owner's cap; the store's LIMIT must be the same number, and a longer list is
+ * a contract violation, not a longer page. `[]` when nothing qualifies, never null. A closed gift
+ * (state not `awaiting`/`choose`, or reveal date reached) answers 409 `ALREADY_RESOLVED` instead
+ * of a list, so `[]` always means "this open gift has nothing to attach right now".
+ *
+ * Every amount is positive at the moment of listing, but the item schema stays `moneyString` (the
+ * same `GiftCandidateSchema`) because the list is a read, not a promise: a row may change before
+ * the giver clicks, and `attach` re-checks it.
+ */
+export const GiftCandidateListSchema = z
+  .array(GiftCandidateSchema)
+  .max(50, 'the candidate list holds at most 50 rows')
+  .refine(
+    (rows) =>
+      rows.slice(1).every((row, i) => {
+        const prev = rows[i];
+        return (
+          prev !== undefined &&
+          (prev.date > row.date ||
+            (prev.date === row.date && prev.transactionId > row.transactionId))
+        );
+      }),
+    { message: 'candidates must be ordered by date, then id, both descending, without repeats' }
+  );
+
+/**
+ * `POST /api/v1/gifts`, `GET /api/v1/gifts/[id]`, `POST …/choose`, `POST …/cancel`,
+ * `POST …/attach`.
+ */
 export const GiftResponseSchema = apiResponseSchema(GiftSchema);
 
 /** `GET /api/v1/gifts`. */
 export const GiftListResponseSchema = apiResponseSchema(GiftListSchema);
 
+/** `GET /api/v1/gifts/[id]/candidates`. */
+export const GiftCandidateListResponseSchema = apiResponseSchema(GiftCandidateListSchema);
+
 export type GiftState = z.infer<typeof GiftStateSchema>;
 export type GiftErrorCode = z.infer<typeof GiftErrorCodeSchema>;
 export type GiftCreateRequest = z.infer<typeof GiftCreateRequestSchema>;
 export type GiftChooseRequest = z.infer<typeof GiftChooseRequestSchema>;
+export type GiftAttachRequest = z.infer<typeof GiftAttachRequestSchema>;
 export type GiftCandidate = z.infer<typeof GiftCandidateSchema>;
+export type GiftCandidateList = z.infer<typeof GiftCandidateListSchema>;
 export type Gift = z.infer<typeof GiftSchema>;

@@ -341,3 +341,86 @@ export function validateGiftRequest(
     },
   };
 }
+
+// ─── Attaching a row that is already in the ledger (P7-41c) ────────────────────────────────────
+//
+// The sync can only claim a row the moment it first inserts it. A row that was already stored when
+// its gift was made, or that missed the window, is attached by the giver instead: they ask for the
+// rows that could be this gift, and name one. What follows is every pure decision that takes.
+
+/**
+ * How far before the gift's creation the candidate list reaches (SPEC.md Open question 1, the
+ * owner's answer). The failure being fixed is "the row was already there, or dated just before,
+ * when I made the gift"; a week of grace covers a purchase bought a few days before the giver
+ * thought to mark it, and anchoring on creation rather than on today means a gift that has waited
+ * a month does not lose the rows it was made for.
+ */
+export const GIFT_ATTACH_LOOKBACK_DAYS = 7;
+
+/**
+ * The most rows the candidate list carries, newest first. The same number as the contract's
+ * `GiftCandidateListSchema` cap; a store that returned more would fail that schema, not quietly
+ * send a longer page.
+ */
+export const GIFT_ATTACH_LIST_CAP = 50;
+
+/** A ledger row as attaching needs it: what matching needs, plus whether it is half of a transfer. */
+export interface AttachRow extends CandidateRow {
+  /** The row has a `transfer_group_id` — it is one side of a transfer pair. */
+  inTransferGroup: boolean;
+}
+
+/** A window no calendar date falls outside of: `isCandidate` with it is `isCandidate` without a window. */
+const ANY_DAY = { windowStart: '0001-01-01', windowEnd: '9999-12-31' } as const;
+
+/**
+ * Whether the giver may attach `row` to `gift`: `isCandidate`'s rule with the window taken away,
+ * and a transfer-pair member refused.
+ *
+ * NOT A SECOND DEFINITION. It calls `isCandidate` itself with a window that holds every date, so the
+ * amount, merchant, account, money-out, Plaid-row, pending and already-linked conjuncts are the
+ * matcher's own, and a fix to one of them reaches attach without anyone remembering to copy it.
+ * The window is exactly what the giver is overriding: they are saying "this row, whatever day it
+ * carries, is the gift".
+ *
+ * The transfer refusal is the one rule attach adds (SPEC.md Open question 6). Moving one side of a
+ * transfer pair into the gift category would break the pair, and the sync never meets the case
+ * because a fresh row is never in a group yet. Fail closed.
+ */
+export function isAttachCandidate(gift: GiftCriteria, row: AttachRow): boolean {
+  if (row.inTransferGroup) return false;
+  return isCandidate({ ...gift, ...ANY_DAY }, row);
+}
+
+/**
+ * Whether a gift can still take a row: unresolved (`awaiting` or `choose`) and not yet revealed.
+ *
+ * Strictly before the reveal date, the exact negation of `isRevealed`: on the reveal date itself the
+ * gift refuses, even while it still says `awaiting` because the daily sweep has not run yet. The
+ * callers read `today` from Postgres in the statement that locks the gift, as the sweep does.
+ */
+export function acceptsAttach(state: GiftState, revealDate: string, today: string): boolean {
+  if (state !== 'awaiting' && state !== 'choose') return false;
+  return !isRevealed(revealDate, today);
+}
+
+/**
+ * The oldest posted date the candidate list reaches: the gift's creation date (Postgres's
+ * calendar) minus `days`. Inclusive — a row dated on the floor is listed, one dated the day before
+ * is not. Calendar arithmetic only, so a leap day or a year end is a day like any other.
+ */
+export function attachFloor(createdDate: string, days: number): string {
+  return addDays(createdDate, -days);
+}
+
+/**
+ * What the gift form opens with, given the giver's local calendar date (SPEC.md Open question 4):
+ * "Expected from" is today, and "Expected until" is the same day — a one-day window, which is the
+ * obvious case of buying something today, and which the giver widens by editing. Nothing else is
+ * defaulted: "Reveal on" is a decision, and a guessed one would be wrong more often than not.
+ *
+ * `today` comes from `localIsoDate()` in the browser; this function reads no clock of its own.
+ */
+export function giftFormDefaults(today: string): { windowStart: string; windowEnd: string } {
+  return { windowStart: today, windowEnd: today };
+}
