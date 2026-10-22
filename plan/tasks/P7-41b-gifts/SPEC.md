@@ -366,4 +366,4 @@ present" is deliberate: it keeps every row the original rule matched (including 
 window and posted inside it), so the change only ever masks more, never less. Every other conjunct is
 unchanged. M4 and S5's "one day outside the window" cases, and acceptance row 6, now mean outside on both
 dates; the test kit sets the authorized date equal to the posted date unless a case overrides it.
-Scenarios: T41b-M13 (pure) and T41b-S13 (sync), each failing under the posted-only rule.
+Scenarios: T41b-M13 (pure) and T41b-S15 (sync), each failing under the posted-only rule.

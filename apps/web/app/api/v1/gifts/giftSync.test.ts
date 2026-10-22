@@ -406,7 +406,7 @@ describe('matching in the sync', () => {
     expect(await snapshot()).toEqual(before);
   });
 
-  it('T41b-S13: a one-day window holds a row bought that day and posted the next, masked for the recipient; a row with neither date inside stays ordinary', async () => {
+  it('T41b-S15: a one-day window holds a row bought that day and posted the next, masked for the recipient; a row with neither date inside stays ordinary', async () => {
     const day = await today();
     const next = await pgDay(1);
     const held = await giftFor('ZQ41BAUTHA', { windowStart: day, windowEnd: day });
