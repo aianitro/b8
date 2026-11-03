@@ -3,14 +3,15 @@
 import { useEffect, useId, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { LANDSCAPE_HEX } from '@/lib/chartColors';
-import type { BalancePoint } from '@/lib/domain/balanceSeries';
+import { monthsBefore, type BalancePoint } from '@/lib/domain/balanceSeries';
 import type { AccountFreshness } from '@/lib/domain/accountFreshness';
 
 const RANGES = [
-  { key: '7d',    label: 'Last 7 days' },
-  { key: '30d',   label: 'Last 30 days' },
-  { key: 'month', label: 'This month' },
-  { key: '12m',   label: 'Last 12 months' },
+  { key: '7d',  label: 'Last 7 days' },
+  { key: '30d', label: 'Last 30 days' },
+  { key: '3m',  label: 'Last 3 months' },
+  { key: '6m',  label: 'Last 6 months' },
+  { key: '12m', label: 'Last 12 months' },
 ] as const;
 type RangeKey = (typeof RANGES)[number]['key'];
 
@@ -35,16 +36,18 @@ function label(iso: string, withYear: boolean): string {
 }
 
 /**
- * The points a range covers, opening point included. "This month" opens on the close of the last
- * day of the previous month, so its change reads as month-to-date rather than from the 1st's close.
+ * The points a range covers, opening point included — the day-count ranges take one extra point so
+ * the change reads from the close of the day before the window, not from inside it.
+ *
  * Every slice is taken from one twelve-month series the server built, so switching is instant.
+ * A series shorter than the range (a valuation account first valued last month) simply yields all
+ * of it: `findIndex` lands on 0 and the counted slices ask for more than there is.
  */
 function slice(points: BalancePoint[], range: RangeKey): BalancePoint[] {
   if (range === '12m') return points;
-  if (range === 'month') {
-    const monthStart = points[points.length - 1].date.slice(0, 8) + '01';
-    const i = points.findIndex((p) => p.date >= monthStart);
-    return points.slice(Math.max(0, i - 1));
+  if (range === '3m' || range === '6m') {
+    const cutoff = monthsBefore(points[points.length - 1].date, range === '3m' ? 3 : 6);
+    return points.slice(Math.max(0, points.findIndex((p) => p.date >= cutoff)));
   }
   return points.slice(-(range === '7d' ? 8 : 31));
 }
@@ -85,7 +88,9 @@ export default function AccountBalanceChart({ accountId, points, landscape, titl
   //
   // Falling back to the default rather than leaving `range` alone matters when the account
   // CHANGES: /accounts/a → /accounts/b keeps this component mounted, and without the else the
-  // second account would inherit the first's range and then quietly save it as its own.
+  // second account would inherit the first's range and then quietly save it as its own. It is
+  // also what retires a range cleanly — a browser still holding the withdrawn `month` key reads
+  // as unrecognised and opens on the default, with nothing to migrate.
   useEffect(() => {
     const saved = localStorage.getItem(storageKeyFor(accountId));
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -165,6 +170,11 @@ export default function AccountBalanceChart({ accountId, points, landscape, titl
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+              {/* THE DATED TICK HOLDS UP TO SIX MONTHS and `Sep 14` says more than `Sep '26`; only
+                  the twelve-month window names months, because that is the one where the axis
+                  carries fewer ticks than months and where a month appears at both ends, so the
+                  year is doing real work. Naming months at six months instead labels two ticks
+                  inside the same month identically. */}
               <XAxis
                 dataKey="date"
                 tick={{ fontSize: 11, fill: '#94a3b8' }}

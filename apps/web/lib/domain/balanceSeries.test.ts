@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dateRange, ledgerSeries, valuationSeries } from './balanceSeries';
+import { dateRange, ledgerSeries, monthsBefore, valuationSeries } from './balanceSeries';
 
 // Fabricated figures throughout, as everywhere in this repo's tests.
 
@@ -15,6 +15,30 @@ describe('dateRange', () => {
 
   it('crosses New Year', () => {
     expect(dateRange('2026-01-01', 1)).toEqual(['2025-12-31', '2026-01-01']);
+  });
+});
+
+describe('monthsBefore', () => {
+  it('keeps the day of the month when that day exists', () => {
+    expect(monthsBefore('2026-11-02', 3)).toBe('2026-08-02');
+    expect(monthsBefore('2026-11-02', 6)).toBe('2026-05-02');
+  });
+
+  it('clamps rather than overflowing into the following month', () => {
+    // Plain Date arithmetic would make this Feb 31 and roll it to Mar 3, cutting three days off
+    // the window the chart then draws.
+    expect(monthsBefore('2026-05-31', 3)).toBe('2026-02-28');
+    expect(monthsBefore('2026-08-31', 6)).toBe('2026-02-28');
+    expect(monthsBefore('2026-03-31', 1)).toBe('2026-02-28');
+  });
+
+  it('finds Feb 29 in a leap year', () => {
+    expect(monthsBefore('2028-05-31', 3)).toBe('2028-02-29');
+  });
+
+  it('crosses New Year', () => {
+    expect(monthsBefore('2026-02-15', 3)).toBe('2025-11-15');
+    expect(monthsBefore('2026-01-31', 6)).toBe('2025-07-31');
   });
 });
 

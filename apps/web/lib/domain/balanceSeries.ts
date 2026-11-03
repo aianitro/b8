@@ -49,6 +49,25 @@ export function dateRange(end: string, days: number): string[] {
 }
 
 /**
+ * `YYYY-MM-DD`, `months` calendar months before `iso` — where the chart's "last 3 months" window
+ * opens.
+ *
+ * The day of the month is CLAMPED rather than left to overflow: three months before May 31 through
+ * `Date` arithmetic alone is Feb 31, which it rolls forward to Mar 3, quietly shortening the
+ * window. Capped at the target month's length it is Feb 28, which is what "three months back"
+ * means. Stepped in UTC for the reason `dateRange` is.
+ */
+export function monthsBefore(iso: string, months: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const target = new Date(Date.UTC(y, m - 1 - months, 1));
+  const ty = target.getUTCFullYear();
+  const tm = target.getUTCMonth();
+  // Day 0 of the next month is the last day of this one.
+  const lastDay = new Date(Date.UTC(ty, tm + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(ty, tm, Math.min(d, lastDay))).toISOString().slice(0, 10);
+}
+
+/**
  * Close-of-day balances for a ledger account, given its balance at the close of `end`.
  *
  * Flows dated after `end` are ignored rather than undone: `endBalance` is the balance as of `end`,
