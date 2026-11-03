@@ -13,6 +13,7 @@ import { walletStatuses } from '@/lib/cashCountStore';
 import AccountStatementList, { type StatementMonth } from '@/components/AccountStatementList';
 import AccountBalanceChart from '@/components/charts/AccountBalanceChart';
 import { ledgerSeries, valuationSeries } from '@/lib/domain/balanceSeries';
+import { accountFreshness } from '@/lib/domain/accountFreshness';
 import type { BudgetCategory } from '@b8/contracts/types';
 import { visibleTransactions } from '@/lib/giftReadPath';
 import { pageViewer } from '@/lib/giftViewer';
@@ -28,6 +29,8 @@ type AccountRow = {
   type: string; subtype: string | null; countable: boolean;
   valuation_mode: 'ledger' | 'valuation'; is_liability: boolean; linked: boolean; track_transactions: boolean;
   overdraft_watch: boolean; overdraft_cushion: string;
+  // The freshness columns lib/sync.ts writes, for the line under the balance.
+  last_synced_at: Date | null; item_last_successful_update: Date | null; item_last_failed_update: Date | null;
 };
 
 type TxRow = {
@@ -51,7 +54,10 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
 
   const [accountRes, balanceRes, txRes, valuationRes, categoriesRes] = await Promise.all([
     db.query<AccountRow>(
-      'SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability, countable, track_transactions, access_token IS NOT NULL AS linked, overdraft_watch, overdraft_cushion::text FROM accounts WHERE id = $1',
+      `SELECT name, landscape, bank, mask, type, subtype, valuation_mode, is_liability, countable,
+              track_transactions, access_token IS NOT NULL AS linked, overdraft_watch, overdraft_cushion::text,
+              last_synced_at, item_last_successful_update, item_last_failed_update
+         FROM accounts WHERE id = $1`,
       [id]
     ),
     db.query<{ beginning_balance: string }>(
@@ -74,8 +80,10 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
        ORDER BY t.date ASC, t.id ASC`,
       [id, year, SERIES_DAYS]
     ),
-    db.query<{ date: string; value: string }>(
-      'SELECT valued_at::date::text AS date, value::text FROM account_valuations WHERE account_id = $1 ORDER BY valued_at',
+    // `at` alongside `date` because the two answer different questions: the series is drawn by
+    // calendar day, while "last changed" is a moment compared against the moment of a sync.
+    db.query<{ date: string; at: Date; value: string }>(
+      'SELECT valued_at::date::text AS date, valued_at AS at, value::text FROM account_valuations WHERE account_id = $1 ORDER BY valued_at',
       [id]
     ),
     db.query<Pick<BudgetCategory, 'name' | 'landscape' | 'exclude_from_budget'>>(
@@ -133,6 +141,22 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
     ? { value: Number(lastValuation.value), date: lastValuation.date }
     : null;
 
+  // How current the figure on the chart is. Worded here rather than in the chart, which is a
+  // client component: the zone a date is read in would otherwise be the browser's on hydration
+  // and the server's before it, and the two disagree about which day a 6 AM sync fell on.
+  const freshness = accountFreshness(
+    {
+      linked: account.linked,
+      valuationMode: account.valuation_mode,
+      lastSuccessfulUpdate: account.item_last_successful_update,
+      lastFailedUpdate: account.item_last_failed_update,
+      lastSyncedAt: account.last_synced_at,
+      latestObservationAt: lastValuation?.at ?? null,
+    },
+    new Date(),
+    Intl.DateTimeFormat().resolvedOptions().timeZone
+  );
+
   const ledgerToday = beginningBalance - yearRows.filter((t) => t.date <= today).reduce((s, t) => s + t.amount, 0);
   const points = isValuation
     ? valuationSeries(today, SERIES_DAYS, valuationRes.rows.map((v) => ({ date: v.date, value: Number(v.value) })))
@@ -161,6 +185,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
         points={points}
         landscape={landscape}
         title={isValuation ? (account.is_liability ? 'Amount owed' : 'Current value') : 'Balance'}
+        freshness={freshness}
       />
 
       {/* A hand-kept account's figure, typed. Every valuation-mode account that Plaid does not

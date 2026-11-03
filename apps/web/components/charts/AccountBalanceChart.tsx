@@ -4,6 +4,7 @@ import { useId, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { LANDSCAPE_HEX } from '@/lib/chartColors';
 import type { BalancePoint } from '@/lib/domain/balanceSeries';
+import type { AccountFreshness } from '@/lib/domain/accountFreshness';
 
 const RANGES = [
   { key: '7d',    label: 'Last 7 days' },
@@ -59,10 +60,12 @@ function niceTicks(values: number[]): number[] {
   return ticks;
 }
 
-export default function AccountBalanceChart({ points, landscape, title }: {
+export default function AccountBalanceChart({ points, landscape, title, freshness }: {
   points: BalancePoint[];
   landscape: 'operational' | 'capital';
   title: string;
+  /** How current the figure is, already worded by the server; absent when there is nothing to say. */
+  freshness: AccountFreshness | null;
 }) {
   const [range, setRange] = useState<RangeKey>('30d');
   // Stripped to word characters: useId's punctuation is legal in an id but not reliably inside
@@ -92,6 +95,17 @@ export default function AccountBalanceChart({ points, landscape, title }: {
                 {pct !== null && ` (${Math.abs(pct).toFixed(1)}%)`}
               </span>
               <span className="text-slate-400"> {rangeLabel}</span>
+            </p>
+          )}
+          {/* HOW CURRENT THE FIGURE ABOVE IS, which the line itself cannot say: a flat weekend and
+              a feed that died on Friday draw the same chart. Worded on the server so the dates are
+              read in one zone and the markup hydrates to what was sent. */}
+          {freshness && (
+            <p
+              title={freshness.title}
+              className={`text-xs mt-1.5 ${freshness.tone === 'warn' ? 'text-amber-600' : 'text-slate-400'}`}
+            >
+              {freshness.text}
             </p>
           )}
         </div>
