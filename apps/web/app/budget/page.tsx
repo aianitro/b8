@@ -14,7 +14,7 @@ import BudgetTabsToggle from '@/components/BudgetTabsToggle';
 import BeginningBalanceEdit from '@/components/BeginningBalanceEdit';
 import KpiCard from '@/components/KpiCard';
 import UnspentBuckets from '@/components/UnspentBuckets';
-import { loadBuckets } from '@/lib/unspentStore';
+import { loadBuckets, loadCloseSchedule } from '@/lib/unspentStore';
 
 type SummaryRow = BudgetSummary & { landscape: Landscape; is_income: boolean; monthly_amounts: string[] | null; closed_months: string; current_month: string };
 interface UncategorizedRow { landscape: Landscape; count: string; total_out: string; total_in: string; }
@@ -213,7 +213,7 @@ export default async function BudgetPage({ searchParams }: PageProps) {
 
   const year = new Date().getFullYear();
 
-  const [summary, uncategorized, settingsRow, yearEnd, buckets, destinations, moves, todayIso] = await Promise.all([
+  const [summary, uncategorized, settingsRow, yearEnd, buckets, closeSchedule, destinations, moves, todayIso] = await Promise.all([
     getBudgetSummary(),
     getUncategorized(landscape),
     db.query<{ beginning_balance: string }>(
@@ -222,6 +222,8 @@ export default async function BudgetPage({ searchParams }: PageProps) {
     ),
     loadYearEnd(landscape, { year, month: new Date().getMonth() }),
     loadBuckets(),
+    // Which month closes next, for the card to name when no bucket is waiting.
+    loadCloseSchedule(),
     // Where a carry may land: spending categories, both landscapes.
     db.query<{ id: number; name: string }>(
       'SELECT id, name FROM budget_categories WHERE is_income = FALSE AND exclude_from_budget = FALSE ORDER BY name'
@@ -329,6 +331,7 @@ export default async function BudgetPage({ searchParams }: PageProps) {
             buckets={buckets.filter((b) => b.landscape === landscape)}
             destinations={destinations}
             today={{ year, month: new Date().getMonth() + 1 }}
+            schedule={closeSchedule}
           />
 
           {view === 'monthly' ? (

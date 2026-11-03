@@ -4,8 +4,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PiggyBank, X } from 'lucide-react';
 import type { UnspentBucket } from '@/lib/unspentStore';
+import type { CloseSchedule } from '@/lib/domain/unspent';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const FULL_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                     'July', 'August', 'September', 'October', 'November', 'December'];
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
 
@@ -13,19 +16,26 @@ const fmt = (n: number) =>
  * The budget page's unspent buckets: what each category left over in closed months and has not yet
  * been allocated, with the one action that clears it.
  *
- * Silent when nothing is waiting. A bucket fully allocated stays out of this list; its history lives
- * in the allocations, not on the page.
+ * IT NO LONGER DISAPPEARS when every bucket is empty. It used to, and an absent card is
+ * indistinguishable from a removed feature: with September allocated to the cent and October still
+ * inside its grace days, the owner read the empty page as the feature having gone. It now says
+ * which month is next and when it closes, and offers to close it early.
+ *
+ * A bucket fully allocated stays out of the list either way; its history lives in the allocations,
+ * not on the page.
  */
-export default function UnspentBuckets({ buckets, destinations, today }: {
+export default function UnspentBuckets({ buckets, destinations, today, schedule }: {
   buckets: UnspentBucket[];
   /** Spending categories a carry may land in. */
   destinations: { id: number; name: string }[];
   /** 1-based month. */
   today: { year: number; month: number };
+  /** Which month closes next and whether one is already waiting. */
+  schedule: CloseSchedule;
 }) {
   const waiting = buckets.filter((b) => b.balance > 0);
   const [open, setOpen] = useState<UnspentBucket | null>(null);
-  if (waiting.length === 0) return null;
+  if (waiting.length === 0) return <NothingWaiting schedule={schedule} />;
   const total = waiting.reduce((s, b) => s + b.balance, 0);
 
   return (
@@ -59,6 +69,80 @@ export default function UnspentBuckets({ buckets, destinations, today }: {
         })}
       </div>
       {open && <AllocateDialog bucket={open} destinations={destinations} today={today} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+/** `{ year, month }` → `October`, and with a day → `Nov 4`. */
+const monthName = (ym: { month: number }) => FULL_MONTHS[ym.month - 1];
+const shortDate = (d: { month: number; day: number }) => `${MONTHS[d.month - 1]} ${d.day}`;
+
+/**
+ * The card with nothing in it: which month is next to close, and the way to close it now.
+ *
+ * CLOSING EARLY IS NOT FREE, so the button asks first. The grace days exist because a charge
+ * authorised at the end of a month posts a day or three later, and a close is written once — a
+ * month closed early keeps a leftover that is too high for good.
+ */
+function NothingWaiting({ schedule }: { schedule: CloseSchedule }) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const closable = schedule.pending.length > 0;
+
+  async function close() {
+    setBusy(true);
+    setError(null);
+    const res = await fetch('/api/v1/budget/unspent/close', { method: 'POST' }).catch(() => null);
+    const body = res ? await res.json().catch(() => null) : null;
+    setBusy(false);
+    if (!body?.success) { setError(body?.error?.message ?? 'Could not close the month.'); return; }
+    setConfirming(false);
+    router.refresh();
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="min-w-0 flex items-center gap-2 text-slate-400">
+          <PiggyBank size={14} className="shrink-0" />
+          <p className="text-xs">
+            Nothing to allocate.{' '}
+            {closable && schedule.ready
+              ? `${monthName(schedule.next)} is ready to close.`
+              : `${monthName(schedule.next)} closes ${shortDate(schedule.closesOn)}.`}
+          </p>
+        </div>
+        {closable && !confirming && (
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="shrink-0 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+          >
+            Close now
+          </button>
+        )}
+        {confirming && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button type="button" onClick={close} disabled={busy}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-50">
+              {busy ? 'Closing…' : `Close ${monthName(schedule.next)}`}
+            </button>
+            <button type="button" onClick={() => setConfirming(false)} disabled={busy}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+      {confirming && (
+        <p className="text-[11px] text-amber-600 mt-2">
+          Charges from the end of {monthName(schedule.next)} that have not posted yet will not be
+          counted, and a month is closed once — its leftovers cannot be recalculated afterwards.
+        </p>
+      )}
+      {error && <p className="text-[11px] text-red-500 mt-2">{error}</p>}
     </div>
   );
 }

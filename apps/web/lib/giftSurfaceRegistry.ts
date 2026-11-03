@@ -51,6 +51,7 @@ export const ROUTES: Surface[] = [
   { file: 'app/api/v1/auth/users/[id]/revoke/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/budget/settings/route.ts', classes: ['numeric-only'] },
   { file: 'app/api/v1/budget/unspent/allocate/route.ts', classes: ['numeric-only'] },
+  { file: 'app/api/v1/budget/unspent/close/route.ts', classes: ['numeric-only'] },
   { file: 'app/api/v1/budget/unspent/route.ts', classes: ['numeric-only'] },
   { file: 'app/api/v1/cash-counts/route.ts', classes: ['numeric-only'] },
   { file: 'app/api/v1/cash-transfers/route.ts', classes: ['guarded-write'], scenario: 'X12' },

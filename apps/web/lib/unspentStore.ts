@@ -1,6 +1,6 @@
 import db from './db';
 import { createLogger } from './logger';
-import { checkMove, closedMonths, leftover, type YearMonth } from './domain/unspent';
+import { checkMove, closeSchedule, closedMonths, leftover, type CloseSchedule, type YearMonth } from './domain/unspent';
 
 const log = createLogger('unspent');
 
@@ -30,11 +30,11 @@ const SPENDING = `bc.is_income = FALSE AND bc.exclude_from_budget = FALSE`;
  * re-running it later would close categories created since — whose year-less schedule gives them a
  * plan for that month — with a leftover they never had.
  */
-export async function recordCloses(now: Date = new Date()): Promise<number> {
+export async function recordCloses(now: Date = new Date(), graceDays?: number): Promise<number> {
   try {
     const today = { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
     let written = 0;
-    for (const ym of closedMonths(today)) {
+    for (const ym of closedMonths(today, undefined, graceDays)) {
       const done = await db.query('SELECT 1 FROM budget_unspent WHERE year = $1 AND month = $2 LIMIT 1', [ym.year, ym.month]);
       if (done.rows.length > 0) continue;
 
@@ -72,6 +72,38 @@ export async function recordCloses(now: Date = new Date()): Promise<number> {
     log.error('recording closes failed', { error: err instanceof Error ? err.message : String(err) });
     return 0;
   }
+}
+
+/** The months that already have a close recorded. */
+export async function loadClosedMonths(): Promise<YearMonth[]> {
+  const { rows } = await db.query<{ year: number; month: number }>(
+    'SELECT DISTINCT year, month FROM budget_unspent ORDER BY year, month'
+  );
+  return rows;
+}
+
+/** Which month the budget page names when no bucket is waiting, and whether it can be closed now. */
+export async function loadCloseSchedule(now: Date = new Date()): Promise<CloseSchedule> {
+  const today = { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
+  return closeSchedule(today, await loadClosedMonths());
+}
+
+/**
+ * Close every month that has ended without waiting out its grace days — the budget page's
+ * "Close now".
+ *
+ * THE GRACE IS THERE FOR A REASON and this gives it up: a charge authorised in the last days of
+ * the month and posted after the close is not in `actual`, so the leftover is overstated, and a
+ * close is written once and never revisited. The owner is told as much before pressing it. What
+ * this cannot do is close the month now running — `closedMonths` steps back a month whatever the
+ * grace — so the worst case is a few days of late charges, not a part-month frozen as a whole one.
+ */
+export async function closeNow(now: Date = new Date()): Promise<{ closed: YearMonth[]; written: number }> {
+  const schedule = await loadCloseSchedule(now);
+  if (schedule.pending.length === 0) return { closed: [], written: 0 };
+  const written = await recordCloses(now, 0);
+  log.info('closed early at the owner\'s request', { months: schedule.pending.length, categories: written });
+  return { closed: schedule.pending, written };
 }
 
 export interface UnspentBucket {

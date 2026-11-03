@@ -31,12 +31,56 @@ export const CLOSE_GRACE_DAYS = 3;
  * The months that may be closed as of `today` (1-based month, plus the day): every month from
  * UNSPENT_START up to last month — or up to the month before last while last month is still inside
  * its grace days.
+ *
+ * `graceDays` is an argument so the owner can close a month early from the budget page. At 0 the
+ * result is every month that has ENDED: the subtraction still steps back one month, so no grace
+ * however short can reach the month now running, whose `actual` is a part-month figure.
  */
-export function closedMonths(today: YearMonth & { day: number }, start: YearMonth = UNSPENT_START): YearMonth[] {
-  const lastClosable = index(today) - (today.day > CLOSE_GRACE_DAYS ? 1 : 2);
+export function closedMonths(
+  today: YearMonth & { day: number },
+  start: YearMonth = UNSPENT_START,
+  graceDays: number = CLOSE_GRACE_DAYS,
+): YearMonth[] {
+  const lastClosable = index(today) - (today.day > graceDays ? 1 : 2);
   const out: YearMonth[] = [];
   for (let i = index(start); i <= lastClosable; i++) out.push(fromIndex(i));
   return out;
+}
+
+export interface CloseSchedule {
+  /** Months that have ended, are in range, and have no close recorded — earliest first. */
+  pending: YearMonth[];
+  /** The month the next close covers: the earliest pending one, or the month now running. */
+  next: YearMonth;
+  /** The day the daily job closes `next` on — the grace day of the month after it. */
+  closesOn: YearMonth & { day: number };
+  /** Whether `next` is already past its grace, so the job's next run would take it. */
+  ready: boolean;
+}
+
+/**
+ * What the budget page says when no bucket is waiting: which month is next to close and when.
+ *
+ * An empty card is indistinguishable from a removed feature — the owner read one as the other —
+ * so the card stays on the page and names the date instead of disappearing.
+ */
+export function closeSchedule(
+  today: YearMonth & { day: number },
+  closed: readonly YearMonth[],
+  start: YearMonth = UNSPENT_START,
+): CloseSchedule {
+  const done = new Set(closed.map(index));
+  const pending = closedMonths(today, start, 0).filter((ym) => !done.has(index(ym)));
+  // With nothing pending the next close is of the month now running, which has not ended: that is
+  // a date to report, never a month `closeNow` may take.
+  const next = pending[0] ?? { year: today.year, month: today.month };
+  const after = fromIndex(index(next) + 1);
+  return {
+    pending,
+    next,
+    closesOn: { ...after, day: CLOSE_GRACE_DAYS + 1 },
+    ready: closedMonths(today, start).some((m) => index(m) === index(next)),
+  };
 }
 
 /** A month's leftover, to the cent; zero when the category spent its plan or more. */
