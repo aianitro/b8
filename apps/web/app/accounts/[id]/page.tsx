@@ -250,9 +250,16 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
               {yearRows.length.toLocaleString()} transaction{yearRows.length === 1 ? '' : 's'}
             </p>
           </div>
-          {/* Importing into this ledger starts here, with this account chosen in the importer. Not
-              for a wallet (cash is counted, not exported) nor a valued account (no ledger rows). */}
-          {!isValuation && !account.countable && (
+          {/* Importing into this ledger starts here, with this account chosen in the importer.
+              A VALUED ACCOUNT GETS IT TOO. It was withheld on the grounds that such an account has
+              no ledger rows, which is not so: a brokerage's buys, dividends and sweep interest are
+              transactions like any other, they are listed in the statement below, and Plaid does
+              not send them — the Transactions product does not cover investment activity, so a CSV
+              is the only way they arrive. Withholding the button hid the one route they had.
+              The balance is untouched either way: a valued account's figure comes from its
+              valuations, which is why these rows carry no running balance.
+              Still not for a wallet, where cash is counted rather than exported. */}
+          {!account.countable && (
             <Link
               href={`/import?account=${encodeURIComponent(id)}`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
