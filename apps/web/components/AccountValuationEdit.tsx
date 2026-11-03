@@ -98,7 +98,11 @@ export default function AccountValuationEdit({ accountId, current, isLiability }
         ) : (
           <span className="italic text-slate-400 hover:text-slate-600">Set value</span>
         )}
-        <Pencil size={11} className="text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+        {/* SHOWN OUTRIGHT WHERE THERE IS NO HOVER. On a phone the figure is the button and
+            nothing says so, which is how a mortgage came to look like a read-only number; the
+            pencil keeps its room either way (`opacity-0`, not hidden), so revealing it on a
+            coarse pointer shifts no figure in the column. */}
+        <Pencil size={11} className="text-slate-400 opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity" />
       </button>
       {error && <p className="text-[10px] text-red-500">{error}</p>}
     </div>

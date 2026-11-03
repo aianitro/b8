@@ -8,6 +8,7 @@ import AccountBalanceEdit from '@/components/AccountBalanceEdit';
 import AccountHeader from '@/components/AccountHeader';
 import CashManagementCard from '@/components/CashManagementCard';
 import StatementUpload from '@/components/StatementUpload';
+import AccountValuationRecord from '@/components/AccountValuationRecord';
 import { walletStatuses } from '@/lib/cashCountStore';
 import AccountStatementList, { type StatementMonth } from '@/components/AccountStatementList';
 import AccountBalanceChart from '@/components/charts/AccountBalanceChart';
@@ -125,6 +126,13 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
   }
   const months = [...monthMap.values()].reverse();
 
+  // The newest recorded valuation, for the typed-figure card to report back. The rows arrive in
+  // date order, so "newest" is the last of them.
+  const lastValuation = valuationRes.rows.at(-1);
+  const latestValuation = lastValuation
+    ? { value: Number(lastValuation.value), date: lastValuation.date }
+    : null;
+
   const ledgerToday = beginningBalance - yearRows.filter((t) => t.date <= today).reduce((s, t) => s + t.amount, 0);
   const points = isValuation
     ? valuationSeries(today, SERIES_DAYS, valuationRes.rows.map((v) => ({ date: v.date, value: Number(v.value) })))
@@ -154,6 +162,13 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
         landscape={landscape}
         title={isValuation ? (account.is_liability ? 'Amount owed' : 'Current value') : 'Balance'}
       />
+
+      {/* A hand-kept account's figure, typed. Every valuation-mode account that Plaid does not
+          link — including a mortgage, which the statement reader below skips, and which until this
+          card could only be valued from the accounts list's hover pencil. */}
+      {isValuation && !account.linked && (
+        <AccountValuationRecord accountId={id} isLiability={account.is_liability} latest={latestValuation} />
+      )}
 
       {/* A hand-valued investment account is refreshed from its statement, here on its own page:
           the value, and the period's shares received. Never for a loan, and never for an account
