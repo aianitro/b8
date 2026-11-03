@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Upload, FileText, AlertCircle, CheckCircle2 } from 'lucide-react';
 
@@ -183,8 +184,12 @@ export default function CsvImporter({ accounts, initialAccountId }: Props) {
     }
   }
 
-  function reset() {
-    setParsed(null); setResult(null); setError(null); setAccountId('');
+  // `keepAccount` for "Import another", where the next file is usually the same account's next
+  // month. Called as `() => reset()`, never as the handler itself: a click event in the first
+  // argument is truthy and would keep the account every time.
+  function reset(keepAccount = false) {
+    setParsed(null); setResult(null); setError(null);
+    if (!keepAccount) setAccountId('');
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -277,17 +282,38 @@ export default function CsvImporter({ accounts, initialAccountId }: Props) {
             )}
           </div>
 
-          <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-            <button onClick={reset} className="text-sm text-slate-400 hover:text-slate-600 transition-colors">
-              Clear
-            </button>
-            <button
-              onClick={handleImport}
-              disabled={!accountId || loading || !!result}
-              className="px-5 py-2 bg-slate-900 hover:bg-slate-700 text-white rounded-lg text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              {loading ? 'Importing…' : result ? 'Done' : `Import ${parsed.rows.length} transactions`}
-            </button>
+          {/* ONCE THE ROWS ARE IN, THE ACTION CHANGES rather than greying out. This button used to
+              relabel itself "Done" and stay disabled — a word that names an action and then
+              refuses it, leaving the faint Clear link as the only way on. The import button is
+              now gone entirely at that point, which is also what stops a second import of the
+              same file: the guard is the button's absence, not a disabled attribute. */}
+          <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
+            {result ? (
+              <>
+                <button onClick={() => reset(true)} className="text-sm text-slate-400 hover:text-slate-600 transition-colors">
+                  Import another
+                </button>
+                <Link
+                  href={`/transactions?account=${encodeURIComponent(accountId)}`}
+                  className="px-5 py-2 bg-slate-900 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  View transactions
+                </Link>
+              </>
+            ) : (
+              <>
+                <button onClick={() => reset()} className="text-sm text-slate-400 hover:text-slate-600 transition-colors">
+                  Clear
+                </button>
+                <button
+                  onClick={handleImport}
+                  disabled={!accountId || loading}
+                  className="px-5 py-2 bg-slate-900 hover:bg-slate-700 text-white rounded-lg text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {loading ? 'Importing…' : `Import ${parsed.rows.length} transactions`}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
