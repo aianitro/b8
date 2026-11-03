@@ -182,6 +182,7 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
       />
 
       <AccountBalanceChart
+        accountId={id}
         points={points}
         landscape={landscape}
         title={isValuation ? (account.is_liability ? 'Amount owed' : 'Current value') : 'Balance'}

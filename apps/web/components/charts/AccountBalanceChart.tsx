@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { LANDSCAPE_HEX } from '@/lib/chartColors';
 import type { BalancePoint } from '@/lib/domain/balanceSeries';
@@ -13,6 +13,13 @@ const RANGES = [
   { key: '12m',   label: 'Last 12 months' },
 ] as const;
 type RangeKey = (typeof RANGES)[number]['key'];
+
+const DEFAULT_RANGE: RangeKey = '30d';
+
+/** Per account, so a brokerage kept on 12 months and a card kept on 7 days each stay put. */
+const storageKeyFor = (accountId: string) => `accountChartRange:${accountId}`;
+
+const isRangeKey = (v: string | null): v is RangeKey => RANGES.some((r) => r.key === v);
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -60,14 +67,35 @@ function niceTicks(values: number[]): number[] {
   return ticks;
 }
 
-export default function AccountBalanceChart({ points, landscape, title, freshness }: {
+export default function AccountBalanceChart({ accountId, points, landscape, title, freshness }: {
+  /** Which account's remembered range to restore; the chart stores nothing else. */
+  accountId: string;
   points: BalancePoint[];
   landscape: 'operational' | 'capital';
   title: string;
   /** How current the figure is, already worded by the server; absent when there is nothing to say. */
   freshness: AccountFreshness | null;
 }) {
-  const [range, setRange] = useState<RangeKey>('30d');
+  const [range, setRange] = useState<RangeKey>(DEFAULT_RANGE);
+
+  // Restored in an effect rather than a lazy initializer: localStorage does not exist during SSR,
+  // so reading it while rendering would make the client's first pass disagree with the server
+  // HTML — a real mismatch, since the range decides which points are drawn. The same trade the
+  // categories tab and the property ledger's filter make.
+  //
+  // Falling back to the default rather than leaving `range` alone matters when the account
+  // CHANGES: /accounts/a → /accounts/b keeps this component mounted, and without the else the
+  // second account would inherit the first's range and then quietly save it as its own.
+  useEffect(() => {
+    const saved = localStorage.getItem(storageKeyFor(accountId));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRange(isRangeKey(saved) ? saved : DEFAULT_RANGE);
+  }, [accountId]);
+
+  function chooseRange(next: RangeKey) {
+    localStorage.setItem(storageKeyFor(accountId), next);
+    setRange(next);
+  }
   // Stripped to word characters: useId's punctuation is legal in an id but not reliably inside
   // the `url(#…)` that references it.
   const gradientId = `balance-fill-${useId().replace(/\W/g, '')}`;
@@ -114,7 +142,7 @@ export default function AccountBalanceChart({ points, landscape, title, freshnes
             iOS zooming the page when it takes focus — it does that to anything under 16px. */}
         <select
           value={range}
-          onChange={(e) => setRange(e.target.value as RangeKey)}
+          onChange={(e) => chooseRange(e.target.value as RangeKey)}
           aria-label="Chart range"
           className="shrink-0 text-base sm:text-sm border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400"
         >
