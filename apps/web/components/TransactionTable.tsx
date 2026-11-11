@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useTransition } from 'react';
+import { useState, useEffect, useRef, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Trash2, Eye, EyeOff, Copy, Flag, X } from 'lucide-react';
 import CategorySelect from './CategorySelect';
@@ -9,6 +9,7 @@ import MerchantMark from './MerchantMark';
 import { TransactionDetailButton } from './TransactionDetailSheet';
 import TransferLinkButton from './TransferLinkButton';
 import { detailLine, enrichmentDetail } from '@/lib/enrichedDisplay';
+import { useVisibleViewport } from '@/lib/useVisibleViewport';
 
 type AccountOption = { id: string; name: string; landscape: string };
 type GroupPeer = { account_name: string; amount: number | string };
@@ -317,6 +318,21 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // The region actually on screen while the sheet is open, which on a phone is the window minus
+  // the keyboard. `lib/useVisibleViewport.ts` carries why CSS cannot answer this on iOS.
+  const visible = useVisibleViewport(open);
+
+  // FOCUS THE FIELD FROM `sm:` UP AND NOWHERE ELSE — the rule `AccountHeader` writes down. With a
+  // pointer, landing in the note is the whole point of opening this. On a phone, autofocus raises
+  // a keyboard over the sheet the moment it appears, before its owner has read which transaction
+  // it is about, and the only way back is to dismiss a keyboard they did not ask for.
+  useEffect(() => {
+    if (!open) return;
+    if (!window.matchMedia('(min-width: 640px)').matches) return;
+    inputRef.current?.focus();
+  }, [open]);
 
   const watched = transaction.watched_at !== null;
   const label = transaction.merchant_name ?? transaction.name ?? 'this transaction';
@@ -359,19 +375,39 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
       </button>
 
       {open && (
-        /* A SHEET ON A PHONE, a centred dialog from `sm:` up — `TransactionEditButton`'s idiom,
-           and here the keyboard is what forces it. The field below is autofocused, so opening
-           this opens a keyboard too, and a card centred in the full viewport put its buttons
-           where iOS draws that keyboard: measured at 390×844, `Save note` sat ~30px below the
-           keyboard's top edge, so the one control the sheet exists for was the one covered.
-           iOS does not shrink the layout viewport for a keyboard, so nothing recentres it.
+        /* A SHEET ON A PHONE, a centred dialog from `sm:` up — `TransactionEditButton`'s idiom.
+           What makes this one hard is the keyboard: the note field is the only reason the sheet
+           exists, so it is open with a keyboard up for as long as it is open at all.
 
-           Three parts carry that: `items-end` puts the card on the bottom edge, where the
-           keyboard pushes nothing away; `max-h-[85dvh] overflow-y-auto` keeps a long note's
-           field reachable by scrolling the card rather than the page behind it; and the action
-           row below is `sticky bottom-0`, so it stays put while the rest scrolls. */
+           `items-end` AND `max-h-[85dvh]` ARE NOT ENOUGH, and shipping only those is why this
+           came back a second time. iOS does not shrink the layout viewport for a keyboard: the
+           window stays its full height, the keys are drawn over the bottom third of it, and so
+           the bottom edge `items-end` anchors to — and the `85dvh` the card measures itself
+           against — are both still the bottom edge of the whole screen, behind the keys. The
+           sheet moved from the middle of the covered strip to the end of it.
+
+           So the overlay is positioned from `visualViewport`, the one thing that reports the
+           uncovered region, and is sized to it below. That turns `items-end` into "above the
+           keyboard" and the card's cap into "as tall as what I can see" — and costs nothing on
+           Android or a desktop, where the same measurement is simply the whole window. The
+           classes stay as the fallback for anything that cannot measure.
+
+           Two parts survive from the first attempt and still earn their place: `overflow-y-auto`
+           keeps a long note's field reachable by scrolling the card rather than the page behind
+           it, and the action row below is `sticky bottom-0`, so it stays put while it scrolls. */
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-sm"
+          /* Runtime geometry, so it cannot be a class: `top`/`left` follow the page shift iOS
+             applies to reveal a focused field, and `right`/`bottom` go back to `auto` so the
+             width and height here win over `inset-0` rather than fighting it. */
+          style={visible ? {
+            top: visible.top,
+            left: visible.left,
+            width: visible.width,
+            height: visible.height,
+            right: 'auto',
+            bottom: 'auto',
+          } : undefined}
           onClick={() => !busy && setOpen(false)}
         >
           <div
@@ -381,6 +417,8 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
             className="bg-white w-full sm:w-96 rounded-t-2xl sm:rounded-2xl shadow-xl border border-slate-100
                        p-5 sm:p-6 max-h-[85dvh] overflow-y-auto
                        pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pb-6"
+            /* The cap in terms of the visible region rather than `dvh`, for the same reason. */
+            style={visible ? { maxHeight: visible.height } : undefined}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 mb-4">
@@ -410,7 +448,14 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
             </div>
 
             <label className="block text-xs font-medium text-slate-500 mb-1">Why? (optional)</label>
+            {/* `text-base` below `sm`, the rule `AccountHeader` and five other forms already
+                follow: iOS ZOOMS THE PAGE INTO ANY INPUT UNDER 16px. At `text-sm` this field did,
+                and that zoom is what made the complaint about the whole page rather than this
+                sheet — the installed app has no address bar to reset it, so closing the sheet
+                left the transactions table magnified and panning sideways. Nothing about the
+                table was wrong; it was still wearing the zoom this field asked for. */}
             <input
+              ref={inputRef}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               onKeyDown={(e) => {
@@ -418,9 +463,8 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
                 if (e.key === 'Escape' && !busy) setOpen(false);
               }}
               maxLength={200}
-              autoFocus
               placeholder="returning to Zara"
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+              className="w-full text-base sm:text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
             />
             {/* Counts down only near the limit. A counter that is always on is chrome; one that
                 appears at 160 characters is a warning. */}
