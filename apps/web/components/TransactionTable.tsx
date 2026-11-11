@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Trash2, Eye, EyeOff, Copy, Flag } from 'lucide-react';
+import { Trash2, Eye, EyeOff, Copy, Flag, X } from 'lucide-react';
 import CategorySelect from './CategorySelect';
 import type { CategorySuggestionView } from '@/lib/domain/categorySuggest';
 import MerchantMark from './MerchantMark';
@@ -63,6 +63,22 @@ const fmt = (n: number) =>
 
 const UNDO_WINDOW_MS = 5000;
 
+/**
+ * The hit area of the four controls at the end of a row, on a phone.
+ *
+ * Each of them draws a 14px icon, which on a touch screen is a 14px target — a third of what
+ * iOS asks for, in a cluster of four where the one next to the flag deletes the row. Padding
+ * is what makes a target bigger without redrawing anything, so the phone pays for it in width:
+ * `gap-1` on the group below, and the category select beside it gives up the rest (measured at
+ * 390px: four 30px targets, and the select still 163px — wide enough for a category name).
+ *
+ * NO NEGATIVE MARGIN. `p-2 -m-2` is the usual trick for keeping the layout identical, and it
+ * is wrong here: it pulls the four targets until they touch, which turns a miss into a tap on
+ * the wrong control — the one failure worse than missing. From `sm:` up a pointer is exact and
+ * the row goes back to being compact.
+ */
+const ROW_ICON_HIT = 'p-2 sm:p-0';
+
 type BulkUndo = { prevById: Map<number, string | null>; category: string | null; count: number };
 
 function DeleteButton({ transactionId }: { transactionId: number }) {
@@ -72,7 +88,7 @@ function DeleteButton({ transactionId }: { transactionId: number }) {
     <>
       <button
         onClick={() => setConfirming(true)}
-        className="text-slate-400 hover:text-red-500 transition-colors"
+        className={`${ROW_ICON_HIT} text-slate-400 hover:text-red-500 transition-colors`}
         title="Delete transaction"
       >
         <Trash2 size={14} />
@@ -167,7 +183,7 @@ function DuplicateButton({ transaction, accounts, categories }: {
     <>
       <button
         onClick={openModal}
-        className="text-slate-400 hover:text-blue-500 transition-colors"
+        className={`${ROW_ICON_HIT} text-slate-400 hover:text-blue-500 transition-colors`}
         title="Duplicate transaction"
       >
         <Copy size={14} />
@@ -335,7 +351,7 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
     <>
       <button
         onClick={openModal}
-        className={`disabled:opacity-30 transition-colors ${watched ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-amber-500'}`}
+        className={`${ROW_ICON_HIT} disabled:opacity-30 transition-colors ${watched ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-amber-500'}`}
         title={watched ? `Keeping an eye on this${transaction.note ? `: ${transaction.note}` : ''}` : 'Keep an eye on this one'}
         data-testid="watch-toggle"
       >
@@ -343,24 +359,55 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
       </button>
 
       {open && (
+        /* A SHEET ON A PHONE, a centred dialog from `sm:` up — `TransactionEditButton`'s idiom,
+           and here the keyboard is what forces it. The field below is autofocused, so opening
+           this opens a keyboard too, and a card centred in the full viewport put its buttons
+           where iOS draws that keyboard: measured at 390×844, `Save note` sat ~30px below the
+           keyboard's top edge, so the one control the sheet exists for was the one covered.
+           iOS does not shrink the layout viewport for a keyboard, so nothing recentres it.
+
+           Three parts carry that: `items-end` puts the card on the bottom edge, where the
+           keyboard pushes nothing away; `max-h-[85dvh] overflow-y-auto` keeps a long note's
+           field reachable by scrolling the card rather than the page behind it; and the action
+           row below is `sticky bottom-0`, so it stays put while the rest scrolls. */
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/30 backdrop-blur-sm"
           onClick={() => !busy && setOpen(false)}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl border border-slate-100 p-6 w-96 mx-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label={watched ? 'Keeping an eye on this' : 'Keep an eye on this one'}
+            className="bg-white w-full sm:w-96 rounded-t-2xl sm:rounded-2xl shadow-xl border border-slate-100
+                       p-5 sm:p-6 max-h-[85dvh] overflow-y-auto
+                       pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pb-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-amber-50 mb-4">
-              <Flag size={18} className="text-amber-500" />
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="min-w-0">
+                <div className="flex items-center justify-center w-10 h-10 rounded-full bg-amber-50 mb-4">
+                  <Flag size={18} className="text-amber-500" />
+                </div>
+                <h3 className="text-sm font-semibold text-slate-900 mb-1">
+                  {watched ? 'Keeping an eye on this' : 'Keep an eye on this one'}
+                </h3>
+                {/* The row, named. A prompt box could not say which transaction it was about. */}
+                <p className="text-xs text-slate-400">
+                  {label} · {fmt(Number(transaction.amount))} · {transaction.date}
+                </p>
+              </div>
+              {/* The backdrop still closes it; this is the way out for a thumb that cannot
+                  reach past a keyboard to find the backdrop. */}
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                disabled={busy}
+                aria-label="Close"
+                className="shrink-0 p-1 -m-1 text-slate-300 hover:text-slate-600 disabled:opacity-40 transition-colors"
+              >
+                <X size={18} />
+              </button>
             </div>
-            <h3 className="text-sm font-semibold text-slate-900 mb-1">
-              {watched ? 'Keeping an eye on this' : 'Keep an eye on this one'}
-            </h3>
-            {/* The row, named. A prompt box could not say which transaction it was about. */}
-            <p className="text-xs text-slate-400 mb-4">
-              {label} · {fmt(Number(transaction.amount))} · {transaction.date}
-            </p>
 
             <label className="block text-xs font-medium text-slate-500 mb-1">Why? (optional)</label>
             <input
@@ -383,7 +430,9 @@ function WatchToggleButton({ transaction }: { transaction: TxRow }) {
 
             {error && <p className="text-xs text-red-500 mt-3">{error}</p>}
 
-            <div className="flex gap-2 mt-5">
+            {/* Stuck to the bottom of the card, so a keyboard scrolls the note under it rather
+                than taking the buttons with it. */}
+            <div className="flex gap-2 mt-5 sticky bottom-0 bg-white pt-4 -mb-1 sm:static sm:pt-0 sm:mb-0">
               {watched ? (
                 <button
                   onClick={() => send(false, null)}
@@ -435,7 +484,7 @@ function HideToggleButton({ transactionId, hidden }: { transactionId: number; hi
     <button
       onClick={toggle}
       disabled={busy}
-      className="text-slate-400 hover:text-slate-600 disabled:opacity-30 transition-colors"
+      className={`${ROW_ICON_HIT} text-slate-400 hover:text-slate-600 disabled:opacity-30 transition-colors`}
       title={hidden ? 'Unhide — include in budget again' : 'Hide from budget'}
     >
       {hidden ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -732,6 +781,22 @@ export default function TransactionTable({ transactions, categories, accounts, p
                             layout only `anywhere` lowers a cell's minimum width, so one very long
                             city name cannot widen the Merchant column for every row. */}
                         {detail !== null && <div className="text-xs text-slate-400 mt-0.5 wrap-anywhere">{detail}</div>}
+                        {/* THE NOTE, ON THE ROW. It used to live only in the flag's `title`,
+                            which is a tooltip, which is a hover — and the phone this feature is
+                            used from has no hover. The one thing the owner wrote by hand about
+                            this transaction was the one thing the installed app could not show.
+                            Amber, because it is the colour the flag beside it already uses for
+                            the same fact, and `wrap-anywhere` for the Merchant column's sake. */}
+                        {t.watched_at !== null && t.note && (
+                          // ONE LINE IN THE TABLE, all of it on a phone. The desktop Merchant
+                          // column is narrow enough that a note ran to three lines and dragged
+                          // the row's height with it; there the flag's tooltip still holds the
+                          // whole thing, so an ellipsis loses nothing. On a phone there is no
+                          // tooltip and the cell is the full width of the card, so it wraps.
+                          <div className="text-xs text-amber-600 mt-0.5 wrap-anywhere sm:line-clamp-1" title={t.note}>
+                            {t.note}
+                          </div>
+                        )}
                       </div>
                     </TransactionDetailButton>
                   </td>
@@ -782,7 +847,10 @@ export default function TransactionTable({ transactions, categories, accounts, p
                     />
                   </td>
                   <td className="col-start-3 row-start-4 sm:table-cell sm:px-4 sm:py-3.5">
-                    <div className="flex items-center gap-2">
+                    {/* `-mr-2` only cancels the padding the LAST icon adds on the outside edge,
+                        where there is no neighbour to mistap — so the group still ends flush
+                        with the amount above it. */}
+                    <div className="flex items-center gap-1 -mr-2 sm:gap-2 sm:mr-0">
                       <DuplicateButton transaction={t} accounts={accounts} categories={categories} />
                       <WatchToggleButton transaction={t} />
                       <HideToggleButton transactionId={t.id} hidden={t.hidden} />
