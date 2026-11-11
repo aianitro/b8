@@ -100,7 +100,7 @@ export default function CategoryBubbles({ categories, month }: {
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Where the month sits</p>
         {/* Not in the installed app, at the owner's request; the browser keeps it. */}
         <p className="text-[10px] text-slate-400 standalone:hidden">
-          outer = this month&apos;s budget · inner = spent so far · colour = spent or heading over
+          outer = this month&apos;s budget, compressed · inner = spent so far · colour = spent or heading over
         </p>
       </div>
 

@@ -194,7 +194,7 @@ export default function CategoryHeatmap({ categories, month }: {
         {/* Not in the installed app, like the bubbles' legend; the browser keeps it. The colour key
             under the tiles stays everywhere. */}
         <p className="text-[10px] text-slate-400 standalone:hidden">
-          size = budget · icon = category · figure = spent · colour = spent or heading over
+          size = budget, compressed · icon = category · figure = spent · colour = spent or heading over
         </p>
       </div>
 
