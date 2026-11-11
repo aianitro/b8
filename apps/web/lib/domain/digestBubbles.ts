@@ -1,4 +1,5 @@
 import { packCircles } from './bubblePack';
+import { pictureArea } from './pictureScale';
 import { bubbleColor, NEUTRAL_HEX } from './bubbleStatus';
 import { STATUS_HEX } from '../chartColors';
 
@@ -33,11 +34,15 @@ import { STATUS_HEX } from '../chartColors';
  * education line closing at 300% above a $1,900 grocery line closing at 102%, which is true and
  * useless — the grocery line is where the money is. Area says where the money is; colour says
  * whether it is going wrong.
+ *
+ * The budget is COMPRESSED on its way to area (`pictureScale.ts`), exactly as it is on the two
+ * screens. Here it buys something extra: a circle too small to hold a name has to put one in the
+ * gap beneath it, and in a picture with no hover those gaps are the only naming there is.
  */
 
 export interface DigestBubble {
   category: string;
-  /** This month's allocation. Drives the AREA of the circle. */
+  /** This month's allocation. Drives the AREA of the circle, compressed by `pictureArea`. */
   budgeted: number;
   actual: number;
   projectedRatio: number | null;
@@ -91,7 +96,10 @@ function overlaps(a: Box, b: Box): boolean {
 export function renderBubblesSvg(categories: DigestBubble[]): string {
   const drawable = categories.filter((c) => c.budgeted > 0);
   const packed = packCircles(
-    drawable.map((c) => ({ key: c.category, weight: c.budgeted })),
+    // The same compression the dashboard's pictures use, for the same reason and so that the two
+    // cannot disagree: a category the owner saw as a mid-sized circle at breakfast must not be a
+    // speck in the mail. `pictureScale.ts` carries the rule.
+    drawable.map((c) => ({ key: c.category, weight: pictureArea(c.budgeted) })),
     W,
     PLOT_H,
     // Looser than the dashboard's 0.62. On a screen a reader can hover an unlabelled circle to

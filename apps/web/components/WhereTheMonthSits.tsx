@@ -29,13 +29,14 @@
 // and below that the SVG scales every label down with it. The breakpoint is where the picture still
 // renders near its design size, not where it merely fits.
 
+import { pictureArea } from '@/lib/domain/pictureScale';
 import CategoryBubbles from './CategoryBubbles';
 import CategoryHeatmap from './CategoryHeatmap';
 
 /** What both pictures need, and all they need. Numbers, not the wire's money strings. */
 export interface MonthCategoryView {
   category: string;
-  /** This month's allocation. Drives the AREA of the circle or the tile. */
+  /** This month's allocation. Drives the AREA of the circle or the tile, via `pictureWeight`. */
   budgeted: number;
   /** Spent so far this month. */
   actual: number;
@@ -46,14 +47,20 @@ export interface MonthCategoryView {
 }
 
 /**
+ * How large this category is drawn, in both pictures.
+ *
  * OFF-CYCLE CATEGORIES ARE IN THE PICTURE TOO — spending in a category whose schedule gives it
  * nothing this month (`budgeted` 0, `actual` above it). They used to be absent, because area was
  * the budget and a zero budget has no area; the owner wanted them on the map rather than in a panel
  * of their own. So a category is SIZED by the larger of its budget and its spend: a budgeted one is
  * unchanged, an off-cycle one is as large as what it drew. The colour rule already reads it as
  * over — anything spent past a zero line is — so no new state is needed.
+ *
+ * THE MONEY IS THEN COMPRESSED before it becomes area, and `pictureScale.ts` is where that rule
+ * and its reasoning live. Both pictures call this, so neither can be on a different scale from the
+ * other; the figures in the hover line and printed on the marks are untouched money.
  */
-export const pictureWeight = (c: MonthCategoryView) => Math.max(c.budgeted, c.actual);
+export const pictureWeight = (c: MonthCategoryView) => pictureArea(Math.max(c.budgeted, c.actual));
 export const isOffCycle = (c: MonthCategoryView) => c.budgeted === 0 && c.actual > 0;
 
 /**
