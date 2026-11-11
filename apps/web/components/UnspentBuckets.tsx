@@ -39,7 +39,12 @@ export default function UnspentBuckets({ buckets, destinations, today, schedule 
   const total = waiting.reduce((s, b) => s + b.balance, 0);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-8">
+    <div
+      id="unspent"
+      /* The dashboard links here with `#unspent`. `scroll-mt` is what keeps the heading out
+         from under the phone's fixed header, which the browser knows nothing about. */
+      className="scroll-mt-[calc(3.5rem+env(safe-area-inset-top)+1rem)] md:scroll-mt-6 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-8"
+    >
       <div className="flex items-baseline justify-between mb-3">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Unspent to allocate</p>
         <p className="text-sm font-mono font-semibold text-emerald-600">{fmt(total)}</p>
@@ -103,7 +108,12 @@ function NothingWaiting({ schedule }: { schedule: CloseSchedule }) {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-8">
+    <div
+      id="unspent"
+      /* The dashboard links here with `#unspent`. `scroll-mt` is what keeps the heading out
+         from under the phone's fixed header, which the browser knows nothing about. */
+      className="scroll-mt-[calc(3.5rem+env(safe-area-inset-top)+1rem)] md:scroll-mt-6 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 mb-8"
+    >
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="min-w-0 flex items-center gap-2 text-slate-400">
           <PiggyBank size={14} className="shrink-0" />

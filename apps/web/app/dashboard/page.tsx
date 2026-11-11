@@ -231,7 +231,18 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const overdrafts = await overdraftsPromise;
   const moves = await movesPromise;
   const forecasts = await forecastsPromise;
-  const unspentWaiting = (await bucketsPromise).reduce((s, b) => s + Math.max(0, b.balance), 0);
+  // PER LANDSCAPE, not one total, because the budget page shows one landscape at a time: a single
+  // figure summed across both had nowhere honest to link to, and sent the owner to whichever tab
+  // their cookie last held — where the card can truthfully say there is nothing waiting.
+  const unspentBuckets = await bucketsPromise;
+  const unspentWaiting = (['operational', 'capital'] as const)
+    .map((landscape) => ({
+      landscape,
+      total: unspentBuckets
+        .filter((b) => b.landscape === landscape)
+        .reduce((s, b) => s + Math.max(0, b.balance), 0),
+    }))
+    .filter((l) => l.total > 0);
   // Suggested categories for the unfiled rows the Uncategorized panel lists.
   const suggestions = Object.fromEntries(await loadSuggestions(unfiled.map((t) => t.id)));
 
@@ -396,13 +407,26 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           own clock: the tiles and the link out of them should name one month. */}
       {/* A reminder, not a figure to steer by: leftovers from closed months the owner has not yet
           carried or released. One line, only when there is something waiting. */}
-      {unspentWaiting > 0 && (
-        <Link href="/budget" className="mb-3 sm:mb-4 flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800 hover:bg-emerald-100 transition-colors">
+      {unspentWaiting.map(({ landscape, total }) => (
+        <Link
+          key={landscape}
+          /* THE TAB AND THE ANCHOR BOTH MATTER. Without the tab this lands on the landscape the
+             owner last looked at, which may be the one with nothing waiting; without the anchor it
+             lands at the top of a long page, below which the card is off the bottom of a phone.
+             Either way the answer to "where is it?" is "somewhere on this page, keep looking". */
+          href={`/budget?landscape=${landscape}#unspent`}
+          className="mb-3 sm:mb-4 flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800 hover:bg-emerald-100 transition-colors"
+        >
           <PiggyBank size={16} className="shrink-0" />
-          <span><span className="font-mono font-semibold">{fmt(unspentWaiting)}</span> unspent to allocate</span>
+          <span>
+            <span className="font-mono font-semibold">{fmt(total)}</span> unspent to allocate
+            {/* Named only when both landscapes have something, where two lines otherwise read as a
+                repeat. With one line the word is noise — there is nowhere else it could be. */}
+            {unspentWaiting.length > 1 && <span className="text-emerald-600"> · {landscape}</span>}
+          </span>
           <span className="ml-auto text-emerald-600">→</span>
         </Link>
-      )}
+      ))}
       <WhereTheMonthSits categories={monthShape} month={asOf.month} />
 
       {/* Charts. THE PROFIT & LOSS CHART MOVED to `/profit-loss` on 2026-10-01 at the owner's
