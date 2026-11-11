@@ -67,10 +67,28 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
   // Already wrapped; what it lacked was somewhere for the search box to go. At `w-48` beside five
   // other controls it wrapped onto a line of its own and left two thirds of it empty, so it takes
   // the full width below `sm:` and its fixed size above.
+  //
+  // ─── WHY THE PHONE SPELLING OF EVERY CONTROL BELOW DIFFERS ──────────────────────────────────
+  //
+  // Five wrapped lines, measured in the installed app at 390×844: the bar ran 198px and the first
+  // transaction began 391px down — on a page whose job is the list. The third chip is what tipped
+  // it, so it arrives, by design, on the day the owner first flags something.
+  //
+  // Three changes, none of which touch the desktop bar. The separators are `hidden sm:block`:
+  // they divide groups that only sit side by side above `sm:`, and once the bar wraps they strand
+  // themselves at the ends of lines as marks dividing nothing — four of them, ~9px each. The
+  // chips and the account select lose a size (`text-xs`, tighter sides) so that two of them fit
+  // a line, and gain height (`py-2`) so that narrowing them does not shrink the target a thumb
+  // has to hit. And the search box finally gets the full line its note above promised: `w-full`
+  // on the input alone could not do it, because the flex item around it is still only as wide as
+  // its content.
+  //
+  // Measured again after: five lines became four, 198px became 158px, and the first transaction
+  // moved up to 351px — the bar now costs what it used to cost BEFORE the third chip existed.
   return (
     <div className="flex items-center gap-2 mb-5 flex-wrap">
       {/* Search */}
-      <div className="relative">
+      <div className="relative basis-full sm:basis-auto">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         <input
           ref={inputRef}
@@ -93,7 +111,7 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
         )}
       </div>
 
-      <div className="w-px h-5 bg-slate-200 mx-1" />
+      <div className="hidden sm:block w-px h-5 bg-slate-200 mx-1" />
 
       {/* Date range */}
       <div className="relative flex items-center gap-1">
@@ -121,7 +139,7 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
         )}
       </div>
 
-      <div className="w-px h-5 bg-slate-200 mx-1" />
+      <div className="hidden sm:block w-px h-5 bg-slate-200 mx-1" />
 
       {/* Amount: exact, range or bound in one field. A text input, not type="number": the
           notation needs -, < and >, which a number input and the phone's decimal keypad refuse. */}
@@ -157,11 +175,11 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
         )}
       </div>
 
-      <div className="w-px h-5 bg-slate-200 mx-1" />
+      <div className="hidden sm:block w-px h-5 bg-slate-200 mx-1" />
 
       <button
         onClick={() => nav({ filter: null })}
-        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+        className={`px-2.5 py-2 sm:px-3 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
           !activeFilter
             ? 'bg-slate-900 text-white'
             : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -171,7 +189,7 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
       </button>
       <button
         onClick={() => nav({ filter: activeFilter === 'uncategorized' ? null : 'uncategorized' })}
-        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+        className={`px-2.5 py-2 sm:px-3 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
           activeFilter === 'uncategorized'
             ? 'bg-amber-500 text-white'
             : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -184,7 +202,7 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
       {watched > 0 && (
         <button
           onClick={() => nav({ filter: activeFilter === 'watched' ? null : 'watched' })}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+          className={`px-2.5 py-2 sm:px-3 sm:py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
             activeFilter === 'watched'
               ? 'bg-amber-600 text-white'
               : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -194,12 +212,12 @@ export default function TransactionFilter({ total, uncategorized, watched, accou
         </button>
       )}
 
-      <div className="w-px h-5 bg-slate-200 mx-1" />
+      <div className="hidden sm:block w-px h-5 bg-slate-200 mx-1" />
 
       <select
         value={activeAccount ?? ''}
         onChange={(e) => nav({ account: e.target.value || null })}
-        className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+        className="text-xs sm:text-sm border border-slate-200 rounded-lg px-2.5 py-2 sm:px-3 sm:py-1.5 bg-white text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
       >
         <option value="">All accounts</option>
         {(['operational', 'capital'] as const).map((ls) => {
