@@ -68,13 +68,21 @@ function Row({
       onDragEnd={onDragEnd}
       className={`border-b border-slate-100 last:border-0 group hover:bg-slate-50/30 cursor-grab active:cursor-grabbing transition-colors ${isDragOver ? 'border-t-2 border-t-blue-400' : ''}`}
     >
-      {/* Category. IN THE INSTALLED APP (`standalone:`) the column narrows to the phone app's
-          104px and carries the name alone — no plan line, no drag grip a finger cannot use — and
-          the YTD column at the far end stops being pinned, both at the owner's request, so the
-          months get the width. The browser keeps both as they were. */}
-      <td className="sticky left-0 bg-white group-hover:bg-slate-50/30 px-2 py-1.5 border-r border-slate-100 z-10 min-w-[140px] standalone:min-w-[104px] standalone:max-w-[104px]">
+      {/* Category. ON A NARROW SCREEN (`max-sm:`) the column narrows to 104px and carries the
+          name alone — no plan line, no drag grip a finger cannot use — and the YTD column at the
+          far end stops being pinned, both at the owner's request, so the months get the width.
+          A wide screen keeps both as they were.
+
+          THIS USED TO BE `standalone:`, the `display-mode: standalone` variant, and on the owner's
+          phone it never applied: WebKit reports a home-screen web app's display mode as
+          `fullscreen` rather than `standalone` in some versions, so every rule here was inert on
+          the one device they were written for — two pinned columns taking more than half of a
+          390px screen, leaving no month column fully visible. Width is the honest test anyway: the
+          grid is cramped at 390px whether it was launched from a Home Screen icon or a tab, and a
+          media query about how the app was opened cannot say that. */}
+      <td className="sticky left-0 bg-white group-hover:bg-slate-50/30 px-2 py-1.5 border-r border-slate-100 z-10 min-w-[140px] max-sm:min-w-[104px] max-sm:max-w-[104px]">
         <div className="flex items-center gap-1.5">
-          <GripVertical size={12} className="text-slate-300 group-hover:text-slate-400 shrink-0 transition-colors standalone:hidden" />
+          <GripVertical size={12} className="text-slate-300 group-hover:text-slate-400 shrink-0 transition-colors max-sm:hidden" />
           <div className={`w-0.5 h-5 rounded-full shrink-0 ${accentColor}`} />
           <Link
             href={`/categories/${encodeURIComponent(row.category)}`}
@@ -82,13 +90,13 @@ function Row({
             draggable={false}
             className="block hover:opacity-70 transition-opacity"
           >
-            <div className="text-xs font-medium text-slate-800 whitespace-nowrap standalone:whitespace-normal standalone:line-clamp-2 hover:text-blue-600 hover:underline">
+            <div className="text-xs font-medium text-slate-800 whitespace-nowrap max-sm:whitespace-normal max-sm:line-clamp-2 hover:text-blue-600 hover:underline">
               {/* A break opportunity after each slash: "Utilities/Maintenance" has no space, so in
                   the installed app's narrow column it clipped where "Property Taxes" wrapped. The
                   zero-width space is invisible, and `whitespace-nowrap` keeps one line elsewhere. */}
               {row.category.replace(/\//g, '/\u200B')}
             </div>
-            <div className="text-[9px] text-slate-400 font-mono mt-0.5 standalone:hidden">
+            <div className="text-[9px] text-slate-400 font-mono mt-0.5 max-sm:hidden">
               {budgetLabel(row)}
             </div>
           </Link>
@@ -219,7 +227,7 @@ function Row({
       })}
 
       {/* YTD */}
-      <td className="sticky right-0 standalone:static bg-white group-hover:bg-slate-50/30 px-3 py-1.5 text-right border-l border-slate-100 z-10 min-w-[85px]">
+      <td className="sticky right-0 max-sm:static bg-white group-hover:bg-slate-50/30 px-3 py-1.5 text-right border-l border-slate-100 z-10 min-w-[85px]">
         <div className={`font-mono text-xs font-semibold ${
           ytdNetIncome  ? 'text-emerald-700' :
           ytdNetExpense ? 'text-red-600' :
@@ -288,7 +296,7 @@ function TotalsRow({
           </td>
         );
       })}
-      <td className={`sticky right-0 standalone:static px-3 py-1.5 text-right text-xs font-mono font-bold border-l border-slate-200 z-10 ${isIncome && ytd < 0 ? 'text-red-600' : 'text-slate-700'} ${accent}`}>
+      <td className={`sticky right-0 max-sm:static px-3 py-1.5 text-right text-xs font-mono font-bold border-l border-slate-200 z-10 ${isIncome && ytd < 0 ? 'text-red-600' : 'text-slate-700'} ${accent}`}>
         {fmt(ytd)}
       </td>
     </tr>
@@ -316,7 +324,7 @@ function NetRow({ netMonthTotals, netYtd, currentMonth }: { netMonthTotals: numb
           </td>
         );
       })}
-      <td className={`sticky right-0 standalone:static bg-slate-900 px-3 py-1.5 text-right text-xs font-mono font-bold border-l border-slate-700 z-10 ${netYtd > 0 ? 'text-emerald-400' : netYtd < 0 ? 'text-red-400' : 'text-white'}`}>
+      <td className={`sticky right-0 max-sm:static bg-slate-900 px-3 py-1.5 text-right text-xs font-mono font-bold border-l border-slate-700 z-10 ${netYtd > 0 ? 'text-emerald-400' : netYtd < 0 ? 'text-red-400' : 'text-white'}`}>
         {fmtSigned(netYtd)}
       </td>
     </tr>
@@ -330,12 +338,12 @@ function UncategorizedRow({
   if (ytd === 0 && months.every((n) => n === 0)) return null;
   return (
     <tr className="border-b border-amber-100 bg-amber-50/40 hover:bg-amber-50/70 transition-colors">
-      <td className="sticky left-0 bg-amber-50/40 px-2 py-1.5 border-r border-amber-100 z-10 min-w-[140px] standalone:min-w-[104px] standalone:max-w-[104px]">
+      <td className="sticky left-0 bg-amber-50/40 px-2 py-1.5 border-r border-amber-100 z-10 min-w-[140px] max-sm:min-w-[104px] max-sm:max-w-[104px]">
         <div className="flex items-center gap-1.5">
-          <div className="w-4 shrink-0 standalone:hidden" />
+          <div className="w-4 shrink-0 max-sm:hidden" />
           <div className="w-0.5 h-5 rounded-full shrink-0 bg-amber-400" />
-          <div className="text-xs font-medium text-amber-700 whitespace-nowrap standalone:whitespace-normal">
-            Uncategorized <span className="font-normal text-amber-600/70 standalone:hidden">· not counted</span>
+          <div className="text-xs font-medium text-amber-700 whitespace-nowrap max-sm:whitespace-normal">
+            Uncategorized <span className="font-normal text-amber-600/70 max-sm:hidden">· not counted</span>
           </div>
         </div>
       </td>
@@ -362,7 +370,7 @@ function UncategorizedRow({
           </td>
         );
       })}
-      <td className="sticky right-0 standalone:static bg-amber-50/40 px-3 py-1.5 text-right border-l border-amber-100 z-10 min-w-[85px]">
+      <td className="sticky right-0 max-sm:static bg-amber-50/40 px-3 py-1.5 text-right border-l border-amber-100 z-10 min-w-[85px]">
         <div className={`font-mono text-xs font-semibold ${isIncome ? 'text-emerald-700' : 'text-amber-700'}`}>
           {ytd > 0 ? fmt(ytd) : '—'}
         </div>
@@ -393,7 +401,7 @@ function BalanceRow({
           </td>
         );
       })}
-      <td className={`sticky right-0 standalone:static px-3 py-1.5 text-right text-xs font-mono font-semibold border-l border-slate-200 z-10 ${accent} ${ytdBalance >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
+      <td className={`sticky right-0 max-sm:static px-3 py-1.5 text-right text-xs font-mono font-semibold border-l border-slate-200 z-10 ${accent} ${ytdBalance >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
         {fmt(ytdBalance)}
       </td>
     </tr>
@@ -520,7 +528,7 @@ export default function BudgetMonthlyGridClient({ rows, currentMonth, beginningB
         <table className="w-full text-xs border-collapse">
           <thead className="sticky top-0 z-20">
             <tr className="bg-slate-50 border-b border-slate-100">
-              <th className="sticky left-0 bg-slate-50 px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 border-r border-slate-100 min-w-[140px] standalone:min-w-[104px] z-30">
+              <th className="sticky left-0 bg-slate-50 px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 border-r border-slate-100 min-w-[140px] max-sm:min-w-[104px] z-30">
                 Category
               </th>
               {MONTHS.map((m, i) => (
@@ -538,7 +546,7 @@ export default function BudgetMonthlyGridClient({ rows, currentMonth, beginningB
                   {i === currentMonth && <div className="text-[8px] font-normal mt-0.5 text-blue-400">current</div>}
                 </th>
               ))}
-              <th className="sticky right-0 standalone:static bg-slate-50 px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-400 border-l border-slate-100 min-w-[85px] z-30">
+              <th className="sticky right-0 max-sm:static bg-slate-50 px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-slate-400 border-l border-slate-100 min-w-[85px] z-30">
                 YTD
               </th>
             </tr>
