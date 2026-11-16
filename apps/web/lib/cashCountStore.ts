@@ -27,7 +27,7 @@ export interface RecordCountArgs {
   /** What was actually in the wallet. */
   counted: number;
   /**
-   * What to file the adjustment as, or `null` to leave it unfiled.
+   * What to file a SHORTFALL as (a spending category), or `null` to leave it unfiled.
    *
    * Unfiled is a first-class answer, not a fallback. Requiring itemisation at count time is how
    * counting stops happening, and an uncounted wallet is worse than an unitemised lump — so an
@@ -35,7 +35,17 @@ export interface RecordCountArgs {
    * reports how much of the month the headline could not see. The money is visible either way; the
    * only question is whether it is attributed.
    */
-  mappedCategory: string | null;
+  spentCategory: string | null;
+  /**
+   * What to file an EXCESS as (an income category), or `null` to leave it unfiled.
+   *
+   * Two fields rather than one, and the direction picks between them here, inside the lock. The
+   * page guesses the direction from the balance it rendered, and that balance can be stale — a sync
+   * or another device can move it between render and submit. Choosing by the direction the count
+   * actually came out in means a spending category is never filed against money that arrived, which
+   * would read as negative spending, and an income category never against money that left.
+   */
+  foundCategory: string | null;
 }
 
 export type RecordCountResult =
@@ -99,7 +109,10 @@ export async function recordCashCount(args: RecordCountArgs): Promise<RecordCoun
       const inserted = await client.query<{ id: number }>(
         `INSERT INTO transactions (plaid_transaction_id, account_id, date, amount, name, mapped_category)
          VALUES ($1, $2, CURRENT_DATE, $3, $4, $5) RETURNING id`,
-        [`manual_${randomUUID()}`, args.accountId, outcome.adjustment.amount, name, args.mappedCategory]
+        [
+          `manual_${randomUUID()}`, args.accountId, outcome.adjustment.amount, name,
+          outcome.adjustment.direction === 'spent' ? args.spentCategory : args.foundCategory,
+        ]
       );
       adjustmentTransactionId = inserted.rows[0].id;
     }

@@ -27,7 +27,7 @@ export async function GET() {
  * "it wrote off a large sum", and those want very different reactions.
  */
 export async function POST(req: NextRequest) {
-  let body: { account_id?: unknown; counted?: unknown; mapped_category?: unknown };
+  let body: { account_id?: unknown; counted?: unknown; mapped_category?: unknown; income_category?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -41,10 +41,11 @@ export async function POST(req: NextRequest) {
   // `Number()` and not `parseFloat`: parseFloat('12abc') is 12, which would silently accept a typo
   // as a count and write an adjustment against it.
   const counted = typeof body.counted === 'number' ? body.counted : Number(body.counted);
-  const mappedCategory =
-    typeof body.mapped_category === 'string' && body.mapped_category.trim() !== ''
-      ? body.mapped_category.trim()
-      : null;
+  // `mapped_category` files a shortfall, `income_category` files an excess; the store applies
+  // whichever matches the direction the count actually came out in, and ignores the other.
+  const category = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+  const spentCategory = category(body.mapped_category);
+  const foundCategory = category(body.income_category);
 
   if (!accountId || !Number.isFinite(counted)) {
     return Response.json(
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await recordCashCount({ accountId, counted, mappedCategory });
+    const result = await recordCashCount({ accountId, counted, spentCategory, foundCategory });
     if (!result.ok) {
       const status = result.code === 'NOT_FOUND' ? 404 : 400;
       return Response.json(

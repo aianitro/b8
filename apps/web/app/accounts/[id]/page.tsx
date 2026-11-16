@@ -98,22 +98,28 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
 
   const isValuation = account.valuation_mode === 'valuation';
 
-  // Only a wallet pays for these two reads. Every other wallet is a place cash can be moved to,
-  // and the categories are what a shortfall can be filed as: operational spending — not income,
-  // not the transfer bucket, since cash that went missing was spent rather than moved.
+  // Only a wallet pays for these reads. Every other wallet is a place cash can be moved to, and the
+  // categories are what a count's difference can be filed as: a shortfall as operational spending,
+  // an excess as operational income — never the transfer bucket, since cash that went missing was
+  // spent rather than moved, and cash that turned up came from outside the ledger.
   const cash = account.countable
     ? await Promise.all([
         walletStatuses(),
-        db.query<{ name: string }>(
-          `SELECT name FROM budget_categories
-            WHERE landscape = 'operational' AND NOT is_income AND NOT exclude_from_budget
+        db.query<{ name: string; is_income: boolean }>(
+          `SELECT name, is_income FROM budget_categories
+            WHERE landscape = 'operational' AND NOT exclude_from_budget
             ORDER BY name`
-        ).then((r) => r.rows.map((c) => c.name)),
-      ]).then(([wallets, spendCategories]) => ({
-        lastCountedAt: wallets.find((w) => w.accountId === id)?.lastCountedAt ?? null,
-        otherWallets: wallets.filter((w) => w.accountId !== id).map((w) => ({ accountId: w.accountId, name: w.name })),
-        spendCategories,
-      }))
+        ).then((r) => r.rows),
+      ]).then(([wallets, categories]) => {
+        const self = wallets.find((w) => w.accountId === id);
+        return {
+          lastCountedAt: self?.lastCountedAt ?? null,
+          balance: self?.balance ?? 0,
+          otherWallets: wallets.filter((w) => w.accountId !== id).map((w) => ({ accountId: w.accountId, name: w.name })),
+          spendCategories: categories.filter((c) => !c.is_income).map((c) => c.name),
+          incomeCategories: categories.filter((c) => c.is_income).map((c) => c.name),
+        };
+      })
     : null;
   const landscape = account.landscape === 'capital' ? 'capital' : 'operational';
   const beginningBalance = Number(balanceRes.rows[0]?.beginning_balance ?? 0);
@@ -225,7 +231,9 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
           wallet={{ accountId: id, name: account.name }}
           lastCountedAt={cash.lastCountedAt}
           otherWallets={cash.otherWallets}
-          categories={cash.spendCategories}
+          balance={cash.balance}
+          spendCategories={cash.spendCategories}
+          incomeCategories={cash.incomeCategories}
         />
       )}
 

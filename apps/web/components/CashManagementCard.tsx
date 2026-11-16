@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { roundCents } from '@/lib/budgetMath';
 import { daysSinceCount } from '@/lib/domain/cashCount';
 import { localIsoDate } from '@/lib/localDate';
 
@@ -44,28 +45,39 @@ function Staleness({ lastCountedAt }: { lastCountedAt: string | null }) {
  * done to one wallet at a time, with the wallet in hand, and its page is where its balance and
  * history already are — so the result of a count lands on the chart above it, not on a list.
  */
-export default function CashManagementCard({ wallet, lastCountedAt, otherWallets, categories }: {
+export default function CashManagementCard({ wallet, lastCountedAt, balance, otherWallets, spendCategories, incomeCategories }: {
   wallet: WalletRef;
   lastCountedAt: string | null;
+  /** What the ledger believes is in the wallet, as of render — only used to guess the direction. */
+  balance: number;
   /** Where cash can be moved to — every other countable wallet. */
   otherWallets: WalletRef[];
   /** What a shortfall can be filed as. */
-  categories: string[];
+  spendCategories: string[];
+  /** What an excess can be filed as. */
+  incomeCategories: string[];
 }) {
   const router = useRouter();
   // One mode at a time: two independent "open" flags would allow both forms at once.
   const [mode, setMode] = useState<'count' | 'move' | null>(null);
   const [counted, setCounted] = useState('');
-  const [category, setCategory] = useState('');
+  // Two selections, not one: the server files whichever matches the direction the count really
+  // came out in, which can differ from the guess below if the balance moved since this page rendered.
+  const [spentCategory, setSpentCategory] = useState('');
+  const [foundCategory, setFoundCategory] = useState('');
   const [moveAmount, setMoveAmount] = useState('');
   const [moveTo, setMoveTo] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The direction as far as this page can tell. A guess only — see the two selections above.
+  const typed = Number(counted);
+  const found = counted.trim() !== '' && Number.isFinite(typed) && roundCents(typed) > roundCents(balance);
+
   function toggle(next: 'count' | 'move') {
     setMode(mode === next ? null : next);
-    setCounted(''); setCategory(''); setMoveAmount(''); setMoveTo('');
+    setCounted(''); setSpentCategory(''); setFoundCategory(''); setMoveAmount(''); setMoveTo('');
     setError(null); setResult(null);
   }
 
@@ -103,7 +115,12 @@ export default function CashManagementCard({ wallet, lastCountedAt, otherWallets
     const res = await fetch('/api/v1/cash-counts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_id: wallet.accountId, counted: value, mapped_category: category || null }),
+      body: JSON.stringify({
+        account_id: wallet.accountId,
+        counted: value,
+        mapped_category: spentCategory || null,
+        income_category: foundCategory || null,
+      }),
     }).catch(() => null);
     const body = await res?.json().catch(() => null);
     setBusy(false);
@@ -114,8 +131,8 @@ export default function CashManagementCard({ wallet, lastCountedAt, otherWallets
     setResult(adj === null
       ? 'Matched exactly — nothing to record.'
       : adj.direction === 'spent'
-        ? `${fmt(adj.magnitude)} spent since the last count${category ? `, filed as ${category}` : ', left unfiled'}.`
-        : `${fmt(adj.magnitude)} more than expected — recorded as received.`);
+        ? `${fmt(adj.magnitude)} spent since the last count${spentCategory ? `, filed as ${spentCategory}` : ', left unfiled'}.`
+        : `${fmt(adj.magnitude)} more than expected — recorded as received${foundCategory ? `, filed as ${foundCategory}` : ', left unfiled'}.`);
     setMode(null);
     router.refresh();
   }
@@ -147,14 +164,26 @@ export default function CashManagementCard({ wallet, lastCountedAt, otherWallets
             <input inputMode="decimal" autoComplete="off" value={counted} onChange={(e) => setCounted(e.target.value)} placeholder="0.00" className={`${FIELD} mt-1 w-full`} />
           </label>
           {/* Filing is OPTIONAL by design: requiring it at count time is how counting stops
-              happening. Unfiled money still shows up, in the uncategorized bucket. */}
-          <label className="block min-w-0">
-            <span className="text-xs text-slate-500">File a shortfall as</span>
-            <select value={category} onChange={(e) => setCategory(e.target.value)} className={`${FIELD} mt-1 w-full`}>
-              <option value="">— leave unfiled —</option>
-              {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </label>
+              happening. Unfiled money still shows up, in the uncategorized bucket. Which list is
+              offered follows what was typed: more than the ledger expects is income, not a
+              negative expense. */}
+          {found ? (
+            <label className="block min-w-0">
+              <span className="text-xs text-slate-500">File the extra as</span>
+              <select value={foundCategory} onChange={(e) => setFoundCategory(e.target.value)} className={`${FIELD} mt-1 w-full`}>
+                <option value="">— leave unfiled —</option>
+                {incomeCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          ) : (
+            <label className="block min-w-0">
+              <span className="text-xs text-slate-500">File a shortfall as</span>
+              <select value={spentCategory} onChange={(e) => setSpentCategory(e.target.value)} className={`${FIELD} mt-1 w-full`}>
+                <option value="">— leave unfiled —</option>
+                {spendCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          )}
           <button type="submit" disabled={busy} className={PRIMARY}>{busy ? 'Saving…' : 'Record count'}</button>
         </form>
       )}
