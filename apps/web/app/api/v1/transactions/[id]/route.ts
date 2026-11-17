@@ -29,7 +29,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
             t.name, t.merchant_name, t.logo_url, t.website, t.account_id, a.name AS account_name,
             t.mapped_category, t.plaid_category, t.plaid_category_detailed, t.plaid_category_confidence,
             t.payment_channel, t.location_city, t.location_region, t.location_country,
-            t.note, t.watched_at, t.hidden, t.plaid_raw
+            t.note, t.watched_at, t.hidden, t.plaid_raw,
+            -- Null for a masked row, whose id column is masked, which reads as not editable.
+            (a.countable AND left(t.plaid_transaction_id, 7) = 'manual_') AS date_editable
        FROM ${visibleTransactions(viewer)} t
        JOIN accounts a ON a.id = t.account_id
       WHERE t.id = $1`,
@@ -54,6 +56,9 @@ function editOf(body: Record<string, unknown>): GiftLockedEdit | null {
   if ('mapped_category' in body) return 'category';
   if ('watched' in body || 'note' in body) return 'watch';
   if ('property_id' in body) return 'property';
+  // A date edit takes the CATEGORY lock, the one held for everyone: moving a row to another day can
+  // move it to another month, which changes a total the giver chose exactly as refiling it would.
+  if ('date' in body) return 'category';
   return null;
 }
 
@@ -123,9 +128,54 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       );
     }
     await db.query(`UPDATE transactions SET property_id = $1 WHERE id = $2 AND ${unlocked('property')}`, [propertyId, id]);
+  } else if ('date' in body) {
+    const date = typeof body.date === 'string' ? body.date : '';
+    // A real calendar day, checked here because Postgres would turn '2026-02-30' into a 500.
+    const [y, m, d] = date.split('-').map(Number);
+    const real = /^\d{4}-\d{2}-\d{2}$/.test(date)
+      && new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10) === date;
+    if (!real) {
+      return Response.json(
+        { success: false, error: { code: 'INVALID_INPUT', message: 'date must be a real day, YYYY-MM-DD' } } satisfies ApiResponse<never>,
+        { status: 400 }
+      );
+    }
+    const moved = await db.query(
+      // ONLY HAND-ENTERED ROWS ON CASH WALLETS. A bank-fed row's date is the bank's, and the next
+      // sync would write it back; a hand-entered row on a card or checking account is not "cash".
+      //
+      // A WALLET-TO-WALLET MOVE MOVES AS ONE. Its two halves share a transfer group, and a move that
+      // left one wallet on Monday and reached the other on Friday would show both wallets wrong for
+      // the days between. Every member of the group that passes the same test moves with it — and
+      // only those: a cash row paired with an ATM withdrawal leaves the bank's row where it is.
+      //
+      // Not in the future, with a day of slack: the server's calendar can be a day behind the
+      // owner's, and "today" on their phone must be accepted.
+      `WITH target AS (
+         SELECT t.id, t.transfer_group_id
+           FROM transactions t JOIN accounts a ON a.id = t.account_id
+          WHERE t.id = $2 AND a.countable AND left(t.plaid_transaction_id, 7) = 'manual_'
+            AND $1::date <= CURRENT_DATE + 1
+            AND NOT ${giftLockSql('t', 'category', viewer)}
+       )
+       UPDATE transactions u SET date = $1::date
+         FROM accounts a
+        WHERE a.id = u.account_id AND a.countable AND left(u.plaid_transaction_id, 7) = 'manual_'
+          AND (u.id IN (SELECT id FROM target)
+               OR u.transfer_group_id IN (SELECT transfer_group_id FROM target WHERE transfer_group_id IS NOT NULL))
+          AND NOT ${giftLockSql('u', 'category', viewer)}
+       RETURNING u.id`,
+      [date, id]
+    );
+    if (moved.rowCount === 0) {
+      return Response.json(
+        { success: false, error: { code: 'NOT_EDITABLE', message: 'Only cash entered by hand can be moved to another day, and not into the future.' } } satisfies ApiResponse<never>,
+        { status: 400 }
+      );
+    }
   } else {
     return Response.json(
-      { success: false, error: { code: 'INVALID_INPUT', message: 'mapped_category, hidden, watched, note, or property_id required' } } satisfies ApiResponse<never>,
+      { success: false, error: { code: 'INVALID_INPUT', message: 'mapped_category, hidden, watched, note, property_id, or date required' } } satisfies ApiResponse<never>,
       { status: 400 }
     );
   }

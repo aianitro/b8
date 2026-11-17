@@ -36,6 +36,11 @@ export interface TransactionDetail {
   id: number;
   /** `YYYY-MM-DD`, posted. */
   date: string;
+  /**
+   * Whether the owner may change `date`: a hand-entered row on a cash wallet, and nothing else. A
+   * bank-fed row's date is the bank's, and the next sync would put it back anyway.
+   */
+  dateEditable: boolean;
   /** `YYYY-MM-DD`, only when it differs from the posted date. */
   authorizedDate: string | null;
   /** Plaid's sign: positive is money out. */
@@ -68,6 +73,8 @@ export interface TransactionDetail {
 export interface DetailRow {
   id: number;
   date: string;
+  /** Computed by the route; absent from callers that do not ask, which reads as not editable. */
+  date_editable?: boolean | null;
   authorized_date: string | null;
   amount: string | number;
   name: string | null;
@@ -205,6 +212,7 @@ export function transactionDetail(row: DetailRow): TransactionDetail {
   return {
     id: row.id,
     date: row.date,
+    dateEditable: row.date_editable === true,
     authorizedDate: authorized !== null && authorized !== row.date ? authorized : null,
     amount: Number(row.amount),
     title,
@@ -243,6 +251,7 @@ export function maskedTransactionDetail(d: TransactionDetail): TransactionDetail
   return {
     id: d.id,
     date: d.date,
+    dateEditable: false,
     authorizedDate: null,
     amount: d.amount,
     title: GIFT_LABEL,

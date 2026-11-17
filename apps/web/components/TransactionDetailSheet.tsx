@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { X, MapPin, ExternalLink, Plus } from 'lucide-react';
 import MerchantMark from './MerchantMark';
 import type { TransactionDetail } from '@/lib/transactionDetail';
-import { setNote } from '@/lib/transactionEdits';
+import { setDate, setNote } from '@/lib/transactionEdits';
+import { localIsoDate } from '@/lib/localDate';
 import { MAX_WATCH_NOTE as MAX_NOTE } from '@b8/contracts/overview';
 import { useVisibleViewport } from '@/lib/useVisibleViewport';
 import type { ApiResponse } from '@b8/contracts/types';
@@ -62,7 +63,7 @@ export default function TransactionDetailSheet({ transactionId, onClose: close }
   const router = useRouter();
   const [detail, setDetail] = useState<TransactionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Whether a note was saved while open. The list behind shows notes, so it is refetched on the way
+  // Whether a note or a date was saved while open. The list behind shows both, so it is refetched on the way
   // out — not on save, which would re-render the list under a sheet that is still being read. A ref,
   // because it is only ever read from a handler, never to render.
   const dirty = useRef(false);
@@ -152,14 +153,14 @@ export default function TransactionDetailSheet({ transactionId, onClose: close }
 
         {error && <p className="px-5 py-6 text-sm text-red-500">{error}</p>}
         {!detail && !error && <div className="px-5 py-10" />}
-        {detail && <DetailBody d={detail} onNoteSaved={() => { dirty.current = true; }} />}
+        {detail && <DetailBody d={detail} onChanged={() => { dirty.current = true; }} />}
       </div>
     </div>,
     document.body
   );
 }
 
-function DetailBody({ d, onNoteSaved }: { d: TransactionDetail; onNoteSaved: () => void }) {
+function DetailBody({ d, onChanged }: { d: TransactionDetail; onChanged: () => void }) {
   const income = d.amount < 0;
   const loc = d.location;
   const cityLine = loc ? [[loc.city, loc.region].filter(Boolean).join(', '), loc.postalCode].filter(Boolean).join(' ') : '';
@@ -178,7 +179,9 @@ function DetailBody({ d, onNoteSaved }: { d: TransactionDetail; onNoteSaved: () 
       </div>
 
       <Section title="When">
-        <Field label="Posted">{longDate(d.date)}</Field>
+        {d.dateEditable
+          ? <DateEditor transactionId={d.id} initial={d.date} onSaved={onChanged} />
+          : <Field label="Posted">{longDate(d.date)}</Field>}
         {d.authorizedDate && <Field label="Authorized">{longDate(d.authorizedDate)}</Field>}
       </Section>
 
@@ -240,7 +243,7 @@ function DetailBody({ d, onNoteSaved }: { d: TransactionDetail; onNoteSaved: () 
           the one someone opens this to annotate. */}
       <Section title="Notes">
         {d.bankDescription && <Field label="Statement text"><span className="font-mono text-xs break-all">{d.bankDescription}</span></Field>}
-        <NoteEditor transactionId={d.id} initial={d.note} onSaved={onNoteSaved} />
+        <NoteEditor transactionId={d.id} initial={d.note} onSaved={onChanged} />
       </Section>
 
       {!d.enriched && (
@@ -249,6 +252,92 @@ function DetailBody({ d, onNoteSaved }: { d: TransactionDetail; onNoteSaved: () 
           arrived before details were kept.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Move a hand-entered cash row to the day it actually happened.
+ *
+ * Offered only when the route says `dateEditable` — a hand-entered row on a cash wallet. A cash
+ * count files what it found under the day of the count, and a spend remembered later is entered on
+ * the day it is remembered; both are usually some other day. The route moves the other half of a
+ * wallet-to-wallet move with it, so a move never shows as leaving on one day and arriving on another.
+ */
+function DateEditor({ transactionId, initial, onSaved }: {
+  transactionId: number;
+  initial: string;
+  onSaved: () => void;
+}) {
+  const [saved, setSaved] = useState(initial);
+  const [value, setValue] = useState(initial);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Today on THIS device's calendar, not UTC's — the same rule the cash forms date their rows by.
+  const today = localIsoDate();
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await setDate(transactionId, value);
+      setSaved(value);
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That did not work. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <Field label="Date">
+        {longDate(saved)}{' '}
+        <button
+          type="button"
+          onClick={() => { setValue(saved); setEditing(true); }}
+          className="ml-1 text-xs text-slate-400 hover:text-slate-700 underline transition-colors"
+        >
+          Change
+        </button>
+      </Field>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        {/* `text-base` below `sm`: iOS zooms the page into any field under 16px. */}
+        <input
+          type="date"
+          value={value}
+          max={today}
+          onChange={(e) => setValue(e.target.value)}
+          disabled={busy}
+          aria-label="Date"
+          className="flex-1 min-w-0 text-base sm:text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-700 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+        />
+        <button
+          type="button"
+          disabled={busy || value === '' || value === saved || value > today}
+          onClick={save}
+          className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-40 transition-colors"
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => { setValue(saved); setError(null); setEditing(false); }}
+          className="text-xs text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
     </div>
   );
 }

@@ -40,6 +40,12 @@ export const setCategory = (id: number, category: string | null) =>
  */
 export const setNote = (id: number, note: string | null) => patch(id, { note });
 
+/**
+ * Move a hand-entered cash row to another day (`YYYY-MM-DD`). The route refuses any other row, and
+ * carries the other half of a wallet-to-wallet move along with it.
+ */
+export const setDate = (id: number, date: string) => patch(id, { date });
+
 /** Flag or unflag it, SAYING NOTHING ABOUT THE NOTE. */
 export const setWatched = (id: number, watched: boolean) => patch(id, { watched });
 
