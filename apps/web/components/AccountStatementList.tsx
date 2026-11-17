@@ -5,6 +5,7 @@ import CategorySelect from '@/components/CategorySelect';
 import MerchantMark from '@/components/MerchantMark';
 import SwipeDeleteRow from '@/components/SwipeDeleteRow';
 import { TransactionDetailButton } from '@/components/TransactionDetailSheet';
+import ReceiptMark from '@/components/ReceiptMark';
 import { detailLine, enrichmentDetail } from '@/lib/enrichedDisplay';
 import type { BudgetCategory } from '@b8/contracts/types';
 
@@ -24,6 +25,8 @@ export interface StatementRow {
   authorized_date: string | null;
   location_city: string | null;
   location_region: string | null;
+  /** A receipt photo is attached. Absent from callers that do not ask, which reads as none. */
+  has_receipt?: boolean;
 }
 
 export interface StatementMonth {
@@ -128,6 +131,7 @@ export default function AccountStatementList({ months, categories }: {
                     <TransactionDetailButton transactionId={t.id} className="block max-w-full">
                       <p className="detail-title font-medium text-sm text-slate-800 truncate transition-colors">
                         {title ?? <span className="text-slate-300">—</span>}
+                        {t.has_receipt && <ReceiptMark />}
                       </p>
                     </TransactionDetailButton>
                     <p className="hidden sm:block text-xs text-slate-400 mt-0.5">{shortDate(t.date)}</p>

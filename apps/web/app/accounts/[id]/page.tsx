@@ -40,6 +40,7 @@ type TxRow = {
   // nothing below reads them, and the running balance is untouched by them.
   logo_url: string | null; authorized_date: string | null;
   location_city: string | null; location_region: string | null;
+  has_receipt: boolean;
 };
 
 export default async function AccountPage({ params }: { params: Promise<{ id: string }> }) {
@@ -74,7 +75,10 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
     // the chart are the same for every viewer.
     db.query<TxRow>(
       `SELECT t.id, t.date::text, t.amount::text, t.name, t.merchant_name, t.mapped_category,
-              t.logo_url, t.authorized_date::text, t.location_city, t.location_region
+              t.logo_url, t.authorized_date::text, t.location_city, t.location_region,
+              -- Whether a receipt photo is attached. False on a row a gift masks for this viewer: like the
+              -- note, its existence is a fact about content that is not theirs yet.
+              (NOT t.gift_masked AND EXISTS (SELECT 1 FROM transaction_receipts r WHERE r.transaction_id = t.id)) AS has_receipt
        FROM ${visibleTransactions(viewer)} t
        WHERE t.account_id = $1 AND t.date >= LEAST(make_date($2, 1, 1), CURRENT_DATE - $3::int)
        ORDER BY t.date ASC, t.id ASC`,

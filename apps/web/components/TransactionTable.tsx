@@ -7,6 +7,7 @@ import CategorySelect from './CategorySelect';
 import type { CategorySuggestionView } from '@/lib/domain/categorySuggest';
 import MerchantMark from './MerchantMark';
 import { TransactionDetailButton } from './TransactionDetailSheet';
+import ReceiptMark from './ReceiptMark';
 import TransferLinkButton from './TransferLinkButton';
 import { detailLine, enrichmentDetail } from '@/lib/enrichedDisplay';
 import { useVisibleViewport } from '@/lib/useVisibleViewport';
@@ -42,6 +43,8 @@ type TxRow = {
   authorized_date: string | null;
   location_city: string | null;
   location_region: string | null;
+  /** A receipt photo is attached. Absent from callers that do not ask, which reads as none. */
+  has_receipt?: boolean;
 };
 
 type PropertyOption = { id: number; nickname: string };
@@ -816,6 +819,7 @@ export default function TransactionTable({ transactions, categories, accounts, p
                         <span className="detail-title font-medium text-slate-800 transition-colors">
                           {t.merchant_name ?? t.name ?? <span className="text-slate-300">—</span>}
                         </span>
+                        {t.has_receipt && <ReceiptMark />}
                         {t.name && t.merchant_name && t.name !== t.merchant_name && (
                           <div className="hidden sm:block text-xs text-slate-400 mt-0.5">{t.name}</div>
                         )}

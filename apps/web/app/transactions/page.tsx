@@ -28,6 +28,7 @@ type TxRow = Transaction & {
   authorized_date: string | null;
   location_city: string | null;
   location_region: string | null;
+  has_receipt: boolean;
 };
 
 type AccountOption = { id: string; name: string; landscape: string };
@@ -159,6 +160,9 @@ async function getData(
               -- it is large, and this whole result set is shipped to the browser.
               t.logo_url, t.authorized_date::text AS authorized_date,
               t.location_city, t.location_region,
+              -- Whether a receipt photo is attached. False on a row a gift masks for this viewer: like the
+              -- note, its existence is a fact about content that is not theirs yet.
+              (NOT t.gift_masked AND EXISTS (SELECT 1 FROM transaction_receipts r WHERE r.transaction_id = t.id)) AS has_receipt,
               a.name AS account_name, a.landscape AS account_landscape,
               t.property_id,
               (SELECT p.nickname FROM properties p
