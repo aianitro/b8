@@ -1,10 +1,14 @@
 'use client';
 
-import { useEffect, useState, type ReactNode, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { X, MapPin, ExternalLink } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { X, MapPin, ExternalLink, Plus } from 'lucide-react';
 import MerchantMark from './MerchantMark';
 import type { TransactionDetail } from '@/lib/transactionDetail';
+import { setNote } from '@/lib/transactionEdits';
+import { MAX_WATCH_NOTE as MAX_NOTE } from '@b8/contracts/overview';
+import { useVisibleViewport } from '@/lib/useVisibleViewport';
 import type { ApiResponse } from '@b8/contracts/types';
 
 const fmt = (n: number) =>
@@ -54,9 +58,23 @@ export function TransactionDetailButton({ transactionId, children, className = '
  * the detail of almost none of them is ever looked at. Everything shown comes from the curated
  * `TransactionDetail`, so a section with nothing in it is simply not rendered.
  */
-export default function TransactionDetailSheet({ transactionId, onClose }: { transactionId: number; onClose: () => void }) {
+export default function TransactionDetailSheet({ transactionId, onClose: close }: { transactionId: number; onClose: () => void }) {
+  const router = useRouter();
   const [detail, setDetail] = useState<TransactionDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whether a note was saved while open. The list behind shows notes, so it is refetched on the way
+  // out — not on save, which would re-render the list under a sheet that is still being read. A ref,
+  // because it is only ever read from a handler, never to render.
+  const dirty = useRef(false);
+  const onClose = useCallback(() => {
+    close();
+    if (dirty.current) router.refresh();
+  }, [close, router]);
+
+  // The note field raises a keyboard, and iOS draws it OVER the layout viewport, so `items-end`
+  // alone parks the sheet behind the keys. `lib/useVisibleViewport.ts` has the whole story; the
+  // flag sheet in `TransactionTable` hit it twice before using this.
+  const visible = useVisibleViewport(true);
 
   useEffect(() => {
     let live = true;
@@ -92,6 +110,10 @@ export default function TransactionDetailSheet({ transactionId, onClose }: { tra
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40"
+      style={visible ? {
+        top: visible.top, left: visible.left, width: visible.width, height: visible.height,
+        right: 'auto', bottom: 'auto',
+      } : undefined}
       onClick={(e) => { e.stopPropagation(); onClose(); }}
       onTouchStart={stop}
       onTouchMove={stop}
@@ -104,6 +126,7 @@ export default function TransactionDetailSheet({ transactionId, onClose }: { tra
         aria-modal="true"
         aria-label="Transaction details"
         onClick={(e) => e.stopPropagation()}
+        style={visible ? { maxHeight: visible.height * 0.85 } : undefined}
         className="bg-white w-full sm:max-w-md max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl shadow-2xl pb-[env(safe-area-inset-bottom)]"
       >
         <div className="sticky top-0 bg-white flex items-start gap-3 px-5 pt-5 pb-3 border-b border-slate-100">
@@ -129,14 +152,14 @@ export default function TransactionDetailSheet({ transactionId, onClose }: { tra
 
         {error && <p className="px-5 py-6 text-sm text-red-500">{error}</p>}
         {!detail && !error && <div className="px-5 py-10" />}
-        {detail && <DetailBody d={detail} />}
+        {detail && <DetailBody d={detail} onNoteSaved={() => { dirty.current = true; }} />}
       </div>
     </div>,
     document.body
   );
 }
 
-function DetailBody({ d }: { d: TransactionDetail }) {
+function DetailBody({ d, onNoteSaved }: { d: TransactionDetail; onNoteSaved: () => void }) {
   const income = d.amount < 0;
   const loc = d.location;
   const cityLine = loc ? [[loc.city, loc.region].filter(Boolean).join(', '), loc.postalCode].filter(Boolean).join(' ') : '';
@@ -213,12 +236,12 @@ function DetailBody({ d }: { d: TransactionDetail }) {
         )}
       </Section>
 
-      {(d.bankDescription || d.note) && (
-        <Section title="Notes">
-          {d.bankDescription && <Field label="Statement text"><span className="font-mono text-xs break-all">{d.bankDescription}</span></Field>}
-          {d.note && <Field label="Your note">{d.note}</Field>}
-        </Section>
-      )}
+      {/* Always rendered now: the note editor is here, and a transaction with no note is exactly
+          the one someone opens this to annotate. */}
+      <Section title="Notes">
+        {d.bankDescription && <Field label="Statement text"><span className="font-mono text-xs break-all">{d.bankDescription}</span></Field>}
+        <NoteEditor transactionId={d.id} initial={d.note} onSaved={onNoteSaved} />
+      </Section>
 
       {!d.enriched && (
         <p className="text-xs text-slate-400">
@@ -226,6 +249,118 @@ function DetailBody({ d }: { d: TransactionDetail }) {
           arrived before details were kept.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Write, change or clear the owner's note on ANY transaction — not only a flagged one.
+ *
+ * WHY HERE. The flag is "keep an eye on this", and on the transactions page its sheet was the only
+ * note field, so annotating a row meant flagging it; on an account's page there was no way at all.
+ * This sheet opens from both, so one editor here covers both. It sends `{ note }` alone through
+ * `setNote`, which leaves the flag untouched — a note is a note.
+ *
+ * Collapsed behind "Add note" for the dashboard editor's reason: an open empty field reads as a
+ * question awaiting an answer. An existing note shows as text with an Edit beside it.
+ */
+function NoteEditor({ transactionId, initial, onSaved }: {
+  transactionId: number;
+  initial: string | null;
+  onSaved: () => void;
+}) {
+  const [saved, setSaved] = useState(initial ?? '');
+  const [text, setText] = useState(initial ?? '');
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const trimmed = text.trim();
+  // Not `maxLength`: a hard stop swallows keystrokes with no explanation. The counter turns red and
+  // the save is refused instead.
+  const tooLong = trimmed.length > MAX_NOTE;
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = trimmed === '' ? null : trimmed;
+      await setNote(transactionId, next);
+      setSaved(next ?? '');
+      setText(next ?? '');
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      // The route says why — a gift-held row, a note over the limit — so show its words.
+      setError(e instanceof Error ? e.message : 'That did not work. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return saved === '' ? (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 transition-colors"
+      >
+        <Plus size={14} /> Add note
+      </button>
+    ) : (
+      <div className="flex items-start gap-3">
+        <p className="flex-1 min-w-0 text-slate-800 whitespace-pre-wrap break-words">{saved}</p>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="shrink-0 text-xs text-slate-400 hover:text-slate-700 underline transition-colors"
+        >
+          Edit
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* `text-base` below `sm`: iOS zooms the page into any field under 16px. Autofocus is fine
+          here, unlike on open: the keyboard comes up because "Add note" or "Edit" was tapped. */}
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        disabled={busy}
+        rows={3}
+        autoFocus
+        placeholder="Anything worth remembering about this one"
+        className={`w-full text-base sm:text-sm border rounded-lg px-3 py-2 text-slate-700 disabled:opacity-50
+                    focus:outline-none focus:ring-2 focus:ring-slate-900/10 ${tooLong ? 'border-red-300' : 'border-slate-200'}`}
+      />
+      <div className="flex items-center justify-between gap-3 mt-1">
+        <p className="text-[11px] text-slate-400">Just a note. It does not flag this one.</p>
+        <span className={`text-[11px] tabular-nums ${tooLong ? 'text-red-500' : 'text-slate-300'}`}>
+          {trimmed.length}/{MAX_NOTE}
+        </span>
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      <div className="flex items-center gap-2 mt-2">
+        <button
+          type="button"
+          disabled={busy || tooLong || trimmed === saved}
+          onClick={save}
+          className="px-3.5 py-1.5 rounded-lg text-xs font-medium bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-40 transition-colors"
+        >
+          {busy ? 'Saving…' : 'Save note'}
+        </button>
+        {/* Restores what is stored, or reopening would show an edit the reader abandoned. */}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => { setText(saved); setError(null); setEditing(false); }}
+          className="text-xs text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

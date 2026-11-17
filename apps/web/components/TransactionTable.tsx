@@ -829,15 +829,17 @@ export default function TransactionTable({ transactions, categories, accounts, p
                             which is a tooltip, which is a hover — and the phone this feature is
                             used from has no hover. The one thing the owner wrote by hand about
                             this transaction was the one thing the installed app could not show.
-                            Amber, because it is the colour the flag beside it already uses for
-                            the same fact, and `wrap-anywhere` for the Merchant column's sake. */}
-                        {t.watched_at !== null && t.note && (
+                            Shown for EVERY row with a note, not only flagged ones: a note is
+                            not a flag, and the detail sheet now writes one without flagging.
+                            Amber when the row is also flagged, the colour the flag beside it
+                            uses; slate otherwise. `wrap-anywhere` for the Merchant column. */}
+                        {t.note && (
                           // ONE LINE IN THE TABLE, all of it on a phone. The desktop Merchant
                           // column is narrow enough that a note ran to three lines and dragged
                           // the row's height with it; there the flag's tooltip still holds the
                           // whole thing, so an ellipsis loses nothing. On a phone there is no
                           // tooltip and the cell is the full width of the card, so it wraps.
-                          <div className="text-xs text-amber-600 mt-0.5 wrap-anywhere sm:line-clamp-1" title={t.note}>
+                          <div className={`text-xs mt-0.5 wrap-anywhere sm:line-clamp-1 ${t.watched_at !== null ? 'text-amber-600' : 'text-slate-500'}`} title={t.note}>
                             {t.note}
                           </div>
                         )}
