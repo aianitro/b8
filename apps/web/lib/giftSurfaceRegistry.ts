@@ -85,6 +85,10 @@ export const ROUTES: Surface[] = [
   // Counts and account names only (S23); the run's figures, never a row.
   { file: 'app/api/v1/sync/route.ts', classes: ['numeric-only'] },
   { file: 'app/api/v1/transactions/[id]/counterparts/route.ts', classes: ['text-bearing'], scenario: 'X1' },
+  // A receipt photo shows exactly what was bought, so it is text-bearing though it is an image: the
+  // giver alone sees a held row's receipt (X1 probes its bytes), and it takes the note's lock for
+  // attach and remove, which `transactions/[id]/receipt/receipt.test.ts` pins.
+  { file: 'app/api/v1/transactions/[id]/receipt/route.ts', classes: ['text-bearing', 'guarded-write'], scenario: 'X1' },
   { file: 'app/api/v1/transactions/[id]/route.ts', classes: ['text-bearing', 'guarded-write'], scenario: 'X2' },
   { file: 'app/api/v1/transactions/bulk/route.ts', classes: ['guarded-write'], scenario: 'X12' },
   { file: 'app/api/v1/transactions/route.ts', classes: ['text-bearing'], scenario: 'X3' },

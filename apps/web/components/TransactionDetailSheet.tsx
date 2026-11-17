@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { X, MapPin, ExternalLink, Plus } from 'lucide-react';
+import { X, MapPin, ExternalLink, Plus, Camera } from 'lucide-react';
 import MerchantMark from './MerchantMark';
 import type { TransactionDetail } from '@/lib/transactionDetail';
 import { setDate, setNote } from '@/lib/transactionEdits';
+import { attachReceipt, receiptUrl, removeReceipt } from '@/lib/receiptUpload';
 import { localIsoDate } from '@/lib/localDate';
 import { MAX_WATCH_NOTE as MAX_NOTE } from '@b8/contracts/overview';
 import { useVisibleViewport } from '@/lib/useVisibleViewport';
@@ -246,6 +247,10 @@ function DetailBody({ d, onChanged }: { d: TransactionDetail; onChanged: () => v
         <NoteEditor transactionId={d.id} initial={d.note} onSaved={onChanged} />
       </Section>
 
+      <Section title="Receipt">
+        <ReceiptEditor transactionId={d.id} initial={d.hasReceipt} />
+      </Section>
+
       {!d.enriched && (
         <p className="text-xs text-slate-400">
           No extra details from the bank for this transaction — it was entered by hand, imported, or
@@ -450,6 +455,145 @@ function NoteEditor({ transactionId, initial, onSaved }: {
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Attach, view, replace or remove the photo of a transaction's receipt.
+ *
+ * ONE FILE INPUT, NO CAMERA CODE. `accept="image/*"` is enough for iOS and Android to offer Take
+ * Photo beside the library, and it asks for no camera permission the app would otherwise need.
+ *
+ * The thumbnail opens a full-screen view inside the app rather than a new tab: the installed app on
+ * iOS opens a new tab in a browser sheet that does not share its session, so the image would 401.
+ */
+function ReceiptEditor({ transactionId, initial }: { transactionId: number; initial: boolean }) {
+  const [has, setHas] = useState(initial);
+  // Bumped on every attach, so the <img> asks again rather than showing the photo it replaced.
+  const [version, setVersion] = useState(0);
+  const [busy, setBusy] = useState<'attach' | 'remove' | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [viewing, setViewing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const src = `${receiptUrl(transactionId)}?v=${version}`;
+
+  async function attach(file: File | undefined) {
+    if (!file) return;
+    setBusy('attach');
+    setError(null);
+    try {
+      await attachReceipt(transactionId, file);
+      setHas(true);
+      setVersion((v) => v + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That did not work. Try again.');
+    } finally {
+      setBusy(null);
+      // Cleared so picking the same file again still fires a change.
+      if (input.current) input.current.value = '';
+    }
+  }
+
+  async function remove() {
+    setBusy('remove');
+    setError(null);
+    try {
+      await removeReceipt(transactionId);
+      setHas(false);
+      setConfirming(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'That did not work. Try again.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const picker = (
+    <input
+      ref={input}
+      type="file"
+      accept="image/*"
+      className="hidden"
+      onChange={(e) => attach(e.target.files?.[0])}
+    />
+  );
+  const linkButton = 'text-xs text-slate-400 hover:text-slate-700 underline disabled:opacity-40 transition-colors';
+
+  if (!has) {
+    return (
+      <div>
+        {picker}
+        <button
+          type="button"
+          disabled={busy !== null}
+          onClick={() => input.current?.click()}
+          className="flex items-center gap-1.5 text-slate-500 hover:text-slate-800 disabled:opacity-50 transition-colors"
+        >
+          <Camera size={14} /> {busy === 'attach' ? 'Attaching…' : 'Attach receipt'}
+        </button>
+        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {picker}
+      <button type="button" onClick={() => setViewing(true)} className="block" aria-label="View receipt">
+        {/* eslint-disable-next-line @next/next/no-img-element -- an authenticated API image, not a static asset */}
+        <img
+          src={src}
+          alt="Receipt"
+          className={`max-h-48 max-w-full rounded-lg border border-slate-200 object-contain bg-slate-50 ${busy ? 'opacity-50' : ''}`}
+        />
+      </button>
+      <div className="flex items-center gap-3 mt-2">
+        {confirming ? (
+          <>
+            <span className="text-xs text-slate-600">Remove this receipt?</span>
+            <button type="button" disabled={busy !== null} onClick={remove} className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-40">
+              {busy === 'remove' ? 'Removing…' : 'Remove'}
+            </button>
+            <button type="button" disabled={busy !== null} onClick={() => setConfirming(false)} className={linkButton}>
+              Keep
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" disabled={busy !== null} onClick={() => input.current?.click()} className={linkButton}>
+              {busy === 'attach' ? 'Attaching…' : 'Replace'}
+            </button>
+            <button type="button" disabled={busy !== null} onClick={() => setConfirming(true)} className={linkButton}>
+              Remove
+            </button>
+          </>
+        )}
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      {viewing && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Receipt"
+          className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-2"
+          onClick={(e) => { e.stopPropagation(); setViewing(false); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setViewing(false); } }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- an authenticated API image, not a static asset */}
+          <img src={src} alt="Receipt" className="max-w-full max-h-full object-contain" />
+          <button
+            type="button"
+            autoFocus
+            aria-label="Close receipt"
+            className="absolute top-[max(0.75rem,env(safe-area-inset-top))] right-3 p-2 rounded-full bg-white/10 text-white"
+          >
+            <X size={20} />
+          </button>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

@@ -351,6 +351,20 @@ CREATE TABLE IF NOT EXISTS transaction_tombstones (
   deleted_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()  -- FIRST tombstoning; a repeat delete of the same id leaves it unchanged
 );
 
+-- A photo of a transaction's receipt, one per transaction; attaching again replaces it. In the
+-- database rather than on disk so the nightly pg_dump backs it up and a transaction's delete takes
+-- it along (migrations/1792500000000_transaction-receipts.sql has the argument). The phone shrinks
+-- and re-encodes a photo before sending it, which also drops its EXIF location.
+CREATE TABLE IF NOT EXISTS transaction_receipts (
+  transaction_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
+  -- Checked against the bytes' magic number by the route; served back as the Content-Type.
+  content_type   TEXT NOT NULL
+                   CONSTRAINT transaction_receipts_content_type CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+  image          BYTEA NOT NULL
+                   CONSTRAINT transaction_receipts_image_size CHECK (octet_length(image) BETWEEN 1 AND 4194304),  -- 4 MiB backstop
+  attached_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Counting a wallet. Cash is the one account kind with a feed on only ONE side: the withdrawal is on
 -- the bank feed, the coffee is on no feed at all, so the only way the ledger learns what a wallet
 -- holds is the owner counting it.

@@ -51,6 +51,7 @@ import { GET as overview } from '../overview/route';
 import { GET as drill } from '../transactions/route';
 import { DELETE as deleteTxn, GET as detail, PATCH as patchTxn } from '../transactions/[id]/route';
 import { GET as counterparts } from '../transactions/[id]/counterparts/route';
+import { GET as receipt } from '../transactions/[id]/receipt/route';
 import { PATCH as bulk } from '../transactions/bulk/route';
 import { POST as linkTransfer } from '../transfers/route';
 import { POST as cashTransfer } from '../cash-transfers/route';
@@ -164,6 +165,19 @@ function probes(sf: Surface): Record<string, { call: (who: Who) => Promise<Respo
     'app/api/v1/transactions/[id]/counterparts/route.ts': {
       call: (who) => counterparts(req(`/api/v1/transactions/${sf.ids.plain}/counterparts`, who as EnrolledUser), params(sf.ids.plain)),
       giverSees: 'ZQ41BXPAIR', nonGiverStatus: 200,
+    },
+    // The held row's receipt, its bytes carrying the canary after a JPEG's magic number: served to the
+    // giver, and the same 404 as no receipt to everyone else.
+    'app/api/v1/transactions/[id]/receipt/route.ts': {
+      call: async (who) => {
+        await db.query(
+          `INSERT INTO transaction_receipts (transaction_id, content_type, image)
+           VALUES ($1, 'image/jpeg', $2) ON CONFLICT (transaction_id) DO NOTHING`,
+          [sf.ids.gift, Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from('ZQ41BXGIFT receipt')])],
+        );
+        return receipt(req(`/api/v1/transactions/${sf.ids.gift}/receipt`, who as EnrolledUser), params(sf.ids.gift));
+      },
+      giverSees: 'ZQ41BXGIFT', nonGiverStatus: 404,
     },
     'app/api/v1/gifts/route.ts': { call: (who) => listGifts(req('/api/v1/gifts', who as EnrolledUser)), giverSees: 'ZQ41BXGIFT', nonGiverStatus: 200 },
     'app/api/v1/gifts/[id]/route.ts': {

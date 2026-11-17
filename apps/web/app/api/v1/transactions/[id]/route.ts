@@ -31,7 +31,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
             t.payment_channel, t.location_city, t.location_region, t.location_country,
             t.note, t.watched_at, t.hidden, t.plaid_raw,
             -- Null for a masked row, whose id column is masked, which reads as not editable.
-            (a.countable AND left(t.plaid_transaction_id, 7) = 'manual_') AS date_editable
+            (a.countable AND left(t.plaid_transaction_id, 7) = 'manual_') AS date_editable,
+            EXISTS (SELECT 1 FROM transaction_receipts r WHERE r.transaction_id = t.id) AS has_receipt
        FROM ${visibleTransactions(viewer)} t
        JOIN accounts a ON a.id = t.account_id
       WHERE t.id = $1`,

@@ -63,6 +63,8 @@ export interface TransactionDetail {
   mapsUrl: string | null;
   counterparties: DetailCounterparty[];
   note: string | null;
+  /** Whether a receipt photo is attached — fetched separately, from `/api/v1/transactions/:id/receipt`. */
+  hasReceipt: boolean;
   watched: boolean;
   hidden: boolean;
   /** False when nothing was captured from Plaid for this row (manual, CSV, cash, or pre-capture). */
@@ -92,6 +94,8 @@ export interface DetailRow {
   location_region: string | null;
   location_country: string | null;
   note: string | null;
+  /** Computed by the route; absent from callers that do not ask, which reads as no receipt. */
+  has_receipt?: boolean | null;
   watched_at: unknown;
   hidden: boolean;
   plaid_raw: unknown;
@@ -231,6 +235,7 @@ export function transactionDetail(row: DetailRow): TransactionDetail {
     mapsUrl: hasLocation ? mapsUrl(rawLoc, location) : null,
     counterparties,
     note: text(row.note),
+    hasReceipt: row.has_receipt === true,
     watched: row.watched_at !== null && row.watched_at !== undefined,
     hidden: row.hidden,
     enriched: raw !== null,
@@ -270,6 +275,8 @@ export function maskedTransactionDetail(d: TransactionDetail): TransactionDetail
     mapsUrl: null,
     counterparties: [],
     note: null,
+    // A receipt names exactly what was bought — the thing a gift hides.
+    hasReceipt: false,
     watched: false,
     hidden: d.hidden,
     enriched: false,
