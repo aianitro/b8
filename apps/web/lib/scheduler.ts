@@ -2,6 +2,7 @@ import { runSync } from './sync';
 import { runDailyDigest } from './dailyDigest';
 import { sendWebPushIfDelivered } from './webPush';
 import { suggestCategories } from './categorySuggester';
+import { watchReceipts } from './receiptCaptureStore';
 import { recordCloses } from './unspentStore';
 import { writeYearEndSnapshot } from './yearEndSnapshots';
 import { writeNetWorthSnapshot } from './netWorth';
@@ -69,6 +70,10 @@ export async function runDailyJob() {
   // Category suggestions for the rows this run pulled, before the digest, so the morning's
   // unfiled rows already carry one when the owner opens the app. Resolves rather than rejects.
   await suggestCategories();
+
+  // The charges for photographed receipts, among what this run pulled — before the digest, so a
+  // mismatch opened this morning is on the dashboard when the owner opens it. Resolves always.
+  await watchReceipts();
 
   // Last, and after the syncs, so the outlook it reads is computed over the transactions this run
   // just pulled rather than yesterday's — an alert about a month the job has not finished loading

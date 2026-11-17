@@ -52,6 +52,9 @@ import { GET as drill } from '../transactions/route';
 import { DELETE as deleteTxn, GET as detail, PATCH as patchTxn } from '../transactions/[id]/route';
 import { GET as counterparts } from '../transactions/[id]/counterparts/route';
 import { GET as receipt } from '../transactions/[id]/receipt/route';
+import { GET as listReceipts } from '../receipts/route';
+import { GET as receiptImage } from '../receipts/[id]/image/route';
+import { GET as receiptCandidates } from '../receipts/[id]/candidates/route';
 import { PATCH as bulk } from '../transactions/bulk/route';
 import { POST as linkTransfer } from '../transfers/route';
 import { POST as cashTransfer } from '../cash-transfers/route';
@@ -153,6 +156,26 @@ function candidateGiftOf(sf: Surface): Promise<number> {
   return id;
 }
 
+/**
+ * Receipt watch: a receipt the giver photographed on the gift row's day, made once per world. Its
+ * merchant and its image bytes carry the canary, and the gift row is among its candidate charges —
+ * all of it the giver's, and none of it anyone else's to see.
+ */
+const giverCaptures = new WeakMap<Surface, Promise<number>>();
+function giverCaptureOf(sf: Surface): Promise<number> {
+  let id = giverCaptures.get(sf);
+  if (!id) {
+    id = db.query<{ id: number }>(
+      `INSERT INTO receipt_captures (captured_by, captured_on, content_type, image, merchant, expected_amount, state)
+       SELECT $1, t.date, 'image/jpeg', $3, 'ZQ41BXGIFT capture', 1, 'waiting' FROM transactions t WHERE t.id = $2
+       RETURNING id`,
+      [sf.w.two.userId, sf.ids.gift, Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from('ZQ41BXGIFT capture')])],
+    ).then((r) => r.rows[0].id);
+    giverCaptures.set(sf, id);
+  }
+  return id;
+}
+
 /** Every text-bearing GET route's probe: what to ask, and the canary its giver must see. */
 function probes(sf: Surface): Record<string, { call: (who: Who) => Promise<Response>; giverSees: string; nonGiverStatus: number }> {
   return {
@@ -177,6 +200,20 @@ function probes(sf: Surface): Record<string, { call: (who: Who) => Promise<Respo
         );
         return receipt(req(`/api/v1/transactions/${sf.ids.gift}/receipt`, who as EnrolledUser), params(sf.ids.gift));
       },
+      giverSees: 'ZQ41BXGIFT', nonGiverStatus: 404,
+    },
+    // Receipt watch: personal to the photographer. Everyone else's list is empty, and the giver's
+    // capture answers them 404.
+    'app/api/v1/receipts/route.ts': {
+      call: async (who) => { await giverCaptureOf(sf); return listReceipts(req('/api/v1/receipts', who as EnrolledUser)); },
+      giverSees: 'ZQ41BXGIFT', nonGiverStatus: 200,
+    },
+    'app/api/v1/receipts/[id]/image/route.ts': {
+      call: async (who) => { const id = await giverCaptureOf(sf); return receiptImage(req(`/api/v1/receipts/${id}/image`, who as EnrolledUser), params(id)); },
+      giverSees: 'ZQ41BXGIFT', nonGiverStatus: 404,
+    },
+    'app/api/v1/receipts/[id]/candidates/route.ts': {
+      call: async (who) => { const id = await giverCaptureOf(sf); return receiptCandidates(req(`/api/v1/receipts/${id}/candidates`, who as EnrolledUser), params(id)); },
       giverSees: 'ZQ41BXGIFT', nonGiverStatus: 404,
     },
     'app/api/v1/gifts/route.ts': { call: (who) => listGifts(req('/api/v1/gifts', who as EnrolledUser)), giverSees: 'ZQ41BXGIFT', nonGiverStatus: 200 },

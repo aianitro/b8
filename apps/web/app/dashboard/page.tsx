@@ -5,6 +5,8 @@ import DriftAlertCard from '@/components/DriftAlertCard';
 import FeedHealthCard from '@/components/FeedHealthCard';
 import JobHealthCard from '@/components/JobHealthCard';
 import AlertBell from '@/components/AlertBell';
+import ReceiptAlertCard from '@/components/ReceiptAlertCard';
+import { loadReceiptAlerts } from '@/lib/receiptCaptureStore';
 import CashStalenessCard from '@/components/CashStalenessCard';
 import ValuationStalenessCard from '@/components/ValuationStalenessCard';
 import { loadValuationFindings } from '@/lib/valuationStalenessRead';
@@ -201,6 +203,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const movesPromise = loadYearEndMoves('operational');
   // Cash accounts below their cushion, from the last sync — the bell's first card.
   const overdraftsPromise = loadOverdrafts();
+  const viewer = await pageViewer('/dashboard');
   // And those whose next week of recurring charges would take them there.
   const forecastsPromise = loadForecasts();
   const valuationFindingsPromise = loadValuationFindings(
@@ -222,7 +225,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     recentArrivals, recentArrivalsTotal, uncategorized: unfiled, watchlist, yearEnd,
     monthCategories,
     feedFindings, driftFindings, jobHealth, walletFindings,
-  } = dashboardFromWire(await loadOverview(await pageViewer('/dashboard'), now));
+  } = dashboardFromWire(await loadOverview(viewer, now));
+  // The viewer's own photographed receipts that need a look (lib/receiptCaptureStore.ts).
+  const receiptAlerts = await loadReceiptAlerts(viewer);
   // Started before the overview and collected here, so the two reads overlap rather than queue.
   const categoryOptions = await categoryOptionsPromise;
   const valuationFindings = await valuationFindingsPromise;
@@ -278,11 +283,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             many things there are to read, which is the only sense in which a reader counts them. */}
         <AlertBell count={(overdrafts.length > 0 ? 1 : 0) + (forecasts.length > 0 ? 1 : 0) + (feedFindings.length > 0 ? 1 : 0) + (driftFindings.length > 0 ? 1 : 0)
           + (jobHealth.status !== 'fresh' ? 1 : 0) + (walletFindings.length > 0 ? 1 : 0)
-          + (valuationFindings.length > 0 ? 1 : 0)}>
+          + (valuationFindings.length > 0 ? 1 : 0) + (receiptAlerts.length > 0 ? 1 : 0)}>
           {/* Ahead of everything: the others say a figure may be wrong or old, this says a fee is
               coming, and it is the one with a deadline. */}
           <OverdraftCard findings={overdrafts} />
           <OverdraftForecastCard findings={forecasts} />
+          {/* After the overdraft cards and ahead of the freshness ones: a charge that differs from its
+              receipt is about money, and is the owner's to settle. */}
+          <ReceiptAlertCard alerts={receiptAlerts} />
           {/* First of the freshness cards, because it outranks the other two: they each say a figure may be
               wrong, this says every figure may be old and the backups are missing as well. */}
           <JobHealthCard health={jobHealth} />

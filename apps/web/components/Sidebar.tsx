@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ArrowLeftRight, Building2, FlaskConical, Gift, Home, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Wallet, X, Zap } from 'lucide-react';
+import { ArrowLeftRight, Building2, FlaskConical, Gift, Home, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Wallet, X, Zap, ReceiptText } from 'lucide-react';
 import type { Me } from '@b8/contracts/auth';
 import { mayInvite } from '@/lib/invitationLink';
 import InviteControl from './InviteControl';
@@ -21,6 +21,8 @@ const NAV = [
   // P7-41b. A constant entry, the same for both people whether or not either has marked a gift: a
   // badge or a count here would tell the recipient a gift exists.
   { href: '/gifts',        label: 'Gifts',         icon: Gift },
+  // Photographed receipts waiting for their charge. Personal: each person sees only their own.
+  { href: '/receipts',     label: 'Receipts',      icon: ReceiptText },
 ];
 
 // WHAT SHAPES THE LEDGER, not places you go to read it — so these sit under their own

@@ -82,6 +82,7 @@ const PAGES = {
   'app/profit-loss/page.tsx': { cls: 'numeric-only', url: () => '/profit-loss' },
   'app/properties/page.tsx': { cls: 'numeric-only', url: () => '/properties' },
   'app/properties/[id]/page.tsx': { cls: 'text-bearing', url: (w) => `/properties/${w.property}` },
+  'app/receipts/page.tsx': { cls: 'text-bearing', url: () => '/receipts' },
   'app/rules/page.tsx': { cls: 'text-bearing', url: () => '/rules' },
   'app/sandbox/page.tsx': { cls: 'numeric-only', url: () => '/sandbox' },
   'app/transactions/page.tsx': { cls: 'text-bearing', url: () => '/transactions' },

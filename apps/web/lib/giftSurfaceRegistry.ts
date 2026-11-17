@@ -81,6 +81,13 @@ export const ROUTES: Surface[] = [
   { file: 'app/api/v1/push/web/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/push/web/status/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/rules/apply/route.ts', classes: ['guarded-write'], scenario: 'X12' },
+  // Photographed receipts (receipt-watch). Personal: every read is scoped to the photographer, and a
+  // linked charge is read through the read path. Each GET is swept by X1 as every viewer; the writes
+  // copy a photo onto a transaction only under the note lock, which receipt-watch.test.ts pins.
+  { file: 'app/api/v1/receipts/[id]/candidates/route.ts', classes: ['text-bearing'], scenario: 'X1' },
+  { file: 'app/api/v1/receipts/[id]/image/route.ts', classes: ['text-bearing'], scenario: 'X1' },
+  { file: 'app/api/v1/receipts/[id]/route.ts', classes: ['guarded-write'], scenario: 'R1' },
+  { file: 'app/api/v1/receipts/route.ts', classes: ['text-bearing'], scenario: 'X1' },
   { file: 'app/api/v1/rules/route.ts', classes: ['guarded-write'], scenario: 'X12' },
   // Counts and account names only (S23); the run's figures, never a row.
   { file: 'app/api/v1/sync/route.ts', classes: ['numeric-only'] },
@@ -114,6 +121,7 @@ export const PAGES: Surface[] = [
   { file: 'app/profit-loss/page.tsx', classes: ['numeric-only'] },
   { file: 'app/properties/[id]/page.tsx', classes: ['text-bearing'], scenario: 'H2' },
   { file: 'app/properties/page.tsx', classes: ['numeric-only'] },
+  { file: 'app/receipts/page.tsx', classes: ['text-bearing'], scenario: 'H2' },
   { file: 'app/rules/page.tsx', classes: ['text-bearing'], scenario: 'H6' },
   { file: 'app/sandbox/page.tsx', classes: ['numeric-only'] },
   { file: 'app/transactions/page.tsx', classes: ['text-bearing'], scenario: 'H2' },

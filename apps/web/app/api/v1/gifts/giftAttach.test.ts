@@ -50,6 +50,10 @@ import { GET as overview } from '../overview/route';
 import { GET as drill } from '../transactions/route';
 import { DELETE as deleteTxn, GET as detail, PATCH as patchTxn } from '../transactions/[id]/route';
 import { GET as counterparts } from '../transactions/[id]/counterparts/route';
+import { GET as txReceipt } from '../transactions/[id]/receipt/route';
+import { GET as listReceipts } from '../receipts/route';
+import { GET as receiptImage } from '../receipts/[id]/image/route';
+import { GET as receiptCandidates } from '../receipts/[id]/candidates/route';
 import { POST as postRule } from '../rules/route';
 import { POST as applyRules } from '../rules/apply/route';
 import RulesPage from '../../../rules/page';
@@ -199,6 +203,19 @@ describe('attach links exactly as the sync does', () => {
     expect(link.rows).toEqual([{ gift_id: g1, prior_mapped_category: OTHER_CATEGORY, prior_rule_applied: true }]);
     expect(await rowState(ra)).toEqual({ mapped_category: GIFT_CATEGORY, rule_applied: false, gift_id: g1 });
 
+    // Receipts around the held row. The giver's photo of it carries the canary in its bytes, both as
+    // the transaction's receipt and as a capture. The recipient has a capture linked to it (its title
+    // must come through the read path as Gift) and one waiting on its day (which must not offer it).
+    const canaryJpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from('ZQ41CATTA photo')]);
+    await db.query(`INSERT INTO transaction_receipts (transaction_id, content_type, image) VALUES ($1, 'image/jpeg', $2)`, [ra, canaryJpeg]);
+    const capture = async (by: number, extra: string, args: unknown[]) => (await db.query<{ id: number }>(
+      `INSERT INTO receipt_captures (captured_by, captured_on, content_type, image, expected_amount, state${extra ? ', ' + extra : ''})
+       VALUES ($1, $2::date, 'image/jpeg', $3, 1, ${extra ? "'matched', $4, $5" : "'waiting'"}) RETURNING id`,
+      [by, today, ...args])).rows[0].id;
+    const giverCapture = await capture(w.owner.userId, '', [canaryJpeg]);
+    await capture(w.two.userId, 'transaction_id, charged_amount', [Buffer.from([0xff, 0xd8, 0xff]), ra, '23.07']);
+    const recipientWaiting = await capture(w.two.userId, '', [Buffer.from([0xff, 0xd8, 0xff])]);
+
     // Every text-bearing GET route in the registry, as every non-giver: no canary of the row.
     const token = await readToken(w.two);
     const probes: Record<string, (who: Who) => Promise<Response>> = {
@@ -209,6 +226,10 @@ describe('attach links exactly as the sync does', () => {
       'app/api/v1/gifts/route.ts': (who) => listGifts(req('/api/v1/gifts', who)),
       'app/api/v1/gifts/[id]/route.ts': (who) => getGift(req(`/api/v1/gifts/${g1}`, who), params(g1)),
       'app/api/v1/gifts/[id]/candidates/route.ts': (who) => giftCandidates(req(`/api/v1/gifts/${g2}/candidates`, who), params(g2)),
+      'app/api/v1/transactions/[id]/receipt/route.ts': (who) => txReceipt(req(`/api/v1/transactions/${ra}/receipt`, who), params(ra)),
+      'app/api/v1/receipts/route.ts': (who) => listReceipts(req('/api/v1/receipts', who)),
+      'app/api/v1/receipts/[id]/image/route.ts': (who) => receiptImage(req(`/api/v1/receipts/${giverCapture}/image`, who), params(giverCapture)),
+      'app/api/v1/receipts/[id]/candidates/route.ts': (who) => receiptCandidates(req(`/api/v1/receipts/${recipientWaiting}/candidates`, who), params(recipientWaiting)),
     };
     const textGets: string[] = [];
     for (const route of ROUTES.filter((x) => x.classes.includes('text-bearing'))) {

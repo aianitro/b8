@@ -70,6 +70,8 @@ export async function designate(categoryId: number | null): Promise<void> {
 /** Everything this suite writes outside the auth tables, removed. Safe to call twice. */
 export async function clearOwn(): Promise<void> {
   await db.query('TRUNCATE gift_transactions, gifts');
+  // Receipt captures point at users, which resetAuth removes; the scratch database holds no others.
+  await db.query('TRUNCATE receipt_captures');
   await db.query(`DELETE FROM agent_proposals WHERE subject_id IN (SELECT id FROM transactions WHERE account_id LIKE 'zq41b%')`);
   await db.query(`DELETE FROM transactions WHERE account_id LIKE 'zq41b%'`);
   await db.query(`DELETE FROM transaction_tombstones WHERE plaid_transaction_id LIKE 'zq41b%'`);

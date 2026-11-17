@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { runSync } from '@/lib/sync';
 import { suggestCategories } from '@/lib/categorySuggester';
+import { watchReceipts } from '@/lib/receiptCaptureStore';
 import type { ApiResponse } from '@b8/contracts/types';
 import { createLogger } from '@/lib/logger';
 
@@ -19,6 +20,9 @@ export async function POST(req: NextRequest) {
     // the promise finishes after the response; `suggestCategories` never rejects. Not `after()`,
     // which throws outside a live request scope — every route test calls this handler directly.
     void suggestCategories();
+    // The charges for photographed receipts, among whatever just posted (lib/receiptCaptureStore.ts).
+    // Not awaited for the same reason, and it resolves always.
+    void watchReceipts();
 
     if (result.errors.length > 0 && result.synced === 0) {
       return Response.json(

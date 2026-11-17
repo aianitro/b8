@@ -1269,3 +1269,38 @@ CREATE TABLE IF NOT EXISTS gift_transactions (
 );
 
 CREATE INDEX IF NOT EXISTS gift_transactions_gift ON gift_transactions (gift_id);
+
+-- A receipt photographed before its charge exists, and the watch for that charge
+-- (migrations/1792600000000_receipt-captures.sql has the argument). The owner confirms the charge
+-- they expect; each sync looks for it. Exactly that amount links it and copies the photo to
+-- transaction_receipts; the merchant's charge for a different amount is an alert; nothing in seven
+-- days is an alert. Personal: only captured_by sees a capture, its alert and its push.
+CREATE TABLE IF NOT EXISTS receipt_captures (
+  id              SERIAL PRIMARY KEY,
+  captured_by     INTEGER NOT NULL REFERENCES users(id),  -- no ON DELETE: users rows are never deleted
+  captured_on     DATE NOT NULL,                          -- the phone's calendar day; the match window counts from it
+  captured_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  content_type    TEXT NOT NULL
+                    CONSTRAINT receipt_captures_content_type CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+  image           BYTEA NOT NULL
+                    CONSTRAINT receipt_captures_image_size CHECK (octet_length(image) BETWEEN 1 AND 4194304),
+  merchant        TEXT                                    -- as read, or as corrected
+                    CONSTRAINT receipt_captures_merchant_length CHECK (merchant IS NULL OR char_length(merchant) BETWEEN 1 AND 200),
+  read_total      NUMERIC(12, 2)                          -- what the model read; NULL when nothing could be
+                    CONSTRAINT receipt_captures_read_total_positive CHECK (read_total IS NULL OR read_total > 0),
+  expected_amount NUMERIC(12, 2)                          -- confirmed by the owner; positive is money out
+                    CONSTRAINT receipt_captures_expected_positive CHECK (expected_amount IS NULL OR expected_amount > 0),
+  state           TEXT NOT NULL DEFAULT 'draft'           -- draft, waiting, matched, mismatch, overdue, closed
+                    CONSTRAINT receipt_captures_state_check
+                      CHECK (state IN ('draft', 'waiting', 'matched', 'mismatch', 'overdue', 'closed')),
+  state_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  transaction_id  INTEGER UNIQUE REFERENCES transactions(id) ON DELETE SET NULL,  -- one capture per charge
+  charged_amount  NUMERIC(12, 2),                         -- the posted amount when linked
+  rejected_ids    INTEGER[] NOT NULL DEFAULT '{}',        -- charges the owner said were not this one
+  CONSTRAINT receipt_captures_confirmed_has_amount CHECK (state = 'draft' OR expected_amount IS NOT NULL),
+  CONSTRAINT receipt_captures_link_has_charge CHECK (transaction_id IS NULL OR charged_amount IS NOT NULL),
+  CONSTRAINT receipt_captures_linked_states_charged CHECK (state NOT IN ('matched', 'mismatch') OR charged_amount IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS receipt_captures_waiting ON receipt_captures (captured_on) WHERE state = 'waiting';
+CREATE INDEX IF NOT EXISTS receipt_captures_by_person ON receipt_captures (captured_by, captured_at DESC);
