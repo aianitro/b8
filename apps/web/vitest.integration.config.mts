@@ -58,6 +58,8 @@ export default defineConfig({
       'app/api/v1/**/*.test.ts', 'proxy.test.ts', 'scripts/backfill-enrichment.test.ts',
       'scripts/rekey-plaid-ids.test.ts', 'scripts/findings-freshness-read.test.ts',
       'scripts/findings-digest-read.test.ts',
+      // P8-42a: the loyalty import against Postgres, by exact path for the reason above.
+      'scripts/import-loyalty.test.ts',
     ],
     // Two setup files, in this order and for two unrelated reasons. The guard is the control
     // described above and must stay first — it refuses before any pool exists. The second installs

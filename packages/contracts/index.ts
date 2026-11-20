@@ -61,6 +61,7 @@ export * from './envelope';
 // P7-41b. A per-route request/response surface, unlike the five above, and therefore NOT in
 // CONTRACT_SCHEMAS: none of its schemas stands against an export of types.ts.
 export * from './gifts';
+export * from './loyalty';
 
 /**
  * Every non-envelope export of shared/types.ts, keyed by the exact name that file exports.

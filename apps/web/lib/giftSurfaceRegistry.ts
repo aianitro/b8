@@ -69,6 +69,21 @@ export const ROUTES: Surface[] = [
   { file: 'app/api/v1/gifts/[id]/route.ts', classes: ['text-bearing'], scenario: 'G2' },
   { file: 'app/api/v1/gifts/route.ts', classes: ['text-bearing'], scenario: 'G2' },
   { file: 'app/api/v1/import/csv/route.ts', classes: ['numeric-only'] },
+  // Loyalty (P8-42a): members, programs, memberships, balance readings and instruments. A domain of
+  // its own beside the ledger — nothing in it reads transactions (SPEC.md S2–S8), so it can carry no
+  // row text. The member-number route returns a full number to a browser session, which is a
+  // different secret from a gift's and is pinned by its own scenario (C4), not by this registry.
+  { file: 'app/api/v1/loyalty/instruments/[id]/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/instruments/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/members/[id]/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/members/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/memberships/[id]/member-number/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/memberships/[id]/observations/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/memberships/[id]/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/memberships/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/programs/[id]/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/programs/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/overview/route.ts', classes: ['text-bearing'], scenario: 'X1' },
   { file: 'app/api/v1/plaid/create-link-token/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/plaid/exchange-token/route.ts', classes: ['no-transaction-data'] },
@@ -125,6 +140,8 @@ export const PAGES: Surface[] = [
   { file: 'app/rules/page.tsx', classes: ['text-bearing'], scenario: 'H6' },
   { file: 'app/sandbox/page.tsx', classes: ['numeric-only'] },
   { file: 'app/transactions/page.tsx', classes: ['text-bearing'], scenario: 'H2' },
+  // Nights & Miles (P8-42a): loyalty balances and masked member numbers; no ledger row at all (H11).
+  { file: 'app/travel/page.tsx', classes: ['no-transaction-data'] },
 ];
 
 /**

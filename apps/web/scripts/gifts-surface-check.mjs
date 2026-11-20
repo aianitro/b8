@@ -7,6 +7,9 @@
 // It prints one line per step, `H<n> PASS <what was observed>`, then `OK H1-H10`. The first failing
 // step prints `H<n> FAIL <observed>` and the script exits non-zero after cleaning up.
 //
+// P8-42a added H11 (the loyalty page and overview, SPEC.md S10 of P8-42a-loyalty-model-page-import),
+// so the final success line is now `OK H1-H11`.
+//
 // ─── Why it needs its own database ────────────────────────────────────────────────────────────
 //
 // It makes its OWN scratch database, `b8_gifts_check`, by that hard-coded name. It never reads
@@ -86,6 +89,7 @@ const PAGES = {
   'app/rules/page.tsx': { cls: 'text-bearing', url: () => '/rules' },
   'app/sandbox/page.tsx': { cls: 'numeric-only', url: () => '/sandbox' },
   'app/transactions/page.tsx': { cls: 'text-bearing', url: () => '/transactions' },
+  'app/travel/page.tsx': { cls: 'no-transaction-data', url: () => '/travel' },
 };
 
 /** The pages H3 and H4 expect the held row's label on. */
@@ -324,7 +328,34 @@ try {
   check('H10', [giverGifts, recipientGifts].every((h) => h.includes('href="/gifts"')), 'the nav entry is missing for someone');
   pass('H10', `giver's /gifts lists the gift and its criterion; recipient's lists none and holds no criterion; the Gifts nav entry is present for both`);
 
-  console.log('OK H1-H10');
+  // ── H11 ── (P8-42a) The loyalty page and overview carry a member number masked, for both people.
+  // One member, one membership on the first catalog program whose number is an 18-character canary,
+  // and one reading. The visible suffix (the mask's last four) must be there — proving the line
+  // rendered at all — and the canary itself, in any case, must not: not in the HTML, not in the
+  // inlined flight data, not in the JSON.
+  current = 'H11';
+  const NUMBER_CANARY = 'ZQ42ANUMCANARY9876';
+  psql(`
+    INSERT INTO household_members (display_name) VALUES ('ZQ42A Surface Member');
+    INSERT INTO loyalty_memberships (member_id, program_id, member_number)
+      VALUES ((SELECT id FROM household_members WHERE display_name = 'ZQ42A Surface Member'),
+              (SELECT id FROM loyalty_programs ORDER BY id LIMIT 1), '${NUMBER_CANARY}');
+    INSERT INTO loyalty_observations (membership_id, as_of, balance, unit, source)
+      VALUES ((SELECT max(id) FROM loyalty_memberships), CURRENT_DATE, 1200, 'points', 'typed');`);
+  for (const [who, token] of [['owner', w.owner], ['second user', w.two]]) {
+    const page = await get('/travel', token);
+    check('H11', page.status === 200, `/travel as the ${who} answered ${page.status}`);
+    check('H11', page.text.includes('Nights & Miles') || page.text.includes('Nights &amp; Miles'), `/travel as the ${who} lacks its label`);
+    check('H11', page.text.includes('9876'), `/travel as the ${who} lacks the masked suffix`);
+    check('H11', !holds(page.text, NUMBER_CANARY), `/travel as the ${who} holds the full member number`);
+    const api = await get('/api/v1/loyalty', token);
+    check('H11', api.status === 200, `/api/v1/loyalty as the ${who} answered ${api.status}`);
+    check('H11', api.text.includes('9876'), `/api/v1/loyalty as the ${who} lacks the masked suffix`);
+    check('H11', !holds(api.text, NUMBER_CANARY), `/api/v1/loyalty as the ${who} holds the full member number`);
+  }
+  pass('H11', `/travel and /api/v1/loyalty as both users: 200, label and masked suffix present, the 18-character number absent in any case`);
+
+  console.log('OK H1-H11');
 } catch (error) {
   exitCode = 1;
   if (error instanceof StepFailure) console.log(`${error.step} FAIL ${error.message}`);

@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ArrowLeftRight, Building2, FlaskConical, Gift, Home, LayoutDashboard, Menu, PieChart, Sparkles, Tag, TrendingUp, Wallet, X, Zap, ReceiptText } from 'lucide-react';
+// A line of its own rather than an edit of the one above: this change only adds to the file.
+import { Plane } from 'lucide-react';
 import type { Me } from '@b8/contracts/auth';
 import { mayInvite } from '@/lib/invitationLink';
 import InviteControl from './InviteControl';
@@ -18,6 +20,9 @@ const NAV = [
   { href: '/transactions', label: 'Transactions',  icon: ArrowLeftRight },
   { href: '/net-worth',    label: 'Net Worth',     icon: Wallet },
   { href: '/properties',   label: 'Properties',    icon: Home },
+  // P8-42a. Loyalty balances sit beside the household's other holdings but are never money in the
+  // ledger's sense, so the page is its own entry rather than a section of Net Worth or Accounts.
+  { href: '/travel',       label: 'Nights & Miles', icon: Plane },
   // P7-41b. A constant entry, the same for both people whether or not either has marked a gift: a
   // badge or a count here would tell the recipient a gift exists.
   { href: '/gifts',        label: 'Gifts',         icon: Gift },

@@ -1304,3 +1304,155 @@ CREATE TABLE IF NOT EXISTS receipt_captures (
 
 CREATE INDEX IF NOT EXISTS receipt_captures_waiting ON receipt_captures (captured_on) WHERE state = 'waiting';
 CREATE INDEX IF NOT EXISTS receipt_captures_by_person ON receipt_captures (captured_by, captured_at DESC);
+
+-- ─── Loyalty (migrations/1792700000000_loyalty.sql has the argument; step 42a) ───────────────
+-- A domain of its own beside the ledger, like properties: nothing in accounts, account_valuations
+-- or net worth reads these tables, and no loyalty figure is ever summed into money. The catalog
+-- seed (program names and aliases, public facts only) lives in the migration, not here.
+-- Written as plain CREATE TABLE rather than IF NOT EXISTS so each reads as "CREATE TABLE <name> ",
+-- the form the task's acceptance command looks for.
+--
+-- NO "CURRENT" COLUMN. A membership's current balance is derived on read from loyalty_observations:
+-- greatest as_of, then greatest recorded_at, then greatest id, through the shared reducer in
+-- apps/web/lib/domain/observations.ts. Never newest-by-arrival, never stored. No observation means
+-- no current balance: NULL, rendered "—", never 0.
+--
+-- A person who can hold a membership. user_id NULL = not a b8 user (no access to anything); UNIQUE,
+-- one member per user. Names unique ignoring case, because the import resolves a member by a
+-- case-folded label suffix.
+CREATE TABLE household_members (
+  id            SERIAL PRIMARY KEY,
+  display_name  TEXT NOT NULL                             -- stored trimmed
+                  CONSTRAINT household_members_display_name_trimmed CHECK (
+                    display_name = btrim(display_name, E' \t\n\r\f\x0B')
+                    AND char_length(display_name) BETWEEN 1 AND 100),
+  user_id       INTEGER UNIQUE REFERENCES users(id),    -- no ON DELETE: users rows are never deleted
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS household_members_display_name_ci ON household_members (lower(display_name));
+
+-- The program catalog. default_unit is only what an unlabelled balance takes; each observation
+-- carries its own unit. The import never creates a program.
+CREATE TABLE loyalty_programs (
+  id            SERIAL PRIMARY KEY,
+  name          TEXT NOT NULL
+                  CONSTRAINT loyalty_programs_name_trimmed CHECK (
+                    name = btrim(name, E' \t\n\r\f\x0B')
+                    AND char_length(name) BETWEEN 1 AND 200),
+  kind          TEXT NOT NULL
+                  CONSTRAINT loyalty_programs_kind_check
+                    CHECK (kind IN ('airline', 'hotel', 'card_currency', 'travel_cash', 'car', 'other')),
+  default_unit  TEXT NOT NULL
+                  CONSTRAINT loyalty_programs_default_unit_check
+                    CHECK (default_unit IN ('points', 'miles', 'nights', 'usd')),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- The names a program is known by, stored ALREADY NORMALISED (trim; drop leading non-letters and
+-- non-digits; remove parenthesised groups; case-fold; collapse whitespace; trim), because the import
+-- matches a sheet label against them by exact equality and never fuzzily. UNIQUE across the whole
+-- table: an alias can never name two programs. The CHECK refuses what normalisation cannot produce;
+-- the leading-symbol rule is the application's alone.
+CREATE TABLE loyalty_program_aliases (
+  id          SERIAL PRIMARY KEY,
+  program_id  INTEGER NOT NULL REFERENCES loyalty_programs(id) ON DELETE CASCADE,
+  alias       TEXT NOT NULL
+                CONSTRAINT loyalty_program_aliases_alias_key UNIQUE
+                CONSTRAINT loyalty_program_aliases_normalised CHECK (
+                  char_length(alias) BETWEEN 1 AND 200
+                  AND alias = btrim(alias)
+                  AND alias = lower(alias)
+                  AND position('  ' IN alias) = 0
+                  AND alias !~ '[\t\n\r\f\v ]'
+                  AND alias !~ '\(.*\)')
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_program_aliases_program ON loyalty_program_aliases (program_id);
+
+-- One member in one program; one row per pair (a duplicate is the route's 409, never a 500).
+--   member_number   — FULL value, stored trimmed; emitted MASKED everywhere except the one copy
+--                     route for a browser session. Never logged. NULL = none known (never '' or '-').
+--   tier            — free text as the program names it; NULL = not known.
+--   card_account_id — reserved for step 42b, always NULL in 42a; nothing sets or emits it.
+CREATE TABLE loyalty_memberships (
+  id               SERIAL PRIMARY KEY,
+  member_id        INTEGER NOT NULL REFERENCES household_members(id),   -- no ON DELETE: nothing deletes members
+  program_id       INTEGER NOT NULL REFERENCES loyalty_programs(id),    -- no ON DELETE: history must not cascade away
+  member_number    TEXT
+                     CONSTRAINT loyalty_memberships_member_number_trimmed CHECK (
+                       member_number IS NULL
+                       OR (member_number = btrim(member_number, E' \t\n\r\f\x0B')
+                           AND char_length(member_number) BETWEEN 1 AND 64)),
+  tier             TEXT
+                     CONSTRAINT loyalty_memberships_tier_trimmed CHECK (
+                       tier IS NULL
+                       OR (tier = btrim(tier, E' \t\n\r\f\x0B')
+                           AND char_length(tier) BETWEEN 1 AND 100)),
+  card_account_id  TEXT REFERENCES accounts(id) ON UPDATE CASCADE ON DELETE SET NULL,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT loyalty_memberships_member_program_key UNIQUE (member_id, program_id)
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_memberships_program ON loyalty_memberships (program_id);
+
+-- APPEND-ONLY balance readings: nothing updates or deletes a row; a correction is a newer row.
+--   as_of   — the calendar date the reading is true for; routes refuse one more than a day past
+--             CURRENT_DATE.
+--   balance — NUMERIC, never float, non-negative (zero is a real reading), under 13 integer digits.
+--             One spelling per value: whole units (points, miles, nights) at scale 0, usd at scale
+--             exactly 2, so balance::text is already the emitted form and nothing rounds it. No
+--             typmod, which would force two decimals onto points.
+--   source  — typed (the only one a request may send) · import · email (42c) · screenshot (42d).
+--   recorded_at — arrival; the newest-wins order's SECOND key, never the first.
+CREATE TABLE loyalty_observations (
+  id             SERIAL PRIMARY KEY,
+  membership_id  INTEGER NOT NULL REFERENCES loyalty_memberships(id),  -- no ON DELETE: history is kept
+  as_of          DATE NOT NULL,
+  balance        NUMERIC NOT NULL
+                   CONSTRAINT loyalty_observations_balance_range CHECK (balance >= 0 AND balance < 1e12),
+  unit           TEXT NOT NULL
+                   CONSTRAINT loyalty_observations_unit_check
+                     CHECK (unit IN ('points', 'miles', 'nights', 'usd')),
+  source         TEXT NOT NULL
+                   CONSTRAINT loyalty_observations_source_check
+                     CHECK (source IN ('typed', 'import', 'email', 'screenshot')),
+  recorded_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT loyalty_observations_unit_scale CHECK (
+    (unit = 'usd' AND scale(balance) = 2)
+    OR (unit <> 'usd' AND scale(balance) = 0))
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_observations_newest
+  ON loyalty_observations (membership_id, as_of DESC, recorded_at DESC, id DESC);
+-- One imported reading per membership and date: keeps the import idempotent under any interleaving.
+CREATE UNIQUE INDEX IF NOT EXISTS loyalty_observations_one_import_per_day
+  ON loyalty_observations (membership_id, as_of) WHERE source = 'import';
+
+-- Certificates, companion fares, travel credits. Every date NULL = unknown; a NULL expiry sorts last.
+CREATE TABLE loyalty_instruments (
+  id             SERIAL PRIMARY KEY,
+  membership_id  INTEGER NOT NULL REFERENCES loyalty_memberships(id),
+  kind           TEXT NOT NULL
+                   CONSTRAINT loyalty_instruments_kind_check
+                     CHECK (kind IN ('free_night', 'companion_fare', 'travel_credit', 'other')),
+  description    TEXT NOT NULL                          -- not blank, at most 200 characters
+                   CONSTRAINT loyalty_instruments_description_length CHECK (
+                     char_length(btrim(description, E' \t\n\r\f\x0B')) >= 1
+                     AND char_length(description) <= 200),
+  issued_on      DATE,
+  expires_on     DATE,
+  used_on        DATE,
+  source         TEXT NOT NULL
+                   CONSTRAINT loyalty_instruments_source_check CHECK (source IN ('typed', 'import')),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT loyalty_instruments_expires_not_before_issued
+    CHECK (issued_on IS NULL OR expires_on IS NULL OR expires_on >= issued_on),
+  CONSTRAINT loyalty_instruments_used_not_before_issued
+    CHECK (issued_on IS NULL OR used_on IS NULL OR used_on >= issued_on)
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_instruments_membership ON loyalty_instruments (membership_id);
+-- One imported instrument per membership: a second import run creates none.
+CREATE UNIQUE INDEX IF NOT EXISTS loyalty_instruments_one_import
+  ON loyalty_instruments (membership_id) WHERE source = 'import';
