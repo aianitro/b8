@@ -7,6 +7,14 @@
 // A MEMBERSHIP WITH NO READING SHOWS "—", never 0. `formatBalance` returns the dash for a null
 // balance, and the branch below states it once more where the balance is drawn, so a refactor that
 // dropped the helper could not quietly start printing a zero.
+//
+// AN EMPTY SAVE ON THE MEMBER NUMBER CHANGES NOTHING (P8-42a2). That editor starts empty, because the
+// page holds only the mask, so a Save with nothing typed is almost always "I tapped it by accident",
+// not "erase the number" — and an erased number is not restored by a re-import, which never updates
+// an existing membership. The guard lives in the `onSave` callback itself, not in a disabled button,
+// because the Enter key submits the form without touching the button. Removing a number is a
+// separate "Remove number" control with a confirming second tap; its Confirm handler is the only
+// place on the page that sends `memberNumber` as null.
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -27,6 +35,10 @@ const SOURCE_BADGE: Record<LoyaltyObservationSource, { label: string; cls: strin
 export default function LoyaltyMembershipLine({ m, defaultUnit }: { m: LoyaltyMembership; defaultUnit: LoyaltyUnit }) {
   const router = useRouter();
   const [entering, setEntering] = useState(false);
+  // The "Remove number" control's two steps: a first tap only asks; Confirm sends.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   /** A PATCH, then a server re-read; the refusal message for the inline editor otherwise. */
   async function patch(path: string, body: unknown): Promise<string | null> {
@@ -37,6 +49,20 @@ export default function LoyaltyMembershipLine({ m, defaultUnit }: { m: LoyaltyMe
   }
 
   const blankIsNull = (text: string) => (text.trim() === '' ? null : text);
+
+  /**
+   * The confirmed removal — the ONLY sender of a null member number. Attached to Confirm, never to
+   * "Remove number" itself, so one tap cannot erase anything. The confirmation is closed on success
+   * explicitly: `router.refresh()` keeps client state, and the control disappears with the number.
+   */
+  async function removeNumber() {
+    setRemoving(true);
+    setRemoveError(null);
+    const message = await patch(`/api/v1/loyalty/memberships/${m.id}`, { memberNumber: null });
+    setRemoving(false);
+    if (message === null) setConfirmingRemove(false);
+    else setRemoveError(message);
+  }
 
   return (
     <li className="py-3 border-b border-gray-100 last:border-0">
@@ -80,10 +106,41 @@ export default function LoyaltyMembershipLine({ m, defaultUnit }: { m: LoyaltyMe
             label="member number"
             startEmpty
             mono
-            onSave={(t) => patch(`/api/v1/loyalty/memberships/${m.id}`, { memberNumber: blankIsNull(t) })}
+            onSave={(t) => (t.trim() === '' ? Promise.resolve(null) : patch(`/api/v1/loyalty/memberships/${m.id}`, { memberNumber: t }))}
           />
           {m.memberNumberMasked !== null && <LoyaltyCopyNumber membershipId={m.id} />}
         </span>
+        {m.memberNumberMasked !== null && (confirmingRemove ? (
+          <span className="inline-flex flex-wrap items-center gap-1 text-gray-500">
+            <span>Remove this number?</span>
+            <button
+              type="button"
+              onClick={removeNumber}
+              disabled={removing}
+              aria-label="Confirm removing the member number"
+              className="min-h-8 px-2 rounded font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              {removing ? 'Removing…' : 'Confirm'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setConfirmingRemove(false); setRemoveError(null); }}
+              disabled={removing}
+              className="min-h-8 px-2 rounded hover:bg-gray-100 disabled:opacity-50"
+            >
+              Keep
+            </button>
+            {removeError && <span className="basis-full text-red-500 text-sm">{removeError}</span>}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirmingRemove(true)}
+            className="min-h-8 px-2 rounded text-red-400 hover:text-red-600 hover:bg-gray-100"
+          >
+            Remove number
+          </button>
+        ))}
       </div>
       {entering && (
         <LoyaltyBalanceEditor membershipId={m.id} unit={m.unit ?? defaultUnit} onClose={() => setEntering(false)} />

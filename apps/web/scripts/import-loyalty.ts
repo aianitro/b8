@@ -40,6 +40,18 @@
  * `deps.err` only, after `rekey-plaid-ids.ts`, so the test captures everything the script says.
  * Exit codes: 0 success, 1 any refused row or a failed run, 2 a usage or file-level refusal.
  *
+ * A FAILED RUN NAMES ITS CLASS, AND NOTHING ELSE (P8-42a2). After "import could not run; nothing was
+ * changed" comes one line `code=<CODE>`: the database's SQLSTATE (`42P01`) or the driver's errno
+ * name (`ECONNREFUSED`), so the operator can tell a missing migration from a stopped server. Never
+ * the message, detail, hint or stack — those can quote the row a statement refused. A code of any
+ * other shape prints as `unknown`, because a string the driver chose could itself carry data.
+ *
+ * THE --as-of DATE MAY NOT BE MORE THAN A DAY AHEAD of Postgres's CURRENT_DATE — the same rule, and
+ * the same one-day slack, as a reading typed through the API (`lib/loyaltyStore.ts`). A typo year
+ * far in the future would otherwise make every imported reading current ahead of everything typed
+ * since. Postgres computes the bound, in dry run and with `--apply` alike, so the answer does not
+ * move with this machine's clock or time zone. There is no lower bound: an old sheet is fine.
+ *
  * It imports no network client, and deliberately not the shared helper module of the Plaid
  * scripts, which pulls in the Plaid client's types; it carries its own small usage error instead.
  */
@@ -211,6 +223,23 @@ async function performWrites(query: Query, plan: ImportPlan, asOf: string): Prom
   }
 }
 
+/**
+ * The failure class of a thrown value, or `unknown`. Only a SQLSTATE (five digits and capitals) or an
+ * errno-style name passes; anything else — no code, a number, a sentence, a thrown string or null —
+ * is not printed, because only those two shapes are known to carry no data.
+ */
+export function failureCode(thrown: unknown): string {
+  const code = typeof thrown === 'object' && thrown !== null ? (thrown as { code?: unknown }).code : undefined;
+  if (typeof code !== 'string') return 'unknown';
+  return /^[0-9A-Z]{5}$/.test(code) || /^E[A-Z0-9_]{1,31}$/.test(code) ? code : 'unknown';
+}
+
+/** The two lines of a run that could not complete. Every path that reports a failed run uses this. */
+export function reportFailure(err: (line: string) => void, thrown: unknown): void {
+  err('import could not run; nothing was changed');
+  err(`code=${failureCode(thrown)}`);
+}
+
 const FILE_REFUSAL: Record<string, string> = {
   'malformed': 'the file is not a readable CSV (an unterminated quote, or no header row)',
   'label-header': 'the first column must have an empty header (it holds the row labels)',
@@ -248,6 +277,23 @@ export async function main(
     return { exitCode: 2, plan: null };
   }
 
+  // The --as-of bound, read from the database before anything else is: a refused date never reaches
+  // the plan or a transaction. A failure to read it is a failed run (exit 1 with its code), not a
+  // refusal — the date may be fine and the server down.
+  let future: boolean;
+  try {
+    const r = await deps.db.query<{ future: boolean }>('SELECT $1::date > CURRENT_DATE + 1 AS future', [args.asOf]);
+    future = r.rows[0].future === true;
+  } catch (thrown) {
+    reportFailure(deps.err, thrown);
+    return { exitCode: 1, plan: null };
+  }
+  if (future) {
+    // No date in the message: neither the one given nor the database's.
+    deps.err('refusing --as-of: it is more than a day after the database\'s current date; nothing was changed');
+    return { exitCode: 2, plan: null };
+  }
+
   let plan: ImportPlan;
   try {
     if (!args.apply) {
@@ -270,9 +316,11 @@ export async function main(
         client.release();
       }
     }
-  } catch {
-    // No error object is printed: a database error's detail can quote the row it refused.
-    deps.err('import could not run; nothing was changed');
+  } catch (thrown) {
+    // Only the error's class is printed: a database error's detail can quote the row it refused.
+    // Under --apply the ROLLBACK above swallowed its own failure and rethrew the original error, so
+    // the code printed is the statement's, not the rollback's.
+    reportFailure(deps.err, thrown);
     return { exitCode: 1, plan: null };
   }
 
@@ -298,8 +346,8 @@ if (isEntryPoint()) {
       await db.end().catch(() => {});
       process.exit(exitCode);
     })
-    .catch(async () => {
-      console.error('import could not run; nothing was changed');
+    .catch(async (thrown: unknown) => {
+      reportFailure((line) => console.error(line), thrown);
       await db.end().catch(() => {});
       process.exit(1);
     });

@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url';
 import db from '@/lib/db';
 import { membershipView } from '@/lib/loyaltyStore';
 import { defaultDeps, isEntryPoint, main } from './import-loyalty';
+import { Pool } from 'pg';
+import type { ImportDb } from './import-loyalty';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const FIX = join(HERE, 'fixtures');
@@ -322,5 +324,179 @@ describe('the loyalty import (P8-42a)', () => {
     expect(spaced.exitCode).toBe(0);
     expect(await counts()).toEqual([12, 7, 3]);
     expect(await n('SELECT count(*) FROM household_members')).toBe(members);
+  });
+});
+
+// ─── P8-42a2: the --as-of bound and the failure class (T42a2-I1–I3) ─────────────────────────────
+//
+// Dates come from this suite's own database (`CURRENT_DATE + n`), never the JS clock, so the bound
+// is tested as Postgres sees it. Failures are driven two ways: stub errors of every shape (I2), and
+// real `pg` errors from a missing table and a closed port (I3). The canary `ZQ42A-NUM-0001-ZZ` is
+// put in every message, detail, hint and stack, and must appear nowhere in what the script prints.
+
+const FAILED = 'import could not run; nothing was changed';
+const CANARY = 'ZQ42A-NUM-0001-ZZ';
+const CLOSED_PORT = 'postgresql://nobody@127.0.0.1:1/x';
+
+type Captured = { exitCode: number; out: string[]; err: string[] };
+/** `main` with a substitute `deps.db`; everything printed is captured, as in `run`. */
+async function runWith(dbDep: ImportDb, ...argv: string[]): Promise<Captured> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const { exitCode } = await main(argv, {}, { ...defaultDeps, db: dbDep, out: (l) => out.push(l), err: (l) => err.push(l) });
+  return { exitCode, out, err };
+}
+const goodArgs = (asOf: string, ...extra: string[]) => ['--file', GOOD, '--as-of', asOf, '--default-member', 'zq42aanna', ...extra];
+const dayAhead = async (days: number) => (await db.query<{ d: string }>(`SELECT (CURRENT_DATE + ${days})::text AS d`)).rows[0].d;
+
+/** The real database, with every query text first passed through `rewrite` and recorded. */
+function forwardingDb(texts: string[], rewrite: (t: string) => string = (t) => t): ImportDb {
+  return {
+    query: (t: string, v?: unknown[]) => { texts.push(t); return db.query(rewrite(t), v); },
+    connect: async () => {
+      const client = await db.connect();
+      return {
+        query: (t: string, v?: unknown[]) => { texts.push(t); return client.query(rewrite(t), v); },
+        release: () => client.release(),
+      };
+    },
+  } as unknown as ImportDb;
+}
+
+/**
+ * A database whose first query on `deps.db` rejects with `thrown` (`at: 'bound'`), or which answers
+ * the bound and rejects the first query after it — readState's in a dry run, the transaction's
+ * BEGIN under --apply (`at: 'after'`). Everything after the rejection resolves empty.
+ */
+function failingDb(thrown: unknown, at: 'bound' | 'after'): ImportDb {
+  let calls = 0;
+  const next = () => {
+    calls++;
+    const fail = at === 'bound' ? calls === 1 : calls === 2;
+    if (fail) return Promise.reject(thrown);
+    return Promise.resolve({ rows: calls === 1 ? [{ future: false }] : [], rowCount: 0 });
+  };
+  return { query: next, connect: async () => ({ query: next, release: () => {} }) } as unknown as ImportDb;
+}
+
+describe('the loyalty import follow-ups (P8-42a2)', () => {
+  it('T42a2-I1: --as-of is refused after CURRENT_DATE + 1, by Postgres, in both modes, with nothing written or echoed', async () => {
+    const struct = await structure();
+    for (const bad of [await dayAhead(2), await dayAhead(3), '2999-01-01']) {
+      for (const mode of [[], ['--apply']]) {
+        const r = await run(...goodArgs(bad, ...mode));
+        expect(r.exitCode, `${bad} ${mode.join('')}`).toBe(2);
+        expect(r.out).toEqual([]);
+        expect(r.err.length).toBeGreaterThan(0);
+        const text = r.err.join('\n');
+        expect(/zq42a/i.test(text)).toBe(false);
+        expect(text).not.toMatch(/\d{4}/);
+        expect(text.includes(bad)).toBe(false);
+        expect(await counts()).toEqual([0, 0, 0]);
+        expect(await structure()).toEqual(struct);
+      }
+    }
+    for (const ok of [await dayAhead(0), await dayAhead(1)]) {
+      const dry = await run(...goodArgs(ok));
+      expect(dry.exitCode, ok).toBe(0);
+      expect(dry.out).toHaveLength(20);
+      for (const l of dry.out) expect(l).toMatch(LINE);
+      expect(dry.values).toMatchObject({ mode: 'dry-run', memberships_created: '12', observations_created: '7', instruments_created: '3' });
+      expect(dry.err).toEqual([]);
+      expect(await counts()).toEqual([0, 0, 0]);
+    }
+    const applied = await run(...goodArgs(await dayAhead(1), '--apply'));
+    expect(applied.exitCode).toBe(0);
+    expect(applied.err).toEqual([]);
+    expect(await counts()).toEqual([12, 7, 3]);
+    expect(await n('SELECT count(*) FROM loyalty_observations WHERE as_of = CURRENT_DATE + 1')).toBe(7);
+    await reset();
+    // No lower bound: an old sheet is fine.
+    const past = await run(...goodArgs('2000-01-01'));
+    expect(past.exitCode).toBe(0);
+    expect(past.err).toEqual([]);
+    // The bound comes from the database: the script asked a query naming CURRENT_DATE, in both modes.
+    for (const mode of [[], ['--apply']]) {
+      await reset();
+      const texts: string[] = [];
+      const r = await runWith(forwardingDb(texts), ...goodArgs('2999-01-01', ...mode));
+      expect(r.exitCode).toBe(2);
+      expect(texts.some((t) => t.includes('CURRENT_DATE'))).toBe(true);
+      // Refused before the transaction: no BEGIN, no read of the loyalty tables.
+      expect(texts.some((t) => /BEGIN|loyalty_memberships/.test(t))).toBe(false);
+    }
+  });
+
+  it('T42a2-I2: a failed run prints the failure line and a shape-checked code, never any text of the error', async () => {
+    const withCode = (code: unknown) => Object.assign(new Error(`${CANARY} message`), { code });
+    const full = Object.assign(new Error(`${CANARY} message`), {
+      code: '42P01', detail: `${CANARY} detail`, hint: `${CANARY} hint`, stack: `${CANARY} stack`,
+    });
+    const cases: [string, unknown, string][] = [
+      ['sqlstate', full, '42P01'],
+      ['errno', withCode('ECONNREFUSED'), 'ECONNREFUSED'],
+      ['no code', new Error(`${CANARY} message`), 'unknown'],
+      ['text code', withCode('ZQ42A secret value here'), 'unknown'],
+      ['numeric code', withCode(42), 'unknown'],
+      ['thrown string', `${CANARY} thrown`, 'unknown'],
+      ['thrown null', null, 'unknown'],
+    ];
+    for (const [label, thrown, code] of cases) {
+      for (const at of ['bound', 'after'] as const) {
+        for (const mode of [[], ['--apply']]) {
+          const r = await runWith(failingDb(thrown, at), ...goodArgs(AS_OF, ...mode));
+          const where = `${label} ${at} ${mode.join('')}`;
+          expect(r.exitCode, where).toBe(1);
+          expect(r.out, where).toEqual([]);
+          expect(r.err, where).toEqual([FAILED, `code=${code}`]);
+          expect([...r.out, ...r.err].join('\n').includes(CANARY), where).toBe(false);
+          expect(/secret value/.test(r.err.join('\n')), where).toBe(false);
+        }
+      }
+    }
+    // The control: a healthy run says nothing on stderr.
+    const healthy = await good();
+    expect(healthy.exitCode).toBe(0);
+    expect(healthy.err).toEqual([]);
+  });
+
+  it('T42a2-I3: real driver errors give their real class and no text; a usage error stays a usage error', async () => {
+    const struct = await structure();
+    // (a) A real 42P01: the query is rewritten to name a table that does not exist.
+    for (const mode of [[], ['--apply']]) {
+      const texts: string[] = [];
+      const r = await runWith(forwardingDb(texts, (t) => t.replace(/household_members/g, 'zq42a_missing_table')), ...goodArgs(AS_OF, ...mode));
+      expect(r.exitCode).toBe(1);
+      expect(r.out).toEqual([]);
+      expect(r.err).toEqual([FAILED, 'code=42P01']);
+      const text = [...r.out, ...r.err].join('\n');
+      for (const word of ['zq42a_missing_table', 'relation', 'does not exist']) expect(text.includes(word), word).toBe(false);
+      expect(texts.some((t) => t.includes('household_members'))).toBe(true);
+      expect(await counts()).toEqual([0, 0, 0]);
+      expect(await structure()).toEqual(struct);
+    }
+    // (b)–(d) A closed port: nothing listens on 127.0.0.1:1, so the connection is refused at once.
+    const closed = new Pool({ connectionString: CLOSED_PORT });
+    closed.on('error', () => {});
+    try {
+      const closedDb = closed as unknown as ImportDb;
+      for (const mode of [[], ['--apply']]) {
+        for (const asOf of [AS_OF, '2999-01-01']) {
+          const r = await runWith(closedDb, ...goodArgs(asOf, ...mode));
+          // A database failure while reading the bound is a failed run (1), not a refusal (2).
+          expect(r.exitCode, asOf).toBe(1);
+          expect(r.out).toEqual([]);
+          expect(r.err).toEqual([FAILED, 'code=ECONNREFUSED']);
+          expect(r.err.join('\n').includes('127.0.0.1')).toBe(false);
+        }
+        const usage = await runWith(closedDb, '--as-of', AS_OF, ...mode);
+        expect(usage.exitCode).toBe(2);
+        expect(usage.out).toEqual([]);
+        expect(usage.err.some((l) => l.includes('code='))).toBe(false);
+      }
+    } finally {
+      await closed.end().catch(() => {});
+    }
+    expect(await counts()).toEqual([0, 0, 0]);
   });
 });
