@@ -30,6 +30,9 @@ import {
   LoyaltyMembershipResponseSchema,
   LoyaltyMembershipSchema,
   LoyaltyObservationCreateRequestSchema,
+  LoyaltyErrorCodeSchema,
+  LoyaltyFeeWatchSchema,
+  LoyaltyOverviewSchema,
   LoyaltyOverviewResponseSchema,
   LoyaltyProgramCreateRequestSchema,
   LoyaltyProgramPatchRequestSchema,
@@ -37,7 +40,7 @@ import {
 
 const membership = (over: Record<string, unknown> = {}) => ({
   id: 1, memberId: 2, memberDisplayName: 'ZQ42AAnna', programId: 3, memberNumberMasked: '••••0001',
-  tier: null, balance: '1500', unit: 'points', asOf: '2026-01-15', source: 'typed', ...over,
+  tier: null, balance: '1500', unit: 'points', asOf: '2026-01-15', source: 'typed', cardAccountId: null, cardAccountName: null, benefit: null, feeWatch: null, ...over,
 });
 
 /** Every key of a schema's object shape, through refinements and the envelope's union. */
@@ -108,7 +111,7 @@ describe('the loyalty contract', () => {
     }
     expect(LoyaltyMembershipResponseSchema.safeParse({ success: true, data: membership() }).success).toBe(true);
     expect(LoyaltyMemberNumberResponseSchema.safeParse({ success: true, data: { membershipId: 1, memberNumber: 'ZQ42A0000001' } }).success).toBe(true);
-    expect(LoyaltyOverviewResponseSchema.safeParse({ success: true, data: { members: [], programs: [], cards: [], instruments: [] } }).success).toBe(true);
+    expect(LoyaltyOverviewResponseSchema.safeParse({ success: true, data: { members: [], programs: [], cards: [], instruments: [], cardAccounts: [] } }).success).toBe(true);
 
     // The vocabularies, by set equality with SPEC.md Conventions.
     const set = (xs: readonly string[]) => [...xs].sort();
@@ -122,5 +125,94 @@ describe('the loyalty contract', () => {
     // Program PATCH: an alias list, when given, has at least one entry.
     expect(LoyaltyProgramPatchRequestSchema.safeParse({ aliases: [] }).success).toBe(false);
     expect(LoyaltyProgramPatchRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  // ─── P8-42b — the card link, the benefit and the fee watch ─────────────────────────────────────
+  //
+  // Fixtures carry `ZQ42B`. The dates are fixed calendar text: these pin the SCHEMA's consistency
+  // rules, which do not depend on today; the routes' dates are computed by Postgres in
+  // `apps/web/app/api/v1/loyalty/loyaltyCard.test.ts`.
+
+  it('T42b-U1: the membership PATCH takes a card link and a benefit, bounded and strict, and refuses everything else', () => {
+    const ok = (b: unknown) => LoyaltyMembershipPatchRequestSchema.safeParse(b).success;
+    const night = { kind: 'free_night', description: 'ZQ42B night' };
+    for (const body of [
+      { cardAccountId: 'zq42b_a' },
+      { cardAccountId: null },
+      { benefit: night },
+      { benefit: { ...night, windowDays: 1 } },
+      { benefit: { ...night, windowDays: 45 } },
+      { benefit: { ...night, windowDays: 365 } },
+      { benefit: null },
+      { cardAccountId: 'zq42b_a', benefit: night, tier: 'ZQ42B Gold' },
+    ]) expect(ok(body), JSON.stringify(body)).toBe(true);
+    for (const body of [
+      { cardAccountId: '' }, { cardAccountId: 7 }, { cardAccountId: { id: 'zq42b_a' } },
+      { benefit: { ...night, windowDays: 0 } }, { benefit: { ...night, windowDays: 366 } },
+      { benefit: { ...night, windowDays: 1.5 } }, { benefit: { ...night, windowDays: -1 } },
+      { benefit: { ...night, windowDays: '30' } },
+      { benefit: { kind: 'points_deposit', description: 'ZQ42B night' } },
+      { benefit: { kind: 'free_night', description: '' } }, { benefit: { kind: 'free_night', description: '   ' } },
+      { benefit: { kind: 'free_night', description: 'Z'.repeat(201) } },
+      { benefit: { ...night, zq42bExtra: 1 } },
+      { cardAccountId: 'zq42b_a', zq42bExtra: 1 },
+      {},
+    ]) expect(ok(body), JSON.stringify(body)).toBe(false);
+    expect(ok({ benefit: { kind: 'free_night', description: 'Z'.repeat(200) } })).toBe(true);
+  });
+
+  it('T42b-U2: a membership carries the card, the benefit and a fee watch that cannot contradict itself, and never an amount', () => {
+    const benefit = { kind: 'free_night', description: 'ZQ42B night', windowDays: 45 };
+    const linked = (feeWatch: unknown, b: unknown = benefit) =>
+      membership({ cardAccountId: 'zq42b_card', cardAccountName: 'ZQ42B Card', benefit: b, feeWatch });
+    const parses = (m: unknown) => LoyaltyMembershipSchema.safeParse(m).success;
+
+    expect(parses(membership())).toBe(true);
+    // Linked, no benefit: no state, and a fee date or none.
+    expect(parses(linked({ feeDate: null, expectedBy: null, state: null }, null))).toBe(true);
+    expect(parses(linked({ feeDate: '2026-01-05', expectedBy: null, state: null }, null))).toBe(true);
+    // The four states, with the dates their rules require.
+    expect(parses(linked({ feeDate: null, expectedBy: null, state: 'no_fee_seen' }))).toBe(true);
+    for (const state of ['awaiting', 'received', 'overdue']) {
+      expect(parses(linked({ feeDate: '2026-01-05', expectedBy: '2026-02-19', state })), state).toBe(true);
+      expect(parses(linked({ feeDate: null, expectedBy: '2026-02-19', state })), `${state} with no fee date`).toBe(false);
+      expect(parses(linked({ feeDate: '2026-01-05', expectedBy: null, state })), `${state} with no expected-by`).toBe(false);
+    }
+    // Contradictions, a stray key, an amount, a missing key.
+    expect(parses(linked({ feeDate: '2026-01-05', expectedBy: null, state: 'no_fee_seen' }))).toBe(false);
+    expect(parses(linked({ feeDate: null, expectedBy: '2026-02-19', state: 'no_fee_seen' }))).toBe(false);
+    expect(parses(linked({ feeDate: '2026-01-05', expectedBy: '2026-02-19', state: 'pending' }))).toBe(false);
+    expect(parses(linked({ feeDate: '2026-01-05', expectedBy: '2026-02-19', state: null }, null))).toBe(false);
+    expect(parses(linked({ feeDate: '2026-1-5', expectedBy: '2026-02-19', state: 'awaiting' }))).toBe(false);
+    expect(parses(linked({ feeDate: '2026-01-05', expectedBy: '2026-02-19', state: 'awaiting', zq42bExtra: 1 }))).toBe(false);
+    expect(parses(linked({ feeDate: '2026-01-05', expectedBy: '2026-02-19', state: 'awaiting', amount: '12.34' }))).toBe(false);
+    expect(parses(linked({ feeDate: null, expectedBy: null, state: 'no_fee_seen' }, { ...benefit, zq42bExtra: 1 }))).toBe(false);
+    for (const key of ['cardAccountId', 'benefit', 'feeWatch']) {
+      const m: Record<string, unknown> = membership();
+      delete m[key];
+      expect(parses(m), `missing ${key}`).toBe(false);
+    }
+    // The bare fee watch, against its own schema.
+    expect(LoyaltyFeeWatchSchema.safeParse({ feeDate: null, expectedBy: null, state: null }).success).toBe(true);
+    expect(LoyaltyFeeWatchSchema.safeParse({ feeDate: '2026-01-05', expectedBy: null, state: null }).success).toBe(true);
+    expect(LoyaltyFeeWatchSchema.safeParse({ feeDate: null, expectedBy: '2026-02-19', state: null }).success).toBe(false);
+    expect(LoyaltyFeeWatchSchema.safeParse({ feeDate: '2026-01-05', expectedBy: '2026-02-19', state: 'overdue', amount: '12.34' }).success).toBe(false);
+    // The overview requires the link picker's list.
+    const overview = { members: [], programs: [], cards: [], instruments: [] };
+    expect(LoyaltyOverviewSchema.safeParse(overview).success).toBe(false);
+    expect(LoyaltyOverviewSchema.safeParse({ ...overview, cardAccounts: [] }).success).toBe(true);
+    expect(LoyaltyOverviewSchema.safeParse({ ...overview, cardAccounts: [{ id: 'zq42b_card', name: 'ZQ42B Card' }] }).success).toBe(true);
+    expect(LoyaltyOverviewSchema.safeParse({ ...overview, cardAccounts: [{ id: 'zq42b_card', name: 'ZQ42B Card', type: 'credit' }] }).success).toBe(false);
+  });
+
+  it('T42b-U3: a membership is still created unlinked and with no benefit, and the new error code exists beside the old ones', () => {
+    expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2, cardAccountId: 'zq42b' }).success).toBe(false);
+    expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2, benefit: { kind: 'free_night', description: 'ZQ42B night' } }).success).toBe(false);
+    expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2 }).success).toBe(true);
+    for (const code of ['INVALID_INPUT', 'NOT_FOUND', 'INSUFFICIENT_SCOPE', 'BROWSER_SESSION_REQUIRED', 'MEMBERSHIP_EXISTS',
+      'ALIAS_TAKEN', 'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED']) {
+      expect(LoyaltyErrorCodeSchema.safeParse(code).success, code).toBe(true);
+    }
+    expect(LoyaltyErrorCodeSchema.safeParse('CARD_TAKEN').success).toBe(false);
   });
 });

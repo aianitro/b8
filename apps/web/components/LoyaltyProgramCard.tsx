@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { LoyaltyProgram, LoyaltyProgramCard as Card, LoyaltyProgramKind, LoyaltyUnit } from '@b8/contracts/loyalty';
+import type { LoyaltyCardAccount, LoyaltyProgram, LoyaltyProgramCard as Card, LoyaltyProgramKind, LoyaltyUnit } from '@b8/contracts/loyalty';
 import LoyaltyMembershipLine from './LoyaltyMembershipLine';
 import LoyaltyInlineText from './LoyaltyInlineText';
 import { send } from './LoyaltyRequest';
@@ -20,7 +20,9 @@ const KIND_LABEL: Record<LoyaltyProgramKind, string> = {
   airline: 'airline', hotel: 'hotel', card_currency: 'card points', travel_cash: 'travel cash', car: 'car', other: 'other',
 };
 
-export default function LoyaltyProgramCard({ card, program }: { card: Card; program: LoyaltyProgram }) {
+export default function LoyaltyProgramCard({
+  card, program, cardChoices,
+}: { card: Card; program: LoyaltyProgram; cardChoices: LoyaltyCardAccount[] }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +73,7 @@ export default function LoyaltyProgramCard({ card, program }: { card: Card; prog
         </div>
       )}
       <ul className="mt-2">
-        {card.memberships.map((m) => <LoyaltyMembershipLine key={m.id} m={m} defaultUnit={program.defaultUnit} />)}
+        {card.memberships.map((m) => <LoyaltyMembershipLine key={m.id} m={m} defaultUnit={program.defaultUnit} cardChoices={cardChoices} />)}
       </ul>
     </section>
   );

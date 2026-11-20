@@ -9,6 +9,11 @@ import { callerOf, ok } from './loyaltyResponses';
  *
  * Open to a read-scope token, as every GET is: it changes nothing and carries nothing a read token
  * may not see. The same answer for both b8 users — they are peers over these rows.
+ *
+ * P8-42b: each membership also carries its linked card and that card's fee watch (the posted date
+ * of its annual fee, found in the ledger through the gift read path, and the derived state), and the
+ * overview lists the credit cards a membership may be linked to. A row held by an unrevealed gift is
+ * never a fee for anyone, so the answer still does not depend on who asks; it is `numeric-only`.
  */
 export async function GET(req: NextRequest) {
   const caller = await callerOf(req);

@@ -36,8 +36,8 @@
 // DATES are `YYYY-MM-DD` calendar text produced by Postgres (`::text` or `to_char`), never a JS Date,
 // so no time zone can move one by a day. TIMESTAMPS are not emitted at all.
 //
-// STRICT OBJECTS throughout, the gifts precedent: a stray key (`source: 'import'`, `cardAccountId`)
-// is exactly the key that must be refused, never carried through.
+// STRICT OBJECTS throughout, the gifts precedent: a stray key (`source: 'import'`, `cardAccountId` on
+// a create) is exactly the key that must be refused, never carried through.
 //
 // Layering as gifts.ts: `zod` and sibling modules only. No `next/*`, no `pg`, no `lib/**`.
 
@@ -78,12 +78,35 @@ export const LOYALTY_INSTRUMENT_KINDS = [
 export const LOYALTY_OBSERVATION_SOURCES = ['typed', 'import', 'email', 'screenshot'] as const;
 /** Where an instrument came from. Requests never carry it: a route always writes `typed`. */
 export const LOYALTY_INSTRUMENT_SOURCES = ['typed', 'import'] as const;
+/**
+ * The derived state of a linked card's annual benefit (P8-42b). NEVER STORED: computed on every read
+ * from the ledger (the most recent unrefunded annual-fee row, read through the gift read path), the
+ * membership's instruments and Postgres's CURRENT_DATE. No CHECK mirrors this list, because no
+ * column holds it.
+ *
+ *   no_fee_seen — no posted annual fee on the card (none, or the most recent one was refunded).
+ *   awaiting    — fee posted, CURRENT_DATE is on or before expectedBy, nothing received yet.
+ *   received    — an instrument of the benefit's kind on this membership, issued (or, when its
+ *                 issue date is unknown, recorded) on or after the fee date. Wins over overdue.
+ *   overdue     — fee posted, CURRENT_DATE is after expectedBy, nothing received.
+ */
+export const LOYALTY_FEE_WATCH_STATES = ['no_fee_seen', 'awaiting', 'received', 'overdue'] as const;
+/**
+ * The benefit window in days. Bounds equal `loyalty_memberships_benefit_window_range` in
+ * migrations/1792800000000_loyalty_card_benefit.sql. The default is what the membership PATCH route
+ * stores when a benefit arrives without `windowDays`; the column has no DEFAULT (a default would fill
+ * rows that describe no benefit), so this constant is the one place the number lives.
+ */
+export const LOYALTY_BENEFIT_WINDOW_MIN_DAYS = 1;
+export const LOYALTY_BENEFIT_WINDOW_MAX_DAYS = 365;
+export const LOYALTY_BENEFIT_DEFAULT_WINDOW_DAYS = 45;
 
 export const LoyaltyUnitSchema = z.enum(LOYALTY_UNITS);
 export const LoyaltyProgramKindSchema = z.enum(LOYALTY_PROGRAM_KINDS);
 export const LoyaltyInstrumentKindSchema = z.enum(LOYALTY_INSTRUMENT_KINDS);
 export const LoyaltyObservationSourceSchema = z.enum(LOYALTY_OBSERVATION_SOURCES);
 export const LoyaltyInstrumentSourceSchema = z.enum(LOYALTY_INSTRUMENT_SOURCES);
+export const LoyaltyFeeWatchStateSchema = z.enum(LOYALTY_FEE_WATCH_STATES);
 
 /**
  * The codes these endpoints define. A SUBSET, NOT A CLOSURE: the boundary's `UNAUTHENTICATED` (401)
@@ -110,6 +133,12 @@ export const LoyaltyInstrumentSourceSchema = z.enum(LOYALTY_INSTRUMENT_SOURCES);
  *                                    at all.
  *   `MEMBER_NAME_TAKEN`        409 — another member already has that display name, ignoring case.
  *   `MEMBER_USER_TAKEN`        409 — another member is already linked to that user.
+ *   `CARD_ALREADY_LINKED`      409 — a membership PATCH linking a card another membership already
+ *                                    holds (one card, one membership; decided by the unique index,
+ *                                    so a lost race is this and never a 500). Nothing changed.
+ *
+ * Linking an account that does not exist, or whose type is not `credit`, is `INVALID_INPUT` (400)
+ * with nothing changed. The message never echoes a submitted benefit description.
  */
 export const LoyaltyErrorCodeSchema = z.enum([
   'INVALID_INPUT',
@@ -120,6 +149,7 @@ export const LoyaltyErrorCodeSchema = z.enum([
   'ALIAS_TAKEN',
   'MEMBER_NAME_TAKEN',
   'MEMBER_USER_TAKEN',
+  'CARD_ALREADY_LINKED',
 ]);
 
 // ─── Primitives ─────────────────────────────────────────────────────────────────────────────────
@@ -214,6 +244,27 @@ export const LoyaltyAliasInputSchema = z
   .string()
   .refine((s) => chars(s) <= 200, 'an alias is at most 200 characters');
 
+/**
+ * A benefit window in days: an integer from 1 to 365. A JSON integer only — `1.5`, `'30'` and `-1`
+ * are refused, never coerced or rounded.
+ */
+export const LoyaltyBenefitWindowDaysSchema = z
+  .int()
+  .min(LOYALTY_BENEFIT_WINDOW_MIN_DAYS)
+  .max(LOYALTY_BENEFIT_WINDOW_MAX_DAYS);
+
+/**
+ * A card's annual benefit AS SUBMITTED on the membership PATCH. `kind` is one of the four instrument
+ * kinds (the state matches an instrument of exactly this kind). `description` is not blank and at
+ * most 200 characters once trimmed; the handler stores it trimmed. `windowDays` absent means the
+ * handler stores `LOYALTY_BENEFIT_DEFAULT_WINDOW_DAYS`. Strict: a stray key is refused.
+ */
+export const LoyaltyBenefitInputSchema = z.strictObject({
+  kind: LoyaltyInstrumentKindSchema,
+  description: typedName(200, 'a benefit description'),
+  windowDays: LoyaltyBenefitWindowDaysSchema.optional(),
+});
+
 // ─── Requests ───────────────────────────────────────────────────────────────────────────────────
 
 /** `POST /api/v1/loyalty/members`. `userId` absent or null: this person is not a b8 user. */
@@ -264,8 +315,9 @@ export const LoyaltyProgramPatchRequestSchema = z
 
 /**
  * `POST /api/v1/loyalty/memberships`. An unknown member or program is refused and nothing is
- * created; a pair that already exists is 409 `MEMBERSHIP_EXISTS`. `cardAccountId` is not accepted:
- * the column is reserved for step 42b.
+ * created; a pair that already exists is 409 `MEMBERSHIP_EXISTS`. `cardAccountId` and `benefit` are
+ * not accepted here (strict object): a membership is created unlinked, and a card and its benefit
+ * are set afterwards by the membership PATCH, the one place their rules are checked.
  */
 export const LoyaltyMembershipCreateRequestSchema = z.strictObject({
   memberId: LoyaltyIdSchema,
@@ -274,11 +326,23 @@ export const LoyaltyMembershipCreateRequestSchema = z.strictObject({
   tier: typedName(100, 'a tier').nullable().optional(),
 });
 
-/** `PATCH /api/v1/loyalty/memberships/[id]`. At least one field; `null` clears it. */
+/**
+ * `PATCH /api/v1/loyalty/memberships/[id]`. At least one field; `null` clears it.
+ *
+ * `cardAccountId` links the credit card that earns into this membership; `null` unlinks. The handler
+ * refuses an unknown account or one whose type is not `credit` (400 `INVALID_INPUT`) and a card
+ * another membership holds (409 `CARD_ALREADY_LINKED`). Re-linking the same card is a no-op 200.
+ * Unlinking sets only the link to null: instruments and the benefit stay.
+ *
+ * `benefit` describes the card's annual benefit; `null` clears all three of its columns. Accepted on
+ * an unlinked membership too (it is inert until a card is linked).
+ */
 export const LoyaltyMembershipPatchRequestSchema = z
   .strictObject({
     memberNumber: LoyaltyMemberNumberInputSchema.nullable().optional(),
     tier: typedName(100, 'a tier').nullable().optional(),
+    cardAccountId: z.string().min(1, 'a card account id may not be empty').nullable().optional(),
+    benefit: LoyaltyBenefitInputSchema.nullable().optional(),
   })
   .refine((b) => Object.keys(b).length > 0, 'nothing to change');
 
@@ -370,6 +434,64 @@ export const LoyaltyProgramSchema = z.strictObject({
   aliases: z.array(z.string().min(1)),
 });
 
+/** A card's annual benefit as stored (the three `benefit_*` columns). `windowDays` is always set. */
+export const LoyaltyBenefitSchema = z.strictObject({
+  kind: LoyaltyInstrumentKindSchema,
+  description: z.string().min(1),
+  windowDays: LoyaltyBenefitWindowDaysSchema,
+});
+
+/**
+ * THE FEE WATCH — derived on every read, never stored (see `LOYALTY_FEE_WATCH_STATES`).
+ *
+ *   feeDate    — the POSTED date (never the authorized date) of the card's most recent annual-fee
+ *                row, if that row was not refunded; null when there is none. Postgres `::text`.
+ *   expectedBy — feeDate plus the benefit window in calendar days, by Postgres date arithmetic.
+ *                Null whenever there is no fee or no benefit to wait for.
+ *   state      — one of the four states when a benefit is described; null when none is.
+ *
+ * Consistency, enforced here so a producer cannot emit a state that contradicts its dates:
+ * `state` null implies `expectedBy` null (`feeDate` may be either: a linked card with no benefit
+ * still shows its fee date). `no_fee_seen` implies both dates null. `awaiting`, `received` and
+ * `overdue` imply both dates present.
+ *
+ * THE FEE AMOUNT IS NEVER EMITTED. There is deliberately no amount field, and the strict object
+ * refuses one: no figure is needed to say whether the benefit arrived, and a ledger amount on a
+ * loyalty surface would be a new place for a money figure to leak (SPEC.md Open question 9).
+ *
+ * The answer is identical for every viewer: a ledger row held by an unrevealed gift is never a fee
+ * for anyone, giver included. That is why the routes returning a membership are `numeric-only` in
+ * the gift surface registry (they carry a date derived from a ledger row, never its text).
+ */
+export const LoyaltyFeeWatchSchema = z
+  .strictObject({
+    feeDate: calendarDate.nullable(),
+    expectedBy: calendarDate.nullable(),
+    state: LoyaltyFeeWatchStateSchema.nullable(),
+  })
+  .refine((w) => w.state !== null || w.expectedBy === null, {
+    message: 'with no state there is no expected-by date',
+    path: ['expectedBy'],
+  })
+  .refine((w) => w.state !== 'no_fee_seen' || (w.feeDate === null && w.expectedBy === null), {
+    message: 'no_fee_seen carries no dates',
+    path: ['feeDate'],
+  })
+  .refine(
+    (w) =>
+      w.state === null || w.state === 'no_fee_seen' || (w.feeDate !== null && w.expectedBy !== null),
+    { message: 'awaiting, received and overdue carry both dates', path: ['feeDate'] }
+  );
+
+/**
+ * One credit account a membership may be linked to — the `/travel` link picker's choices. Only
+ * accounts whose type is `credit`. `name` is the account's display name as stored.
+ */
+export const LoyaltyCardAccountSchema = z.strictObject({
+  id: z.string().min(1),
+  name: z.string(),
+});
+
 /**
  * One membership as every response but the member-number route shows it.
  *
@@ -380,6 +502,13 @@ export const LoyaltyProgramSchema = z.strictObject({
  * apps/web/lib/domain/observations.ts and never by arrival. All four are null together when the
  * membership has no observation (rendered "—", never 0), and all four are present together
  * otherwise. A zero balance is a reading and is `"0"` (or `"0.00"` for usd), never null.
+ *
+ * THE CARD (P8-42b). `cardAccountId` and `cardAccountName` are the linked credit account, null
+ * together when no card is linked. `benefit` is the described annual benefit, or null; it is kept
+ * across an unlink, so it may be present with no card. `feeWatch` is null exactly when no card is
+ * linked, and otherwise always an object (all three fields null for a linked card with no benefit
+ * and no fee). When `feeWatch` is present, its `state` is null exactly when `benefit` is null: there
+ * is a state only when there is something to wait for.
  */
 export const LoyaltyMembershipSchema = z
   .strictObject({
@@ -393,6 +522,22 @@ export const LoyaltyMembershipSchema = z
     unit: LoyaltyUnitSchema.nullable(),
     asOf: calendarDate.nullable(),
     source: LoyaltyObservationSourceSchema.nullable(),
+    cardAccountId: z.string().min(1).nullable(),
+    cardAccountName: z.string().nullable(),
+    benefit: LoyaltyBenefitSchema.nullable(),
+    feeWatch: LoyaltyFeeWatchSchema.nullable(),
+  })
+  .refine((m) => (m.cardAccountId === null) === (m.cardAccountName === null), {
+    message: 'cardAccountId and cardAccountName are null together or present together',
+    path: ['cardAccountName'],
+  })
+  .refine((m) => (m.cardAccountId === null) === (m.feeWatch === null), {
+    message: 'feeWatch is null exactly when no card is linked',
+    path: ['feeWatch'],
+  })
+  .refine((m) => m.feeWatch === null || (m.feeWatch.state === null) === (m.benefit === null), {
+    message: 'a linked card has a state exactly when a benefit is described',
+    path: ['feeWatch'],
   })
   .refine(
     (m) =>
@@ -441,12 +586,15 @@ export const LoyaltyInstrumentSchema = z.strictObject({
  *   cards       — one per program with at least one membership, by program name then id.
  *   instruments — unused before used, then expiry ascending with null expiry last, then id
  *                 ascending (the page's order, decided by the server).
+ *   cardAccounts — every account whose type is `credit`, linked or not, by name then id: the
+ *                 choices for "Link a card". Never an account of another type.
  */
 export const LoyaltyOverviewSchema = z.strictObject({
   members: z.array(LoyaltyMemberSchema),
   programs: z.array(LoyaltyProgramSchema),
   cards: z.array(LoyaltyProgramCardSchema),
   instruments: z.array(LoyaltyInstrumentSchema),
+  cardAccounts: z.array(LoyaltyCardAccountSchema),
 });
 
 /**
@@ -477,6 +625,11 @@ export type LoyaltyInstrumentKind = z.infer<typeof LoyaltyInstrumentKindSchema>;
 export type LoyaltyObservationSource = z.infer<typeof LoyaltyObservationSourceSchema>;
 export type LoyaltyInstrumentSource = z.infer<typeof LoyaltyInstrumentSourceSchema>;
 export type LoyaltyErrorCode = z.infer<typeof LoyaltyErrorCodeSchema>;
+export type LoyaltyFeeWatchState = z.infer<typeof LoyaltyFeeWatchStateSchema>;
+export type LoyaltyBenefitInput = z.infer<typeof LoyaltyBenefitInputSchema>;
+export type LoyaltyBenefit = z.infer<typeof LoyaltyBenefitSchema>;
+export type LoyaltyFeeWatch = z.infer<typeof LoyaltyFeeWatchSchema>;
+export type LoyaltyCardAccount = z.infer<typeof LoyaltyCardAccountSchema>;
 export type LoyaltyMemberCreateRequest = z.infer<typeof LoyaltyMemberCreateRequestSchema>;
 export type LoyaltyMemberPatchRequest = z.infer<typeof LoyaltyMemberPatchRequestSchema>;
 export type LoyaltyProgramCreateRequest = z.infer<typeof LoyaltyProgramCreateRequestSchema>;

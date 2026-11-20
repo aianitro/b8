@@ -7,8 +7,10 @@
 // It prints one line per step, `H<n> PASS <what was observed>`, then `OK H1-H10`. The first failing
 // step prints `H<n> FAIL <observed>` and the script exits non-zero after cleaning up.
 //
-// P8-42a added H11 (the loyalty page and overview, SPEC.md S10 of P8-42a-loyalty-model-page-import),
-// so the final success line is now `OK H1-H11`.
+// P8-42a added H11 (the loyalty page and overview, SPEC.md S10 of P8-42a-loyalty-model-page-import).
+// P8-42b added H12 (a credit card linked to a membership, its annual fee held by a second gift, the
+// fee watch on /travel, /accounts/<card> and the API through every state), so the final success line
+// is now `OK H1-H12`.
 //
 // ─── Why it needs its own database ────────────────────────────────────────────────────────────
 //
@@ -89,7 +91,7 @@ const PAGES = {
   'app/rules/page.tsx': { cls: 'text-bearing', url: () => '/rules' },
   'app/sandbox/page.tsx': { cls: 'numeric-only', url: () => '/sandbox' },
   'app/transactions/page.tsx': { cls: 'text-bearing', url: () => '/transactions' },
-  'app/travel/page.tsx': { cls: 'no-transaction-data', url: () => '/travel' },
+  'app/travel/page.tsx': { cls: 'numeric-only', url: () => '/travel' },
 };
 
 /** The pages H3 and H4 expect the held row's label on. */
@@ -355,7 +357,128 @@ try {
   }
   pass('H11', `/travel and /api/v1/loyalty as both users: 200, label and masked suffix present, the 18-character number absent in any case`);
 
-  console.log('OK H1-H11');
+  // ── H12 ── (P8-42b) A credit card linked to a membership, its annual fee found in the ledger, and
+  // the benefit's state, over real HTTP for both people. The card is the fabricated one H1 to H11
+  // already use. Its fee row is held by a SECOND gift (giver: the second user, recipient: the owner),
+  // so step 2 is the case that matters: a held row is no fee for anybody, the giver included, and its
+  // name and amount appear on neither /travel nor the API. The account page is text-bearing and shows
+  // the giver their own row by design (H3), so there the name is checked for the recipient alone, and
+  // the amount, which the statement shows every viewer, is not checked there at all.
+  //
+  // The link, the benefit and the unlink go through the real PATCH route. Every date the step checks
+  // is read back from Postgres, never computed here.
+  current = 'H12';
+  const FEE_NAME = 'ZQ42B ANNUAL MEMBERSHIP FEE';
+  const FEE_AMOUNT = '61.29';
+  const membershipId = Number(psql(`
+    INSERT INTO household_members (display_name) VALUES ('ZQ42B Surface Member');
+    INSERT INTO transactions (plaid_transaction_id, account_id, date, amount, name)
+      VALUES ('zq42b-check-fee', '${w.card}', CURRENT_DATE - 5, ${FEE_AMOUNT}, '${FEE_NAME}');
+    INSERT INTO gifts (giver_user_id, recipient_user_id, merchant, window_start, window_end, reveal_date, state)
+      VALUES ((SELECT id FROM users WHERE NOT is_owner), (SELECT id FROM users WHERE is_owner), 'ZQ42B FEE GIFT',
+              CURRENT_DATE - 10, CURRENT_DATE - 1, CURRENT_DATE + 30, 'matched');
+    INSERT INTO gift_transactions (transaction_id, gift_id, prior_mapped_category, prior_rule_applied)
+      VALUES ((SELECT id FROM transactions WHERE plaid_transaction_id = 'zq42b-check-fee'),
+              (SELECT id FROM gifts WHERE merchant = 'ZQ42B FEE GIFT'), NULL, FALSE);
+    INSERT INTO loyalty_memberships (member_id, program_id)
+      VALUES ((SELECT id FROM household_members WHERE display_name = 'ZQ42B Surface Member'),
+              (SELECT id FROM loyalty_programs ORDER BY id OFFSET 1 LIMIT 1))
+      RETURNING id;`).split('\n').pop());
+  const programName = psql(`SELECT p.name FROM loyalty_programs p JOIN loyalty_memberships m ON m.program_id = p.id WHERE m.id = ${membershipId}`);
+  const day = (n) => psql(`SELECT (CURRENT_DATE + ${n})::text`);
+  const escaped = (t) => t.replace(/&/g, '&amp;').replace(/'/g, '&#x27;').replace(/"/g, '&quot;');
+  const hasText = (html, t) => html.includes(t) || html.includes(escaped(t));
+  const uncommented = (html) => html.replace(/<!--[\s\S]*?-->/g, '');
+
+  async function patchMembership(body) {
+    const res = await fetch(`${ORIGIN}/api/v1/loyalty/memberships/${membershipId}`, {
+      method: 'PATCH',
+      headers: { cookie: `b8_session=${w.owner}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    check('H12', res.status === 200, `PATCH ${Object.keys(body).join(',')} answered ${res.status}`);
+    return (await res.json()).data;
+  }
+  /** The three surfaces as `token` sees them, the HTML with its comments removed. */
+  async function surfaces(token, who) {
+    const travel = await get('/travel', token);
+    const account = await get(`/accounts/${w.card}`, token);
+    const api = await get('/api/v1/loyalty', token);
+    check('H12', travel.status === 200 && account.status === 200 && api.status === 200, `a surface failed for the ${who}`);
+    const m = JSON.parse(api.text).data.cards.flatMap((c) => c.memberships).find((x) => x.id === membershipId);
+    check('H12', m !== undefined, `the membership is missing from the API for the ${who}`);
+    return { travel: uncommented(travel.text), account: uncommented(account.text), apiText: api.text, m };
+  }
+  const VIEWERS = [['owner', w.owner], ['second user', w.two]];
+  async function both(step) {
+    const seen = [];
+    for (const [who, token] of VIEWERS) seen.push({ who, ...(await surfaces(token, who)) });
+    check('H12', JSON.stringify(seen[0].m) === JSON.stringify(seen[1].m), `step ${step}: the two viewers got different membership views`);
+    return seen;
+  }
+
+  // (1) Unlinked, benefit described without a window: the route stores the default.
+  const described = await patchMembership({ benefit: { kind: 'free_night', description: 'ZQ42B night' } });
+  check('H12', described.benefit?.windowDays === 45, `the default window is ${described.benefit?.windowDays}`);
+  for (const s of await both(1)) {
+    check('H12', !s.account.includes('Earns into'), `step 1: an unlinked card's page says Earns into (${s.who})`);
+    check('H12', s.m.cardAccountId === null && s.m.feeWatch === null, `step 1: an unlinked membership has a card or a watch (${s.who})`);
+  }
+  // (2) Linked, the fee held by the gift.
+  await patchMembership({ cardAccountId: w.card });
+  for (const s of await both(2)) {
+    check('H12', s.m.feeWatch?.state === 'no_fee_seen' && s.m.feeWatch?.feeDate === null, `step 2: a held fee counted for the ${s.who}: ${JSON.stringify(s.m.feeWatch)}`);
+    for (const [where, text] of [['/travel', s.travel], ['/api/v1/loyalty', s.apiText]]) {
+      check('H12', !holds(text, 'ZQ42B ANNUAL') && !text.includes(FEE_AMOUNT), `step 2: ${where} holds the held fee's name or amount (${s.who})`);
+    }
+    if (s.who === 'owner') check('H12', !holds(s.account, 'ZQ42B ANNUAL'), 'step 2: the recipient sees the held fee row by name');
+    check('H12', s.travel.includes('No annual fee seen yet') && s.account.includes('No annual fee seen yet'), `step 2: "No annual fee seen yet" missing (${s.who})`);
+    check('H12', s.account.includes('Earns into') && hasText(s.account, programName) && s.account.includes('ZQ42B night'),
+      `step 2: the card's page lacks Earns into, the program or the benefit (${s.who})`);
+  }
+  // (3) Revealed yesterday: the fee counts, for both, with Postgres's dates.
+  psql(`UPDATE gifts SET reveal_date = CURRENT_DATE - 1 WHERE merchant = 'ZQ42B FEE GIFT'`);
+  const feeDate = day(-5);
+  const expectedBy = day(40);
+  for (const s of await both(3)) {
+    check('H12', JSON.stringify(s.m.feeWatch) === JSON.stringify({ feeDate, expectedBy, state: 'awaiting' }), `step 3: ${JSON.stringify(s.m.feeWatch)} (${s.who})`);
+    for (const [where, html] of [['/travel', s.travel], [`/accounts/${w.card}`, s.account]]) {
+      check('H12', html.includes(`Annual fee posted ${feeDate}`) && html.includes(`expected by ${expectedBy}`), `step 3: ${where} lacks the fee date or expected-by (${s.who})`);
+    }
+    check('H12', !s.travel.includes('overdue') && !s.travel.includes('received'), `step 3: /travel says overdue or received while awaiting (${s.who})`);
+  }
+  // (4) The reveal moved back: masked again.
+  psql(`UPDATE gifts SET reveal_date = CURRENT_DATE + 30 WHERE merchant = 'ZQ42B FEE GIFT'`);
+  for (const s of await both(4)) check('H12', s.m.feeWatch?.state === 'no_fee_seen', `step 4: still counted after the reveal moved back (${s.who})`);
+  // (5) The fee sixty days ago, revealed: overdue.
+  psql(`UPDATE transactions SET date = CURRENT_DATE - 60 WHERE plaid_transaction_id = 'zq42b-check-fee';
+        UPDATE gifts SET reveal_date = CURRENT_DATE - 1 WHERE merchant = 'ZQ42B FEE GIFT'`);
+  const overdueSince = day(-15);
+  for (const s of await both(5)) {
+    check('H12', s.m.feeWatch?.state === 'overdue' && s.m.feeWatch?.expectedBy === overdueSince, `step 5: ${JSON.stringify(s.m.feeWatch)} (${s.who})`);
+    check('H12', s.travel.includes('overdue') && s.account.includes('overdue') && !s.travel.includes('expected by'), `step 5: the pages do not say overdue (${s.who})`);
+  }
+  // (6) A free night issued yesterday: received.
+  psql(`INSERT INTO loyalty_instruments (membership_id, kind, description, issued_on, source)
+          VALUES (${membershipId}, 'free_night', 'ZQ42B surface night', CURRENT_DATE - 1, 'typed')`);
+  for (const s of await both(6)) {
+    check('H12', s.m.feeWatch?.state === 'received', `step 6: ${JSON.stringify(s.m.feeWatch)} (${s.who})`);
+    check('H12', s.travel.includes('received') && s.account.includes('received'), `step 6: the pages do not say received (${s.who})`);
+  }
+  // (7) Benefit cleared: no state, the fee date still shown, nothing "expected".
+  await patchMembership({ benefit: null });
+  for (const s of await both(7)) {
+    check('H12', JSON.stringify(s.m.feeWatch) === JSON.stringify({ feeDate: day(-60), expectedBy: null, state: null }), `step 7: ${JSON.stringify(s.m.feeWatch)} (${s.who})`);
+    check('H12', s.travel.includes('Annual fee posted') && !s.travel.includes('expected by') && !s.account.includes('expected by'), `step 7: wrong wording with no benefit (${s.who})`);
+  }
+  // (8) Unlinked again.
+  await patchMembership({ cardAccountId: null });
+  for (const s of await both(8)) {
+    check('H12', !s.account.includes('Earns into') && s.m.feeWatch === null, `step 8: the unlink did not stick (${s.who})`);
+  }
+  pass('H12', `both users, 8 steps over /travel, /accounts/${w.card} and /api/v1/loyalty: a gift-held fee is no fee for either; revealed, fee date ${feeDate} and expected by ${expectedBy} (Postgres dates), then overdue, received, no state without a benefit, and no Earns into once unlinked; the held row's name and amount appear on neither /travel nor the API`);
+
+  console.log('OK H1-H12');
 } catch (error) {
   exitCode = 1;
   if (error instanceof StepFailure) console.log(`${error.step} FAIL ${error.message}`);

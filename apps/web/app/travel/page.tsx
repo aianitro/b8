@@ -11,6 +11,13 @@ import { loadOverview } from '@/lib/loyaltyStore';
 //
 // Same for both b8 users: there is no per-user filter, because they are peers over these rows. The
 // proxy has already refused a request with no session before this renders.
+//
+// P8-42b: a membership with a linked credit card also carries that card's fee watch — the posted
+// date of its most recent annual fee and where the expected benefit stands. The store finds the fee
+// through the gift read path and never as any one viewer, so a gift-held row is a fee for nobody and
+// this page shows the same dates to both users. It carries a date derived from a ledger row, never
+// the row's text or amount, which makes it `numeric-only` in the gift surface registry (H12). This
+// page still reads no ledger table itself; `loadOverview` does.
 export default async function TravelPage() {
   const overview = await loadOverview();
   return <TravelBoard overview={overview} />;

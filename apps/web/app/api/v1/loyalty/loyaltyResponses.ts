@@ -1,4 +1,4 @@
-// Loyalty (P8-42a) — what the eleven loyalty endpoints answer, stated once so they cannot drift.
+// Loyalty (P8-42a, P8-42b) — what the eleven loyalty endpoints answer, stated once so they cannot drift.
 //
 // NOT A ROUTE. Next treats only `route.ts` as an endpoint; this file adds none.
 //
@@ -36,6 +36,7 @@ const STATUS: Record<LoyaltyErrorCode, number> = {
   ALIAS_TAKEN: 409,
   MEMBER_NAME_TAKEN: 409,
   MEMBER_USER_TAKEN: 409,
+  CARD_ALREADY_LINKED: 409,
 };
 
 const MESSAGE: Record<LoyaltyErrorCode, string> = {
@@ -47,6 +48,7 @@ const MESSAGE: Record<LoyaltyErrorCode, string> = {
   ALIAS_TAKEN: 'Another program already uses one of those names.',
   MEMBER_NAME_TAKEN: 'Another household member already has that name.',
   MEMBER_USER_TAKEN: 'Another household member is already linked to that user.',
+  CARD_ALREADY_LINKED: 'That card already earns into another membership. Unlink it there first.',
 };
 
 /** A refusal as a response. One body shape for every code and every route. */

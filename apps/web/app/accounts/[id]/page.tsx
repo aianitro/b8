@@ -17,6 +17,8 @@ import { accountFreshness } from '@/lib/domain/accountFreshness';
 import type { BudgetCategory } from '@b8/contracts/types';
 import { visibleTransactions } from '@/lib/giftReadPath';
 import { pageViewer } from '@/lib/giftViewer';
+import AccountEarnsInto from '@/components/AccountEarnsInto';
+import { earningOfCard } from '@/lib/loyaltyStore';
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
@@ -101,6 +103,12 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
   }
 
   const isValuation = account.valuation_mode === 'valuation';
+
+  // The loyalty membership this card earns into (P8-42b), if one has linked it. Only a credit card
+  // can be linked, so no other account pays for the read. The answer is the same membership view
+  // /travel shows, fee watch included, and it is the same for every viewer: the store never reads
+  // the fee as the signed-in person, so a gift-held row is a fee for nobody.
+  const earning = account.type === 'credit' ? await earningOfCard(id) : null;
 
   // Only a wallet pays for these reads. Every other wallet is a place cash can be moved to, and the
   // categories are what a count's difference can be filed as: a shortfall as operational spending,
@@ -198,6 +206,8 @@ export default async function AccountPage({ params }: { params: Promise<{ id: st
         title={isValuation ? (account.is_liability ? 'Amount owed' : 'Current value') : 'Balance'}
         freshness={freshness}
       />
+
+      {earning && <AccountEarnsInto programName={earning.programName} membership={earning.membership} />}
 
       {/* A hand-kept account's figure, typed. Every valuation-mode account that Plaid does not
           link — including a mortgage, which the statement reader below skips, and which until this

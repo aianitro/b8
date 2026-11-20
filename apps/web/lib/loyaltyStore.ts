@@ -5,10 +5,22 @@
 //
 // ─── THE LEDGER IS NOT READ HERE ──────────────────────────────────────────────────────────────
 //
-// Nothing here reads the ledger's transactions, accounts or valuations, and nothing writes them.
-// Loyalty balances are not money in the ledger's sense and are never summed into any figure; the
-// one link to the ledger, `loyalty_memberships.card_account_id`, is reserved for a later step and is
-// never selected, set or emitted.
+// Nothing here writes the ledger's transactions, accounts or valuations, and nothing reads them
+// except the two narrow reads below. Loyalty balances are not money in the ledger's sense and are
+// never summed into any figure.
+//
+// ─── THE CARD AND ITS ANNUAL FEE (P8-42b) ─────────────────────────────────────────────────────
+//
+// `loyalty_memberships.card_account_id` links the credit card that earns into a membership. Two
+// ledger reads follow from it, and only these two:
+//
+//   - `accounts`, for the linked card's name and for the link picker's choices (type `credit` only).
+//     Neither is row text a gift could hold.
+//   - the card's annual-fee row, through the gift read path (`visibleTransactions`), never the table
+//     itself. The fee is FOUND on every read and never stored: its posted date, the expected-by date
+//     and the state are derived in one statement from the ledger, the instruments and Postgres's
+//     CURRENT_DATE (`feeWatchesOf`). The fee AMOUNT is compared in SQL to pair a refund with its fee
+//     and is never selected out of the database, so no code path here can emit or log it.
 //
 // ─── TEXT IN, TEXT OUT ────────────────────────────────────────────────────────────────────────
 //
@@ -33,6 +45,7 @@
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import db from './db';
 import { createLogger } from './logger';
+import { visibleTransactions } from './giftReadPath';
 import {
   currentObservationByMembership,
   maskMemberNumber,
@@ -40,8 +53,13 @@ import {
   parseBalance,
   sortInstruments,
 } from './domain/loyalty';
+import { LOYALTY_BENEFIT_DEFAULT_WINDOW_DAYS } from '@b8/contracts/loyalty';
 import type {
+  LoyaltyBenefit,
+  LoyaltyCardAccount,
   LoyaltyErrorCode,
+  LoyaltyFeeWatch,
+  LoyaltyFeeWatchState,
   LoyaltyInstrument,
   LoyaltyInstrumentCreateRequest,
   LoyaltyInstrumentKind,
@@ -96,6 +114,7 @@ function fromPgError(err: unknown): LoyaltyFailure {
       case 'loyalty_program_aliases_alias_key': return fail('ALIAS_TAKEN');
       case 'household_members_display_name_ci': return fail('MEMBER_NAME_TAKEN');
       case 'household_members_user_id_key': return fail('MEMBER_USER_TAKEN');
+      case 'loyalty_memberships_one_per_card': return fail('CARD_ALREADY_LINKED');
     }
   }
   if (e?.code === '23503') return fail('INVALID_INPUT', 'A referenced member, program, membership or user does not exist.');
@@ -138,6 +157,11 @@ interface MembershipRow {
   program_id: number;
   member_number: string | null;
   tier: string | null;
+  card_account_id: string | null;
+  card_account_name: string | null;
+  benefit_kind: LoyaltyInstrumentKind | null;
+  benefit_description: string | null;
+  benefit_window_days: number | null;
 }
 
 interface ObservationRow {
@@ -166,8 +190,124 @@ async function observationsOf(q: Queryable, ids: number[] | null): Promise<Obser
   return r.rows;
 }
 
-/** One membership as the contract shows it: masked number, current balance or four nulls. */
-function membershipFrom(row: MembershipRow, current: ObservationRow | undefined): LoyaltyMembership {
+// ─── The fee watch (P8-42b) ────────────────────────────────────────────────────────────────────
+//
+// THE RULE, stated once, in SQL, because every comparison in it is one Postgres must make: the
+// amounts are NUMERIC(12,2) compared by exact decimal equality (a JS number or a text comparison would
+// make a trailing zero a question of formatting), and the dates are calendar dates compared with CURRENT_DATE (a JS
+// clock would make the state depend on the server's zone).
+//
+// A FEE ROW is a row on the linked account with amount > 0 (money out: a card charge is positive in
+// this ledger, so nothing is negated here), no transfer group, not held by an unrevealed gift, whose
+// NAME — case-folded, every run of whitespace collapsed to one space — holds `annual membership fee`
+// or `annual fee` as whole words. Only `name` is read: a card with no Plaid feed has nothing else,
+// and the category cannot decide (the real fee carries the same detailed category as a foreign
+// transaction fee, and none at all on some rows). Whole words, so `biannual fee` and `annual fees`
+// are not fees.
+//
+// A REFUND is a row on the same account whose amount is exactly the fee's negated, posted on or
+// after it, named with a fee phrase or `refund`, `reversal` or `reversed`. It cancels ONE fee: the
+// most recent fee row of that amount on or before the refund's date. A card payment that happens to
+// equal the fee is not named that way and cancels nothing.
+//
+// THE FEE is the single most recent fee row — greatest posted date, then greatest id, never arrival
+// order — and only if no refund cancels it. A cancelled latest fee means no fee: last year's is not
+// resurrected, which would raise a false overdue. The POSTED date, never the authorized one, which
+// a hand-entered row and a masked row do not have.
+//
+// HELD ROWS ARE NEVER FEES, FOR ANY VIEWER. The rows are read as the viewer `null` — who masks every
+// unrevealed gift — and `gift_masked` rows are excluded outright. Reading as the signed-in person
+// would let the giver, who sees the real row, get a fee date the recipient does not: a derived
+// answer that differs by viewer, which the gift rules forbid. So the answer is the same for both
+// users and every token, and the surfaces carrying it are `numeric-only`.
+//
+// THE STATE, with F the fee date, E = F + the window, T = CURRENT_DATE: no fee is `no_fee_seen`; an
+// instrument of the benefit's kind on THIS membership issued on or after F (or, with no issue date,
+// recorded on or after F — `created_at` as a date in the session's zone) is `received`, which wins
+// over overdue; T <= E is `awaiting` (E itself is still awaiting); otherwise `overdue`. Matching
+// instruments are tested with EXISTS, never joined, so two of them cannot repeat a membership.
+
+/** Whole-word fee phrases in a case-folded, whitespace-collapsed name. POSIX classes, no backslashes. */
+const FEE_WORDS = `'(^|[^[:alnum:]])annual (membership )?fee($|[^[:alnum:]])'`;
+const REFUND_WORDS = `'(^|[^[:alnum:]])(annual (membership )?fee|refund|reversal|reversed)($|[^[:alnum:]])'`;
+const FOLDED_NAME = `regexp_replace(lower(coalesce(t.name, '')), '[[:space:]]+', ' ', 'g')`;
+
+const FEE_WATCH_SQL = `
+  WITH linked AS (
+    SELECT id, card_account_id, benefit_kind, benefit_window_days
+      FROM loyalty_memberships
+     WHERE card_account_id IS NOT NULL AND ($1::int[] IS NULL OR id = ANY($1::int[]))
+  ),
+  card_rows AS (
+    SELECT t.id, t.account_id, t.date, t.amount, t.transfer_group_id, ${FOLDED_NAME} AS folded
+      FROM ${visibleTransactions(null)} t
+     WHERE t.account_id IN (SELECT card_account_id FROM linked) AND NOT t.gift_masked
+  ),
+  fees AS (
+    SELECT id, account_id, date, amount FROM card_rows
+     WHERE amount > 0 AND transfer_group_id IS NULL AND folded ~ ${FEE_WORDS}
+  ),
+  refunds AS (
+    SELECT id, account_id, date, amount FROM card_rows
+     WHERE amount < 0 AND folded ~ ${REFUND_WORDS}
+  )
+  SELECT l.id, fee.date::text AS "feeDate",
+         CASE WHEN fee.date IS NULL OR l.benefit_kind IS NULL THEN NULL
+              ELSE (fee.date + l.benefit_window_days)::text END AS "expectedBy",
+         CASE WHEN l.benefit_kind IS NULL THEN NULL
+              WHEN fee.date IS NULL THEN 'no_fee_seen'
+              WHEN EXISTS (SELECT 1 FROM loyalty_instruments i
+                            WHERE i.membership_id = l.id AND i.kind = l.benefit_kind
+                              AND COALESCE(i.issued_on, i.created_at::date) >= fee.date) THEN 'received'
+              WHEN CURRENT_DATE <= fee.date + l.benefit_window_days THEN 'awaiting'
+              ELSE 'overdue' END AS state
+    FROM linked l
+    LEFT JOIN LATERAL (
+      SELECT f.id, f.date, f.amount FROM fees f
+       WHERE f.account_id = l.card_account_id
+       ORDER BY f.date DESC, f.id DESC LIMIT 1
+    ) latest ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT latest.date
+       WHERE latest.id IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM refunds r
+            WHERE r.account_id = l.card_account_id AND r.amount = -latest.amount AND r.date >= latest.date
+              AND (SELECT f2.id FROM fees f2
+                    WHERE f2.account_id = r.account_id AND f2.amount = -r.amount AND f2.date <= r.date
+                    ORDER BY f2.date DESC, f2.id DESC LIMIT 1) = latest.id)
+    ) fee ON TRUE`;
+
+/**
+ * The fee watch of every LINKED membership among `ids` (all of them when null), by membership id.
+ * A membership with no card is absent: its `feeWatch` is null. Reads nothing but the card's rows
+ * through the read path and the membership's instruments, and writes nothing.
+ */
+async function feeWatchesOf(q: Queryable, ids: number[] | null): Promise<Map<number, LoyaltyFeeWatch>> {
+  const r = await q.query<{ id: number; feeDate: string | null; expectedBy: string | null; state: LoyaltyFeeWatchState | null }>(
+    FEE_WATCH_SQL, [ids]
+  );
+  return new Map(r.rows.map((w) => [w.id, { feeDate: w.feeDate, expectedBy: w.expectedBy, state: w.state }]));
+}
+
+/** The three benefit columns as the contract's object, or null when no benefit is described. */
+function benefitFrom(row: MembershipRow): LoyaltyBenefit | null {
+  if (row.benefit_kind === null || row.benefit_description === null || row.benefit_window_days === null) return null;
+  return { kind: row.benefit_kind, description: row.benefit_description, windowDays: row.benefit_window_days };
+}
+
+/**
+ * One membership as the contract shows it: masked number, current balance or four nulls, and the
+ * card. `feeWatch` is null exactly when no card is linked; a linked card always has one, because
+ * `feeWatchesOf` returns a row for every linked membership (all three fields null when there is no
+ * benefit and no fee).
+ */
+function membershipFrom(
+  row: MembershipRow,
+  current: ObservationRow | undefined,
+  watches: Map<number, LoyaltyFeeWatch>
+): LoyaltyMembership {
+  const linked = row.card_account_id !== null;
   return {
     id: row.id,
     memberId: row.member_id,
@@ -179,20 +319,50 @@ function membershipFrom(row: MembershipRow, current: ObservationRow | undefined)
     unit: current?.unit ?? null,
     asOf: current?.asOf ?? null,
     source: current?.source ?? null,
+    cardAccountId: row.card_account_id,
+    // An account with no stored name is still linked; '' keeps the id and the name null together.
+    cardAccountName: linked ? (row.card_account_name ?? '') : null,
+    benefit: benefitFrom(row),
+    feeWatch: linked ? (watches.get(row.id) ?? { feeDate: null, expectedBy: null, state: null }) : null,
   };
 }
 
+// The account is LEFT JOINed for its name alone: one account per id, so it cannot repeat a line.
 const MEMBERSHIP_SELECT = `
-  SELECT m.id, m.member_id, hm.display_name AS member_display_name, m.program_id, m.member_number, m.tier
+  SELECT m.id, m.member_id, hm.display_name AS member_display_name, m.program_id, m.member_number, m.tier,
+         m.card_account_id, a.name AS card_account_name,
+         m.benefit_kind, m.benefit_description, m.benefit_window_days
     FROM loyalty_memberships m
-    JOIN household_members hm ON hm.id = m.member_id`;
+    JOIN household_members hm ON hm.id = m.member_id
+    LEFT JOIN accounts a ON a.id = m.card_account_id`;
 
 /** The membership view for one id, or null when there is no such membership. */
 export async function membershipView(id: number, q: Queryable = db): Promise<LoyaltyMembership | null> {
   const r = await q.query<MembershipRow>(`${MEMBERSHIP_SELECT} WHERE m.id = $1`, [id]);
   if (r.rows.length === 0) return null;
-  const current = currentObservationByMembership(await observationsOf(q, [id])).get(id);
-  return membershipFrom(r.rows[0], current);
+  const [observations, watches] = await Promise.all([observationsOf(q, [id]), feeWatchesOf(q, [id])]);
+  const current = currentObservationByMembership(observations).get(id);
+  return membershipFrom(r.rows[0], current, watches);
+}
+
+/**
+ * What the card's own `/accounts/[id]` page says about it: the membership it earns into, with that
+ * program's name, or null when no membership has linked this account (always so for an account
+ * whose type is not `credit`, which can never be linked). At most one, by the unique index.
+ */
+export async function earningOfCard(
+  accountId: string,
+  q: Queryable = db
+): Promise<{ programName: string; membership: LoyaltyMembership } | null> {
+  const r = await q.query<{ id: number; program_name: string }>(
+    `SELECT m.id, p.name AS program_name
+       FROM loyalty_memberships m JOIN loyalty_programs p ON p.id = m.program_id
+      WHERE m.card_account_id = $1`,
+    [accountId]
+  );
+  if (r.rows.length === 0) return null;
+  const membership = await membershipView(r.rows[0].id, q);
+  return membership === null ? null : { programName: r.rows[0].program_name, membership };
 }
 
 interface InstrumentRow {
@@ -217,7 +387,7 @@ const INSTRUMENT_SELECT = `
  * loyalty accounts.
  */
 export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> {
-  const [members, programs, aliases, memberships, observations, instruments] = await Promise.all([
+  const [members, programs, aliases, memberships, observations, instruments, watches, cardAccounts] = await Promise.all([
     q.query<{ id: number; display_name: string; user_id: number | null }>(
       'SELECT id, display_name, user_id FROM household_members ORDER BY display_name, id'
     ),
@@ -230,6 +400,11 @@ export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> 
     q.query<MembershipRow>(`${MEMBERSHIP_SELECT} ORDER BY hm.display_name, m.id`),
     observationsOf(q, null),
     q.query<InstrumentRow>(INSTRUMENT_SELECT),
+    feeWatchesOf(q, null),
+    // The link picker's choices: every credit card, linked or not. No other type can be linked.
+    q.query<LoyaltyCardAccount>(
+      `SELECT id, coalesce(name, '') AS name FROM accounts WHERE type = 'credit' ORDER BY name, id`
+    ),
   ]);
 
   const aliasesOf = new Map<number, string[]>();
@@ -237,7 +412,7 @@ export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> 
   const current = currentObservationByMembership(observations);
   const membershipsOf = new Map<number, LoyaltyMembership[]>();
   for (const row of memberships.rows) {
-    membershipsOf.set(row.program_id, [...(membershipsOf.get(row.program_id) ?? []), membershipFrom(row, current.get(row.id))]);
+    membershipsOf.set(row.program_id, [...(membershipsOf.get(row.program_id) ?? []), membershipFrom(row, current.get(row.id), watches)]);
   }
 
   const programList: LoyaltyProgram[] = programs.rows.map((p) => ({
@@ -255,6 +430,7 @@ export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> 
     programs: programList,
     cards,
     instruments: sortInstruments(instruments.rows),
+    cardAccounts: cardAccounts.rows,
   };
 }
 
@@ -372,7 +548,9 @@ export async function patchProgram(id: number, body: LoyaltyProgramPatchRequest)
 
 export async function createMembership(body: LoyaltyMembershipCreateRequest): Promise<LoyaltyResult<LoyaltyMembership>> {
   try {
-    // card_account_id is not in the column list: it is reserved for a later step and stays NULL.
+    // card_account_id and the benefit columns are not in the column list: a membership is created
+    // unlinked and with no benefit (the create schema refuses both), and `patchMembership` is the one
+    // place a link or a benefit is set, because that is where their rules are checked.
     const r = await db.query<{ id: number }>(
       `INSERT INTO loyalty_memberships (member_id, program_id, member_number, tier)
        VALUES ($1, $2, $3, $4) RETURNING id`,
@@ -385,16 +563,52 @@ export async function createMembership(body: LoyaltyMembershipCreateRequest): Pr
   }
 }
 
+/**
+ * Edits a membership: the number, the tier, the card link and the benefit, each only when present.
+ *
+ * THE LINK. A non-null `cardAccountId` must name an account whose type is `credit`; anything else —
+ * no such account, or a checking, investment or loan account — is 400 `INVALID_INPUT` with nothing
+ * changed. A CHECK cannot read `accounts`, so this is the one place the rule is enforced; the type is
+ * read `FOR SHARE` inside the same transaction as the write, so it cannot change between the check
+ * and the link. A card another membership holds is the unique index's 23505, mapped to 409
+ * `CARD_ALREADY_LINKED` — the index decides, not a prior SELECT, so two links racing for one card
+ * give one 200 and one 409 and never a 500. `null` unlinks and touches nothing else: instruments and
+ * the benefit stay.
+ *
+ * THE BENEFIT. Stored trimmed, with `LOYALTY_BENEFIT_DEFAULT_WINDOW_DAYS` when no window is given:
+ * the column has no DEFAULT (it would fill rows that describe no benefit), so the route is where the
+ * default is written. `null` clears all three columns together.
+ */
 export async function patchMembership(id: number, body: LoyaltyMembershipPatchRequest): Promise<LoyaltyResult<LoyaltyMembership>> {
+  const linking = typeof body.cardAccountId === 'string' ? body.cardAccountId : null;
+  const benefit = body.benefit ?? null;
   try {
-    const r = await db.query(
-      `UPDATE loyalty_memberships
-          SET member_number = CASE WHEN $2 THEN $3 ELSE member_number END,
-              tier = CASE WHEN $4 THEN $5 ELSE tier END
-        WHERE id = $1 RETURNING id`,
-      [id, 'memberNumber' in body, storedNumber(body.memberNumber), 'tier' in body, storedText(body.tier)]
-    );
-    if (r.rows.length === 0) return notFound();
+    const outcome = await inTransaction(async (client): Promise<'missing' | 'not_credit' | 'done'> => {
+      if (linking !== null) {
+        const a = await client.query<{ type: string }>('SELECT type FROM accounts WHERE id = $1 FOR SHARE', [linking]);
+        if (a.rows.length === 0 || a.rows[0].type !== 'credit') return 'not_credit';
+      }
+      const r = await client.query(
+        `UPDATE loyalty_memberships
+            SET member_number = CASE WHEN $2 THEN $3 ELSE member_number END,
+                tier = CASE WHEN $4 THEN $5 ELSE tier END,
+                card_account_id = CASE WHEN $6 THEN $7::text ELSE card_account_id END,
+                benefit_kind = CASE WHEN $8 THEN $9::text ELSE benefit_kind END,
+                benefit_description = CASE WHEN $8 THEN $10::text ELSE benefit_description END,
+                benefit_window_days = CASE WHEN $8 THEN $11::int ELSE benefit_window_days END
+          WHERE id = $1 RETURNING id`,
+        [
+          id, 'memberNumber' in body, storedNumber(body.memberNumber), 'tier' in body, storedText(body.tier),
+          'cardAccountId' in body, linking,
+          'benefit' in body, benefit?.kind ?? null, storedText(benefit?.description),
+          benefit === null ? null : (benefit.windowDays ?? LOYALTY_BENEFIT_DEFAULT_WINDOW_DAYS),
+        ]
+      );
+      return r.rows.length === 0 ? 'missing' : 'done';
+    });
+    if (outcome === 'missing') return notFound();
+    if (outcome === 'not_credit') return fail('INVALID_INPUT', 'Only an existing credit card account can be linked.');
+    if ('cardAccountId' in body) log.info('loyalty card link changed', { count: 1 });
     return { ok: true, value: (await membershipView(id)) as LoyaltyMembership };
   } catch (err) {
     return fromPgError(err);

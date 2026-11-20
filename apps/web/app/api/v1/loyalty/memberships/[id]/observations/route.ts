@@ -11,8 +11,10 @@ import { answer, bodyOf, callerOf, idFrom, invalid } from '../../../loyaltyRespo
  *
  * Only POST is exported: there is no route that updates or deletes an observation, and Next answers
  * any other method here with 405.
- */
-export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+ *
+ * The membership view returned carries the card's fee watch (P8-42b): a date derived from a ledger
+ * row, never its text or amount, the same for every viewer — so this route is `numeric-only`.
+ */export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const caller = await callerOf(req);
   if (caller instanceof Response) return caller;
   const id = idFrom((await ctx.params).id);

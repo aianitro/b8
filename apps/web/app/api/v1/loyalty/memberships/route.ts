@@ -8,8 +8,10 @@ import { answer, bodyOf, callerOf } from '../loyaltyResponses';
  * tier. The answer carries the number MASKED; the full value is stored and only the copy route
  * returns it. One membership per (member, program): the unique constraint decides, so two
  * concurrent creates give one 201 and one 409, never a 500.
- */
-export async function POST(req: NextRequest) {
+ *
+ * The answer is the membership view (unlinked, so `feeWatch` is null); the view is `numeric-only`
+ * because the same shape carries a fee date once a card is linked.
+ */export async function POST(req: NextRequest) {
   const caller = await callerOf(req);
   if (caller instanceof Response) return caller;
   const body = await bodyOf(req, LoyaltyMembershipCreateRequestSchema);

@@ -381,17 +381,19 @@ describe('wiring', () => {
     expect(sidebarProblems(nav(e('/properties', 'Properties') + e('/travel', 'Travel') + e('/gifts', 'Gifts')))).toEqual(['wrong label']);
     expect(sidebarProblems(nav(e('/properties', 'Properties') + e('/gifts', 'Gifts')))).toEqual(['no /travel entry']);
 
-    // Registry: exactly the eleven route files, each no-transaction-data, and no other loyalty file.
+    // Registry: exactly the eleven route files and no other loyalty file. The four that return a membership view are
+    // numeric-only since P8-42b (they carry a fee date derived from a ledger row); the other seven no-transaction-data.
+    const membershipView = ['app/api/v1/loyalty/route.ts', 'app/api/v1/loyalty/memberships/route.ts', 'app/api/v1/loyalty/memberships/[id]/route.ts', 'app/api/v1/loyalty/memberships/[id]/observations/route.ts'];
     const listed = ROUTES.filter((r) => r.file.startsWith('app/api/v1/loyalty/'));
     expect(listed.map((r) => r.file).sort()).toEqual([...LOYALTY_ROUTE_FILES].sort());
-    for (const r of listed) expect(r.classes).toEqual(['no-transaction-data']);
+    for (const r of listed) expect(r.classes).toEqual(membershipView.includes(r.file) ? ['numeric-only'] : ['no-transaction-data']);
     const onDisk = filesUnder('app/api/v1/loyalty').filter((f) => f.endsWith('/route.ts')).sort();
     expect(onDisk).toEqual([...LOYALTY_ROUTE_FILES].sort());
-    expect(PAGES.find((p) => p.file === 'app/travel/page.tsx')?.classes).toEqual(['no-transaction-data']);
+    expect(PAGES.find((p) => p.file === 'app/travel/page.tsx')?.classes).toEqual(['numeric-only']);
     const surface = read('scripts/gifts-surface-check.mjs');
-    expect(surface).toContain(`'app/travel/page.tsx': { cls: 'no-transaction-data', url: () => '/travel' }`);
+    expect(surface).toContain(`'app/travel/page.tsx': { cls: 'numeric-only', url: () => '/travel' }`);
     expect(surface).toMatch(/current = 'H11';/);
-    expect(surface).toContain(`console.log('OK H1-H11');`);
+    expect(surface).toContain(`console.log('OK H1-H12');`);
 
     // Every route resolves its caller first, through the helper that calls the boundary's authorize.
     const helper = read('app/api/v1/loyalty/loyaltyResponses.ts');

@@ -5,6 +5,9 @@
 //
 // Everything here arrives as server props with member numbers MASKED (`loadOverview`). Nothing is
 // fetched on render; each edit is a write in an event handler followed by `router.refresh()`.
+//
+// The "Link a card" choices (P8-42b) are the server's credit cards less the ones a membership already
+// holds: one card earns into one membership, so a taken card is not offered.
 
 import type { LoyaltyOverview } from '@b8/contracts/loyalty';
 import LoyaltyAddPanel from './LoyaltyAddPanel';
@@ -13,6 +16,8 @@ import LoyaltyInstrumentList from './LoyaltyInstrumentList';
 
 export default function TravelBoard({ overview }: { overview: LoyaltyOverview }) {
   const programOf = new Map(overview.programs.map((p) => [p.id, p]));
+  const taken = new Set(overview.cards.flatMap((c) => c.memberships.map((m) => m.cardAccountId)));
+  const cardChoices = overview.cardAccounts.filter((a) => !taken.has(a.id));
   const holderOf = new Map(
     overview.cards.flatMap((c) => c.memberships.map((m) => [m.id, `${c.programName} · ${m.memberDisplayName}`] as const))
   );
@@ -33,7 +38,7 @@ export default function TravelBoard({ overview }: { overview: LoyaltyOverview })
         <div className="mb-8 grid gap-4">
           {overview.cards.map((card) => {
             const program = programOf.get(card.programId);
-            return program ? <LoyaltyProgramCard key={card.programId} card={card} program={program} /> : null;
+            return program ? <LoyaltyProgramCard key={card.programId} card={card} program={program} cardChoices={cardChoices} /> : null;
           })}
         </div>
       )}

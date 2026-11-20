@@ -1374,7 +1374,18 @@ CREATE INDEX IF NOT EXISTS loyalty_program_aliases_program ON loyalty_program_al
 --   member_number   — FULL value, stored trimmed; emitted MASKED everywhere except the one copy
 --                     route for a browser session. Never logged. NULL = none known (never '' or '-').
 --   tier            — free text as the program names it; NULL = not known.
---   card_account_id — reserved for step 42b, always NULL in 42a; nothing sets or emits it.
+--   card_account_id — the credit card that earns into this membership (step 42b); NULL = no card
+--                     linked, NOT "inherit". Type 'credit' is the PATCH route's check (a CHECK cannot
+--                     read accounts). At most one membership per card (the unique index below).
+--                     Unlinking sets only this column to NULL: instruments and benefit stay.
+--   benefit_*       — the card's annual benefit, described once per link (migration
+--                     1792800000000_loyalty_card_benefit): the instrument kind it issues, its
+--                     description, and the window in days after the fee posts. All three NULL
+--                     together (no benefit described) or all set. No column DEFAULT: the route
+--                     writes the default window. Not tied to the card, so it survives an unlink.
+-- NO FEE, FEE DATE, EXPECTED-BY DATE OR STATE COLUMN. The annual fee is found in the ledger on
+-- every read through the gift read path, and the state is derived from it, the instruments and
+-- CURRENT_DATE; a stored copy would go stale the moment a row synced or was refunded.
 CREATE TABLE loyalty_memberships (
   id               SERIAL PRIMARY KEY,
   member_id        INTEGER NOT NULL REFERENCES household_members(id),   -- no ON DELETE: nothing deletes members
@@ -1391,10 +1402,30 @@ CREATE TABLE loyalty_memberships (
                            AND char_length(tier) BETWEEN 1 AND 100)),
   card_account_id  TEXT REFERENCES accounts(id) ON UPDATE CASCADE ON DELETE SET NULL,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT loyalty_memberships_member_program_key UNIQUE (member_id, program_id)
+  -- Same four kinds as loyalty_instruments_kind_check: "received" matches an instrument of this kind.
+  benefit_kind     TEXT
+                     CONSTRAINT loyalty_memberships_benefit_kind_check
+                       CHECK (benefit_kind IS NULL
+                              OR benefit_kind IN ('free_night', 'companion_fare', 'travel_credit', 'other')),
+  benefit_description TEXT                                -- stored trimmed, 1 to 200 characters
+                     CONSTRAINT loyalty_memberships_benefit_description_trimmed
+                       CHECK (benefit_description IS NULL
+                              OR (benefit_description = btrim(benefit_description, E' \t\n\r\f\x0B')
+                                  AND char_length(benefit_description) BETWEEN 1 AND 200)),
+  benefit_window_days INTEGER                             -- calendar days after the fee's posted date
+                     CONSTRAINT loyalty_memberships_benefit_window_range
+                       CHECK (benefit_window_days IS NULL OR benefit_window_days BETWEEN 1 AND 365),
+  CONSTRAINT loyalty_memberships_member_program_key UNIQUE (member_id, program_id),
+  CONSTRAINT loyalty_memberships_benefit_complete
+    CHECK ((benefit_kind IS NULL) = (benefit_description IS NULL)
+           AND (benefit_kind IS NULL) = (benefit_window_days IS NULL))
 );
 
 CREATE INDEX IF NOT EXISTS loyalty_memberships_program ON loyalty_memberships (program_id);
+-- One card, one membership: one fee row must not open two expectations. A race is the route's 409
+-- CARD_ALREADY_LINKED (23505), never a 500.
+CREATE UNIQUE INDEX IF NOT EXISTS loyalty_memberships_one_per_card
+  ON loyalty_memberships (card_account_id) WHERE card_account_id IS NOT NULL;
 
 -- APPEND-ONLY balance readings: nothing updates or deletes a row; a correction is a newer row.
 --   as_of   — the calendar date the reading is true for; routes refuse one more than a day past

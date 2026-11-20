@@ -15,14 +15,18 @@
 // because the Enter key submits the form without touching the button. Removing a number is a
 // separate "Remove number" control with a confirming second tap; its Confirm handler is the only
 // place on the page that sends `memberNumber` as null.
+//
+// THE CARD (P8-42b) sits on its own row under the fields, in `LoyaltyCardLink`: the linked credit
+// card, its link and unlink controls, the benefit, and the fee watch.
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { LoyaltyMembership, LoyaltyObservationSource, LoyaltyUnit } from '@b8/contracts/loyalty';
+import type { LoyaltyCardAccount, LoyaltyMembership, LoyaltyObservationSource, LoyaltyUnit } from '@b8/contracts/loyalty';
 import { formatBalance } from '@/lib/domain/loyalty';
 import LoyaltyInlineText from './LoyaltyInlineText';
 import LoyaltyBalanceEditor from './LoyaltyBalanceEditor';
 import LoyaltyCopyNumber from './LoyaltyCopyNumber';
+import LoyaltyCardLink from './LoyaltyCardLink';
 import { send } from './LoyaltyRequest';
 
 const SOURCE_BADGE: Record<LoyaltyObservationSource, { label: string; cls: string }> = {
@@ -32,7 +36,9 @@ const SOURCE_BADGE: Record<LoyaltyObservationSource, { label: string; cls: strin
   screenshot: { label: 'screenshot', cls: 'bg-gray-100 text-gray-600' },
 };
 
-export default function LoyaltyMembershipLine({ m, defaultUnit }: { m: LoyaltyMembership; defaultUnit: LoyaltyUnit }) {
+export default function LoyaltyMembershipLine({
+  m, defaultUnit, cardChoices,
+}: { m: LoyaltyMembership; defaultUnit: LoyaltyUnit; cardChoices: LoyaltyCardAccount[] }) {
   const router = useRouter();
   const [entering, setEntering] = useState(false);
   // The "Remove number" control's two steps: a first tap only asks; Confirm sends.
@@ -142,6 +148,7 @@ export default function LoyaltyMembershipLine({ m, defaultUnit }: { m: LoyaltyMe
           </button>
         ))}
       </div>
+      <LoyaltyCardLink m={m} cardChoices={cardChoices} />
       {entering && (
         <LoyaltyBalanceEditor membershipId={m.id} unit={m.unit ?? defaultUnit} onClose={() => setEntering(false)} />
       )}
