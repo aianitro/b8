@@ -15,11 +15,18 @@
 // THE WINDOW IS SENT AS A JSON NUMBER, or not at all. Left empty, the server stores the default
 // window; anything that is not a whole number from 1 to 365 is refused by the contract and the
 // refusal is shown, never rounded here.
+//
+// THE EARN RATES (P8-42b2) sit on the same row: the estimate and the last comparison for a linked
+// card (`LoyaltyEarnLine`, the same component the card's account page renders), and the controls to
+// set and clear the rates (`LoyaltyEarnEditor`). The rates can be set before a card is linked; they
+// are kept across an unlink, and the estimate appears once a card is linked again.
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { LoyaltyCardAccount, LoyaltyInstrumentKind, LoyaltyMembership } from '@b8/contracts/loyalty';
 import LoyaltyFeeWatchLine from './LoyaltyFeeWatchLine';
+import LoyaltyEarnLine from './LoyaltyEarnLine';
+import LoyaltyEarnEditor from './LoyaltyEarnEditor';
 import { INSTRUMENT_KIND_LABEL } from './LoyaltyInstrumentList';
 import { send } from './LoyaltyRequest';
 
@@ -86,6 +93,12 @@ export default function LoyaltyCardLink({ m, cardChoices }: { m: LoyaltyMembersh
       <button type="button" onClick={() => setEditing(!editing)} className={`${CONTROL} text-gray-500 hover:bg-gray-100`}>
         {editing ? 'Cancel' : 'Set benefit'}
       </button>
+      <LoyaltyEarnEditor m={m} />
+      {m.cardAccountId !== null && (
+        <span className="basis-full">
+          <LoyaltyEarnLine m={m} tone="gray" />
+        </span>
+      )}
       {editing && (
         <div className="basis-full mt-1 grid gap-2 bg-gray-50 rounded-lg p-3">
           <div className="flex flex-wrap gap-2">

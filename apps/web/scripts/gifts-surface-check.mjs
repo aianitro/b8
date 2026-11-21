@@ -9,8 +9,10 @@
 //
 // P8-42a added H11 (the loyalty page and overview, SPEC.md S10 of P8-42a-loyalty-model-page-import).
 // P8-42b added H12 (a credit card linked to a membership, its annual fee held by a second gift, the
-// fee watch on /travel, /accounts/<card> and the API through every state), so the final success line
-// is now `OK H1-H12`.
+// fee watch on /travel, /accounts/<card> and the API through every state). P8-42b2 added H13 (the
+// earn estimate and its comparison with the next reading, with a gift-held row that must not count,
+// driven by the pinned fixture `lib/fixtures/loyalty-earn-cases.json`), so the final success line is
+// now `OK H1-H13`.
 //
 // ─── Why it needs its own database ────────────────────────────────────────────────────────────
 //
@@ -478,7 +480,114 @@ try {
   }
   pass('H12', `both users, 8 steps over /travel, /accounts/${w.card} and /api/v1/loyalty: a gift-held fee is no fee for either; revealed, fee date ${feeDate} and expected by ${expectedBy} (Postgres dates), then overdue, received, no state without a benefit, and no Earns into once unlinked; the held row's name and amount appear on neither /travel nor the API`);
 
-  console.log('OK H1-H12');
+  // ── H13 ── (P8-42b2) The earn estimate and the comparison with the next reading, over real HTTP
+  // for both people, on /travel, /accounts/<card> and the API. Driven entirely by the `h13` group of
+  // the pinned, fabricated fixture `lib/fixtures/loyalty-earn-cases.json` (read with fs, not
+  // imported): its reading, its rows, its earn description and its eight steps with what each must
+  // show. No figure is written here; every expected figure is the fixture's and every date is
+  // Postgres's.
+  //
+  // The card is the fabricated one the earlier steps use. Its rows from H1 to H12 must not price into
+  // this step's figures, which the fixture computed from its own rows alone: the H1 gift row is still
+  // held (H4 moved its reveal back), so it is no spend for anyone; the H12 fee row is an annual fee,
+  // never spend; the ordinary row dated today WOULD be spend, so it is moved to the day before this
+  // step's reading, outside both the estimate's period and the comparison's window. The held row of
+  // this step is held by a third gift with the H12 pattern (giver: the second user, recipient: the
+  // owner), so a held row is proved to be no spend for either viewer, the giver included.
+  current = 'H13';
+  const H = JSON.parse(readFileSync(join(WEB, 'lib/fixtures/loyalty-earn-cases.json'), 'utf8')).h13;
+  const EARN_GIFT = 'ZQ42B2 EARN GIFT';
+  const quote = (t) => `'${String(t).replace(/'/g, "''")}'`;
+  const earnMember = Number(psql(`
+    UPDATE transactions SET date = CURRENT_DATE + ${Number(H.reading.day) - 1} WHERE plaid_transaction_id = 'zq41b-check-plain';
+    INSERT INTO household_members (display_name) VALUES ('ZQ42B2 Surface Member');
+    INSERT INTO loyalty_memberships (member_id, program_id)
+      VALUES ((SELECT id FROM household_members WHERE display_name = 'ZQ42B2 Surface Member'),
+              (SELECT id FROM loyalty_programs ORDER BY id OFFSET 2 LIMIT 1))
+      RETURNING id;`).split('\n').pop());
+  for (const r of H.rows) {
+    psql(`INSERT INTO transactions (plaid_transaction_id, account_id, date, amount, name)
+            VALUES (${quote(`zq42b2-check-${r.ref}`)}, '${w.card}', CURRENT_DATE + ${Number(r.day)}, ${quote(r.amount)}::numeric, ${quote(r.name)})`);
+  }
+  for (const r of H.rows.filter((x) => x.heldByGift)) {
+    psql(`INSERT INTO gifts (giver_user_id, recipient_user_id, merchant, window_start, window_end, reveal_date, state)
+            VALUES ((SELECT id FROM users WHERE NOT is_owner), (SELECT id FROM users WHERE is_owner), '${EARN_GIFT}',
+                    CURRENT_DATE - 10, CURRENT_DATE - 1, CURRENT_DATE + ${Number(r.revealDay)}, 'matched');
+          INSERT INTO gift_transactions (transaction_id, gift_id, prior_mapped_category, prior_rule_applied)
+            VALUES ((SELECT id FROM transactions WHERE plaid_transaction_id = ${quote(`zq42b2-check-${r.ref}`)}),
+                    (SELECT id FROM gifts WHERE merchant = '${EARN_GIFT}'), NULL, FALSE)`);
+  }
+  const revealEarnGift = (n) => psql(`UPDATE gifts SET reveal_date = CURRENT_DATE + ${Number(n)} WHERE merchant = '${EARN_GIFT}'`);
+
+  async function earnWrite(method, path, body, status) {
+    const res = await fetch(`${ORIGIN}${path}`, {
+      method,
+      headers: { cookie: `b8_session=${w.owner}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    check('H13', res.status === status, `${method} ${path} answered ${res.status}`);
+  }
+  const patchEarnMembership = (body) => earnWrite('PATCH', `/api/v1/loyalty/memberships/${earnMember}`, body, 200);
+  const addEarnReading = async (r) =>
+    earnWrite('POST', `/api/v1/loyalty/memberships/${earnMember}/observations`, { asOf: day(r.day), balance: r.balance, unit: r.unit }, 201);
+
+  /** What each fixture step does, by its id; the fixture says what each must show. */
+  const ACTIONS = {
+    H1: () => patchEarnMembership({ cardAccountId: w.card }),
+    H2: () => patchEarnMembership({ earn: H.earn }),
+    H3: () => revealEarnGift(-1),
+    H4: () => revealEarnGift(30),
+    H5: async (s) => { revealEarnGift(-1); await addEarnReading(s.reading); },
+    H6: (s) => addEarnReading(s.reading),
+    H7: () => patchEarnMembership({ earn: null }),
+    H8: () => patchEarnMembership({ cardAccountId: null }),
+  };
+
+  /** The expected figure object with its day offsets turned into Postgres dates, compared key by key. */
+  const withDates = (o) => {
+    const out = { ...o };
+    for (const [k, to] of [['sinceDay', 'since'], ['fromDay', 'from'], ['toDay', 'to']]) {
+      if (k in out) { out[to] = day(out[k]); delete out[k]; }
+    }
+    return out;
+  };
+  const agrees = (actual, expected) => (expected === null ? actual === null
+    : actual !== null && Object.entries(withDates(expected)).every(([k, v]) => JSON.stringify(actual[k]) === JSON.stringify(v)));
+
+  await addEarnReading(H.reading);
+  const shown = [];
+  for (const step of H.steps) {
+    const action = ACTIONS[step.id];
+    check('H13', action !== undefined, `the fixture step ${step.id} has no action here`);
+    await action(step);
+    const views = [];
+    for (const [who, token] of VIEWERS) {
+      const pages = { '/travel': uncommented((await get('/travel', token)).text), [`/accounts/${w.card}`]: uncommented((await get(`/accounts/${w.card}`, token)).text) };
+      const apiText = (await get('/api/v1/loyalty', token)).text;
+      const m = JSON.parse(apiText).data.cards.flatMap((c) => c.memberships).find((x) => x.id === earnMember);
+      check('H13', m !== undefined, `${step.id}: the membership is missing from the API for the ${who}`);
+      for (const key of ['earn', 'earnEstimate', 'earnComparison']) {
+        if (key in step.expect) check('H13', agrees(m[key], step.expect[key]), `${step.id}: ${key} is ${JSON.stringify(m[key])} for the ${who}`);
+      }
+      for (const [where, html] of Object.entries(pages)) {
+        for (const t of step.expect.htmlHas ?? []) check('H13', hasText(html, t), `${step.id}: ${where} lacks "${t}" (${who})`);
+        for (const t of step.expect.htmlAbsent ?? []) check('H13', !hasText(html, t), `${step.id}: ${where} shows "${t}" (${who})`);
+      }
+      const forbiddenIn = { '/travel': pages['/travel'], '/api/v1/loyalty': apiText };
+      for (const where of H.forbiddenOn) {
+        for (const t of H.forbiddenText) check('H13', !holds(forbiddenIn[where], t), `${step.id}: ${where} holds "${t}" (${who})`);
+      }
+      views.push(m);
+    }
+    check('H13', JSON.stringify(views[0].earnEstimate) === JSON.stringify(views[1].earnEstimate)
+      && JSON.stringify(views[0].earnComparison) === JSON.stringify(views[1].earnComparison), `${step.id}: the two viewers got different figures`);
+    shown.push(views[0]);
+  }
+  const atH2 = shown[1].earnEstimate;
+  const atH5 = shown[4].earnComparison;
+  pass('H13', `both users, ${H.steps.length} fixture steps over /travel, /accounts/${w.card} and /api/v1/loyalty: estimate ${atH2.amount} ${atH2.unit} since ${atH2.since} (${atH2.basis}) with the held row excluded for both, counted once revealed, excluded again when held; comparison ${atH5.from} to ${atH5.to} estimated ${atH5.estimated} reported ${atH5.actual} (${atH5.differencePercent}%, worth a look ${atH5.worthALook}); cleared and unlinked show no figure; the held row's name and the payment, fee and held amounts appear on neither /travel nor the API`);
+
+  console.log('OK H1-H13');
 } catch (error) {
   exitCode = 1;
   if (error instanceof StepFailure) console.log(`${error.step} FAIL ${error.message}`);

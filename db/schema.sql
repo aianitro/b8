@@ -1383,9 +1383,16 @@ CREATE INDEX IF NOT EXISTS loyalty_program_aliases_program ON loyalty_program_al
 --                     description, and the window in days after the fee posts. All three NULL
 --                     together (no benefit described) or all set. No column DEFAULT: the route
 --                     writes the default window. Not tied to the card, so it survives an unlink.
+--   earn_base_rate  — the earn description's base rate (step 42b-2, migration
+--                     1792900000000_loyalty_earn_rules): units of the estimate's unit per one
+--                     currency unit of spend no rule matches, zero to one hundred inclusive. NULL =
+--                     no earn description stored (and then no loyalty_earn_rules rows), so the
+--                     estimate is null, never zero. NOT an inheriting column. Kept across an unlink.
 -- NO FEE, FEE DATE, EXPECTED-BY DATE OR STATE COLUMN. The annual fee is found in the ledger on
 -- every read through the gift read path, and the state is derived from it, the instruments and
 -- CURRENT_DATE; a stored copy would go stale the moment a row synced or was refunded.
+-- NO EARN ESTIMATE, COMPARISON, MISS MARK, SPEND FIGURE OR PERIOD COLUMN, for the same reason: all
+-- are derived on every read from the ledger, the rules, the readings and CURRENT_DATE.
 CREATE TABLE loyalty_memberships (
   id               SERIAL PRIMARY KEY,
   member_id        INTEGER NOT NULL REFERENCES household_members(id),   -- no ON DELETE: nothing deletes members
@@ -1415,6 +1422,9 @@ CREATE TABLE loyalty_memberships (
   benefit_window_days INTEGER                             -- calendar days after the fee's posted date
                      CONSTRAINT loyalty_memberships_benefit_window_range
                        CHECK (benefit_window_days IS NULL OR benefit_window_days BETWEEN 1 AND 365),
+  earn_base_rate   NUMERIC(7, 4)                          -- NULL = no earn description; never float
+                     CONSTRAINT loyalty_memberships_earn_base_rate_range
+                       CHECK (earn_base_rate IS NULL OR earn_base_rate BETWEEN 0 AND 100),
   CONSTRAINT loyalty_memberships_member_program_key UNIQUE (member_id, program_id),
   CONSTRAINT loyalty_memberships_benefit_complete
     CHECK ((benefit_kind IS NULL) = (benefit_description IS NULL)
@@ -1426,6 +1436,34 @@ CREATE INDEX IF NOT EXISTS loyalty_memberships_program ON loyalty_memberships (p
 -- CARD_ALREADY_LINKED (23505), never a 500.
 CREATE UNIQUE INDEX IF NOT EXISTS loyalty_memberships_one_per_card
   ON loyalty_memberships (card_account_id) WHERE card_account_id IS NOT NULL;
+
+-- The bonus rules of a membership's earn description (step 42b-2; the migration
+-- 1792900000000_loyalty_earn_rules has the argument for a table over a JSON column). CONFIGURATION,
+-- typed by a person: read in ascending position, and the first rule that matches a spend row decides
+-- its rate; earn_base_rate prices the rest. The rules belong to the membership, not the card link,
+-- so an unlink keeps them; ON DELETE CASCADE because a rule cannot outlive its membership.
+--   match_kind — 'category': exact equality with mapped_category after trimming and case-folding
+--                (never prefix, substring or pattern). 'merchant': a whole-word literal phrase in
+--                name or merchant_name, case-folded and whitespace-collapsed.
+--   match_text — stored trimmed, 1 to 100 characters; the merchant-only limits are the request
+--                schema's. Compared literally, never as a pattern.
+--   rate       — NUMERIC(7,4), zero to one hundred inclusive; zero earns nothing.
+-- One rule per position, so the match order is total and a duplicate position is 23505.
+CREATE TABLE loyalty_earn_rules (
+  id             SERIAL PRIMARY KEY,
+  membership_id  INTEGER NOT NULL REFERENCES loyalty_memberships(id) ON DELETE CASCADE,
+  position       INTEGER NOT NULL,
+  match_kind     TEXT NOT NULL
+                   CONSTRAINT loyalty_earn_rules_match_kind_check
+                     CHECK (match_kind IN ('category', 'merchant')),
+  match_text     TEXT NOT NULL
+                   CONSTRAINT loyalty_earn_rules_match_text_trimmed
+                     CHECK (match_text = btrim(match_text, E' \t\n\r\f\x0B')
+                            AND char_length(match_text) BETWEEN 1 AND 100),
+  rate           NUMERIC(7, 4) NOT NULL
+                   CONSTRAINT loyalty_earn_rules_rate_range CHECK (rate BETWEEN 0 AND 100),
+  CONSTRAINT loyalty_earn_rules_membership_position_key UNIQUE (membership_id, position)
+);
 
 -- APPEND-ONLY balance readings: nothing updates or deletes a row; a correction is a newer row.
 --   as_of   — the calendar date the reading is true for; routes refuse one more than a day past

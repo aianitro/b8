@@ -101,12 +101,56 @@ export const LOYALTY_BENEFIT_WINDOW_MIN_DAYS = 1;
 export const LOYALTY_BENEFIT_WINDOW_MAX_DAYS = 365;
 export const LOYALTY_BENEFIT_DEFAULT_WINDOW_DAYS = 45;
 
+/**
+ * THE EARN DESCRIPTION (P8-42b2). How a rule matches spend. Equals `loyalty_earn_rules_match_kind_check`
+ * in migrations/1792900000000_loyalty_earn_rules.sql.
+ *
+ *   category — the row's mapped category equals the rule's text after both are trimmed and
+ *              case-folded. Exact equality: never a prefix, a substring or a pattern.
+ *   merchant — the rule's text, case-folded and whitespace-collapsed, appears as a whole-word literal
+ *              phrase in the row's name or its merchant name.
+ */
+export const LOYALTY_EARN_MATCH_KINDS = ['category', 'merchant'] as const;
+/**
+ * Where the estimate's period starts. NEVER STORED. `reading`: the day after the current reading's
+ * as-of date. `last_30_days`: there is no reading, so the period is the last
+ * `LOYALTY_EARN_FALLBACK_DAYS` days, and the page says so.
+ */
+export const LOYALTY_EARN_BASES = ['reading', 'last_30_days'] as const;
+/**
+ * The units an estimate or a comparison can be in. `nights` is deliberately absent: a program
+ * counted in nights has no per-currency earn, so its estimate and comparison are null, never zero.
+ */
+export const LOYALTY_EARN_UNITS = ['points', 'miles', 'usd'] as const;
+/** At most this many bonus rules per membership (the base rate is not a rule). */
+export const LOYALTY_EARN_MAX_RULES = 20;
+/**
+ * The largest rate, inclusive. Equals the upper bound of `loyalty_memberships_earn_base_rate_range`
+ * and `loyalty_earn_rules_rate_range`. The input pattern allows at most three integer digits, so
+ * raising this past three digits means widening that pattern and the column's precision together.
+ */
+export const LOYALTY_EARN_MAX_RATE = 100;
+/** With no reading, the estimate covers this many days ending on Postgres's CURRENT_DATE. */
+export const LOYALTY_EARN_FALLBACK_DAYS = 30;
+/**
+ * The "worth a look" threshold, in percent of the estimate. A constant on purpose: not stored, not
+ * configurable per membership. Strictly greater than is a miss; exactly the threshold is not.
+ */
+export const LOYALTY_EARN_MISS_PERCENT = 25;
+/** A category rule's text, in characters once trimmed. Equals the table's bound on `match_text`. */
+export const LOYALTY_EARN_CATEGORY_MATCH_MAX_CHARS = 100;
+/** A merchant rule's text, in characters once trimmed. Tighter than the table's shared bound. */
+export const LOYALTY_EARN_MERCHANT_MATCH_MAX_CHARS = 60;
+
 export const LoyaltyUnitSchema = z.enum(LOYALTY_UNITS);
 export const LoyaltyProgramKindSchema = z.enum(LOYALTY_PROGRAM_KINDS);
 export const LoyaltyInstrumentKindSchema = z.enum(LOYALTY_INSTRUMENT_KINDS);
 export const LoyaltyObservationSourceSchema = z.enum(LOYALTY_OBSERVATION_SOURCES);
 export const LoyaltyInstrumentSourceSchema = z.enum(LOYALTY_INSTRUMENT_SOURCES);
 export const LoyaltyFeeWatchStateSchema = z.enum(LOYALTY_FEE_WATCH_STATES);
+export const LoyaltyEarnMatchKindSchema = z.enum(LOYALTY_EARN_MATCH_KINDS);
+export const LoyaltyEarnBasisSchema = z.enum(LOYALTY_EARN_BASES);
+export const LoyaltyEarnUnitSchema = z.enum(LOYALTY_EARN_UNITS);
 
 /**
  * The codes these endpoints define. A SUBSET, NOT A CLOSURE: the boundary's `UNAUTHENTICATED` (401)
@@ -265,6 +309,91 @@ export const LoyaltyBenefitInputSchema = z.strictObject({
   windowDays: LoyaltyBenefitWindowDaysSchema.optional(),
 });
 
+/**
+ * The rate rule (SPEC.md Conventions, "Rate text"): one to three integer digits, optionally a
+ * decimal point and one to four digits, and at most `LOYALTY_EARN_MAX_RATE`. A fifth fractional
+ * digit is refused, never rounded. No sign, exponent, separator, surrounding space or leading `.`.
+ * Zero is valid ("earns nothing"). Decided on the text alone: the integer part has at most three
+ * digits, so converting it is exact, and the fraction is only ever tested for being all zeros.
+ */
+export function isEarnRateText(text: string): boolean {
+  const m = /^(\d{1,3})(?:\.(\d{1,4}))?$/.exec(text);
+  if (!m) return false;
+  const whole = Number(m[1]);
+  return whole < LOYALTY_EARN_MAX_RATE || (whole === LOYALTY_EARN_MAX_RATE && /^0*$/.test(m[2] ?? ''));
+}
+
+/**
+ * A rate AS SUBMITTED: decimal text, never a JSON number (a number has already been through binary
+ * floating point before the handler sees it). Stored as NUMERIC(7,4).
+ */
+export const LoyaltyEarnRateInputSchema = z
+  .string()
+  .refine(isEarnRateText, `a rate is decimal text from 0 to ${LOYALTY_EARN_MAX_RATE} with at most four decimals`);
+
+/**
+ * A merchant rule's text, tested once trimmed: starts with a letter or digit and holds only letters,
+ * digits, spaces, `&`, `'` and `-`. So no character in it can be read as a pattern character by any
+ * matcher (`%`, `_`, `.`, `*`, brackets, backslash and slash are all refused). Built with the
+ * constructor so the Unicode property escapes do not depend on the compile target.
+ */
+const MERCHANT_MATCH_TEXT = new RegExp("^[\\p{L}\\p{Nd}][\\p{L}\\p{Nd} &'-]*$", 'u');
+
+const merchantMatch = z
+  .string()
+  .refine((s) => MERCHANT_MATCH_TEXT.test(s.trim()), 'a merchant rule is letters, digits, spaces, &, \' and -, starting with a letter or digit')
+  .refine(
+    (s) => chars(s.trim()) <= LOYALTY_EARN_MERCHANT_MATCH_MAX_CHARS,
+    `a merchant rule is at most ${LOYALTY_EARN_MERCHANT_MATCH_MAX_CHARS} characters`
+  );
+
+/**
+ * One bonus rule AS SUBMITTED. Strict, and the kind decides the text rule: a category text is not
+ * blank and at most `LOYALTY_EARN_CATEGORY_MATCH_MAX_CHARS` once trimmed (any characters, compared
+ * literally); a merchant text follows `MERCHANT_MATCH_TEXT` and `LOYALTY_EARN_MERCHANT_MATCH_MAX_CHARS`.
+ * The handler stores the trimmed text. Error messages never echo the submitted text.
+ */
+export const LoyaltyEarnRuleInputSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('category'),
+    match: typedName(LOYALTY_EARN_CATEGORY_MATCH_MAX_CHARS, 'a category rule'),
+    rate: LoyaltyEarnRateInputSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('merchant'),
+    match: merchantMatch,
+    rate: LoyaltyEarnRateInputSchema,
+  }),
+]);
+
+/**
+ * The key under which two rules can never both match first: same kind, and the same text as the
+ * matcher compares it (trimmed and case-folded; a merchant phrase also whitespace-collapsed). A
+ * second rule with the same key could never decide a row, so it is refused rather than stored dead.
+ */
+const earnRuleKey = (r: { kind: string; match: string }) =>
+  `${r.kind}\u0000${
+    r.kind === 'merchant' ? r.match.trim().toLowerCase().replace(/\s+/g, ' ') : r.match.trim().toLowerCase()
+  }`;
+
+/**
+ * A membership's earn description AS SUBMITTED on the membership PATCH: the COMPLETE description, a
+ * replacement and not an addition. `baseRate` and `rules` are both required (`rules` may be empty).
+ * The array order is the stored order and the match order. The handler replaces the base rate and
+ * every rule in one transaction, or applies nothing.
+ */
+export const LoyaltyEarnInputSchema = z
+  .strictObject({
+    baseRate: LoyaltyEarnRateInputSchema,
+    rules: z
+      .array(LoyaltyEarnRuleInputSchema)
+      .max(LOYALTY_EARN_MAX_RULES, `at most ${LOYALTY_EARN_MAX_RULES} earn rules`),
+  })
+  .refine((e) => new Set(e.rules.map(earnRuleKey)).size === e.rules.length, {
+    message: 'two rules of the same kind match the same text; the second could never apply',
+    path: ['rules'],
+  });
+
 // ─── Requests ───────────────────────────────────────────────────────────────────────────────────
 
 /** `POST /api/v1/loyalty/members`. `userId` absent or null: this person is not a b8 user. */
@@ -336,6 +465,10 @@ export const LoyaltyMembershipCreateRequestSchema = z.strictObject({
  *
  * `benefit` describes the card's annual benefit; `null` clears all three of its columns. Accepted on
  * an unlinked membership too (it is inert until a card is linked).
+ *
+ * `earn` (P8-42b2) replaces the whole earn description — base rate and every rule — in one
+ * transaction; `null` deletes every rule and nulls the base rate. Accepted on an unlinked membership
+ * (inert until a card is linked). The create schema does not accept it.
  */
 export const LoyaltyMembershipPatchRequestSchema = z
   .strictObject({
@@ -343,6 +476,7 @@ export const LoyaltyMembershipPatchRequestSchema = z
     tier: typedName(100, 'a tier').nullable().optional(),
     cardAccountId: z.string().min(1, 'a card account id may not be empty').nullable().optional(),
     benefit: LoyaltyBenefitInputSchema.nullable().optional(),
+    earn: LoyaltyEarnInputSchema.nullable().optional(),
   })
   .refine((b) => Object.keys(b).length > 0, 'nothing to change');
 
@@ -484,6 +618,143 @@ export const LoyaltyFeeWatchSchema = z
   );
 
 /**
+ * A rate as emitted: the NUMERIC(7,4) column's `::text`, so exactly four decimals and no leading
+ * zero (a page may trim trailing zeros by string work). Within the same bounds as the input.
+ */
+export const LoyaltyEarnRateSchema = z
+  .string()
+  .refine((s) => /^(?:0|[1-9]\d{0,2})\.\d{4}$/.test(s) && isEarnRateText(s), 'expected a rate with exactly four decimals');
+
+/** One stored bonus rule, in stored order. `match` is the trimmed text as stored. */
+export const LoyaltyEarnRuleSchema = z.strictObject({
+  kind: LoyaltyEarnMatchKindSchema,
+  match: z.string().min(1),
+  rate: LoyaltyEarnRateSchema,
+});
+
+/** A membership's stored earn description. `rules` is in stored (match) order and may be empty. */
+export const LoyaltyEarnSchema = z.strictObject({
+  baseRate: LoyaltyEarnRateSchema,
+  rules: z.array(LoyaltyEarnRuleSchema).max(LOYALTY_EARN_MAX_RULES),
+});
+
+/**
+ * A signed estimate figure in its unit, as emitted: canonical decimal text from Postgres's single
+ * `round(numeric, scale)` of the exact sum. Whole units (`points`, `miles`): an optional minus, then
+ * digits with no leading zero and no decimal point. `usd`: the same with exactly two decimals. The
+ * plain zero only: a negative zero is refused. Negative is legitimate (refunds outweighing
+ * purchases in the window) and is never clamped.
+ */
+export function isEarnFigureForUnit(unit: string, text: string): boolean {
+  const shaped = unit === 'usd' ? /^-?(?:0|[1-9]\d*)\.\d{2}$/.test(text) : /^-?(?:0|[1-9]\d*)$/.test(text);
+  return shaped && !/^-0(?:\.00)?$/.test(text);
+}
+
+/** A canonical figure is zero exactly when it is the plain zero of its scale. */
+const isZeroFigure = (text: string) => /^0(?:\.00)?$/.test(text);
+
+/** A canonical figure in minor units (the decimal point removed), for exact comparison. */
+const minorUnits = (text: string) => BigInt(text.replace('.', ''));
+
+/**
+ * THE EARN ESTIMATE — derived on every read, never stored (P8-42b2).
+ *
+ *   since  — the period's start, exclusive: the current reading's as-of date (`basis: reading`), or
+ *            CURRENT_DATE minus `LOYALTY_EARN_FALLBACK_DAYS` (`basis: last_30_days`). The period ends
+ *            on CURRENT_DATE inclusive. Postgres `::text`.
+ *   unit   — the current reading's unit, or with no reading the program's default unit. Never
+ *            `nights` (the estimate is null then, not zero).
+ *   amount — the card's purchases less its refunds since `since`, each priced by its first matching
+ *            rule (or the base rate), summed exactly and rounded once. See `isEarnFigureForUnit`.
+ *
+ * Strict: no spend total, row, merchant or per-rule breakdown can be carried. The same for every
+ * viewer: a row held by an unrevealed gift is never spend for anyone.
+ */
+export const LoyaltyEarnEstimateSchema = z
+  .strictObject({
+    since: calendarDate,
+    basis: LoyaltyEarnBasisSchema,
+    unit: LoyaltyEarnUnitSchema,
+    amount: z.string(),
+  })
+  .refine((e) => isEarnFigureForUnit(e.unit, e.amount), {
+    message: 'the estimate is not canonical decimal text for its unit',
+    path: ['amount'],
+  });
+
+/** A difference percentage as emitted: signed, exactly one decimal, the plain zero only. */
+const isDifferencePercentText = (text: string) => /^-?(?:0|[1-9]\d*)\.\d$/.test(text) && text !== '-0.0';
+
+/**
+ * THE MISS RULE (SPEC.md Conventions), decided exactly on the emitted figures and never on the
+ * rounded percentage. With a zero estimate: a miss exactly when the actual is not zero. Otherwise:
+ * a miss exactly when one hundred times the absolute difference is STRICTLY greater than
+ * `LOYALTY_EARN_MISS_PERCENT` times the absolute estimate. Integer arithmetic in minor units (both
+ * figures share the unit's scale), never a JS float.
+ */
+export function isEarnMiss(estimated: string, actual: string): boolean {
+  const zero = BigInt(0);
+  const abs = (x: bigint) => (x < zero ? -x : x);
+  const e = minorUnits(estimated);
+  const a = minorUnits(actual);
+  if (e === zero) return a !== zero;
+  return BigInt(100) * abs(a - e) > BigInt(LOYALTY_EARN_MISS_PERCENT) * abs(e);
+}
+
+/**
+ * THE LATEST "ESTIMATE VS ACTUAL" — derived on every read, never stored (P8-42b2).
+ *
+ *   from, to          — the previous and the current reading's as-of dates; `from` is strictly
+ *                       before `to`. The window is the days after `from` up to and including `to`.
+ *   unit              — both readings' unit (they must agree, or there is no comparison). Never
+ *                       `nights`.
+ *   estimated         — the estimate over that window, canonical for the unit.
+ *   actual            — current balance minus previous balance, exact, canonical for the unit.
+ *   differencePercent — one hundred times (actual minus estimated) over the absolute estimated,
+ *                       rounded once to one decimal, half away from zero. Null exactly when
+ *                       `estimated` is zero (no division by zero, and never shown as zero).
+ *   worthALook        — `isEarnMiss(estimated, actual)`. Advisory only; no alert, no push.
+ *
+ * Refinements make a contradiction unparseable: dates out of order, a non-canonical figure, a
+ * negative zero, a percentage present with a zero estimate or absent with a non-zero one, a
+ * `worthALook` that disagrees with the miss rule. Strict: no spend figure can be carried.
+ */
+export const LoyaltyEarnComparisonSchema = z
+  .strictObject({
+    from: calendarDate,
+    to: calendarDate,
+    unit: LoyaltyEarnUnitSchema,
+    estimated: z.string(),
+    actual: z.string(),
+    differencePercent: z.string().nullable(),
+    worthALook: z.boolean(),
+  })
+  .refine((c) => c.from < c.to, { message: 'from must be before to', path: ['from'] })
+  .refine((c) => isEarnFigureForUnit(c.unit, c.estimated), {
+    message: 'estimated is not canonical decimal text for its unit',
+    path: ['estimated'],
+  })
+  .refine((c) => isEarnFigureForUnit(c.unit, c.actual), {
+    message: 'actual is not canonical decimal text for its unit',
+    path: ['actual'],
+  })
+  .refine((c) => c.differencePercent === null || isDifferencePercentText(c.differencePercent), {
+    message: 'differencePercent is signed text with exactly one decimal',
+    path: ['differencePercent'],
+  })
+  .refine((c) => (c.differencePercent === null) === isZeroFigure(c.estimated), {
+    message: 'differencePercent is null exactly when the estimate is zero',
+    path: ['differencePercent'],
+  })
+  .refine(
+    (c) =>
+      // Only judged on well-formed figures; a malformed one is already reported above.
+      !(isEarnFigureForUnit(c.unit, c.estimated) && isEarnFigureForUnit(c.unit, c.actual)) ||
+      c.worthALook === isEarnMiss(c.estimated, c.actual),
+    { message: 'worthALook does not follow the miss rule', path: ['worthALook'] }
+  );
+
+/**
  * One credit account a membership may be linked to — the `/travel` link picker's choices. Only
  * accounts whose type is `credit`. `name` is the account's display name as stored.
  */
@@ -509,6 +780,15 @@ export const LoyaltyCardAccountSchema = z.strictObject({
  * linked, and otherwise always an object (all three fields null for a linked card with no benefit
  * and no fee). When `feeWatch` is present, its `state` is null exactly when `benefit` is null: there
  * is a state only when there is something to wait for.
+ *
+ * THE EARN DESCRIPTION AND ITS DERIVED FIGURES (P8-42b2). `earn` is the stored description, or null
+ * when none is stored; like `benefit` it is kept across an unlink. `earnEstimate` and
+ * `earnComparison` are DERIVED on every read and never stored. `earnEstimate` is null when no card
+ * is linked, `earn` is null, or the unit is `nights`. `earnComparison` is null in those cases and
+ * also when fewer than two readings exist on different as-of dates or the latest two differ in unit.
+ * A null is rendered as an absent phrase, never as `0`; a genuine zero is a figure. All three keys
+ * are required (nullable, never optional). The same for every viewer. Never `feeWatch`'s concern:
+ * the earn description does not alter any `feeWatch` field.
  */
 export const LoyaltyMembershipSchema = z
   .strictObject({
@@ -526,6 +806,17 @@ export const LoyaltyMembershipSchema = z
     cardAccountName: z.string().nullable(),
     benefit: LoyaltyBenefitSchema.nullable(),
     feeWatch: LoyaltyFeeWatchSchema.nullable(),
+    earn: LoyaltyEarnSchema.nullable(),
+    earnEstimate: LoyaltyEarnEstimateSchema.nullable(),
+    earnComparison: LoyaltyEarnComparisonSchema.nullable(),
+  })
+  .refine((m) => m.earnEstimate === null || (m.cardAccountId !== null && m.earn !== null), {
+    message: 'an estimate needs a linked card and an earn description',
+    path: ['earnEstimate'],
+  })
+  .refine((m) => m.earnComparison === null || (m.cardAccountId !== null && m.earn !== null), {
+    message: 'a comparison needs a linked card and an earn description',
+    path: ['earnComparison'],
   })
   .refine((m) => (m.cardAccountId === null) === (m.cardAccountName === null), {
     message: 'cardAccountId and cardAccountName are null together or present together',
@@ -630,6 +921,15 @@ export type LoyaltyBenefitInput = z.infer<typeof LoyaltyBenefitInputSchema>;
 export type LoyaltyBenefit = z.infer<typeof LoyaltyBenefitSchema>;
 export type LoyaltyFeeWatch = z.infer<typeof LoyaltyFeeWatchSchema>;
 export type LoyaltyCardAccount = z.infer<typeof LoyaltyCardAccountSchema>;
+export type LoyaltyEarnMatchKind = z.infer<typeof LoyaltyEarnMatchKindSchema>;
+export type LoyaltyEarnBasis = z.infer<typeof LoyaltyEarnBasisSchema>;
+export type LoyaltyEarnUnit = z.infer<typeof LoyaltyEarnUnitSchema>;
+export type LoyaltyEarnRuleInput = z.infer<typeof LoyaltyEarnRuleInputSchema>;
+export type LoyaltyEarnInput = z.infer<typeof LoyaltyEarnInputSchema>;
+export type LoyaltyEarnRule = z.infer<typeof LoyaltyEarnRuleSchema>;
+export type LoyaltyEarn = z.infer<typeof LoyaltyEarnSchema>;
+export type LoyaltyEarnEstimate = z.infer<typeof LoyaltyEarnEstimateSchema>;
+export type LoyaltyEarnComparison = z.infer<typeof LoyaltyEarnComparisonSchema>;
 export type LoyaltyMemberCreateRequest = z.infer<typeof LoyaltyMemberCreateRequestSchema>;
 export type LoyaltyMemberPatchRequest = z.infer<typeof LoyaltyMemberPatchRequestSchema>;
 export type LoyaltyProgramCreateRequest = z.infer<typeof LoyaltyProgramCreateRequestSchema>;

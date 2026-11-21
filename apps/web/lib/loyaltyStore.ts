@@ -36,6 +36,14 @@
 // fixed message, a count and at most an error CODE — never a number, a name, a label or a balance —
 // so an operator can see that writes happen without the log becoming a copy of the data.
 //
+// ─── THE EARN DESCRIPTION AND ITS FIGURES (P8-42b2) ───────────────────────────────────────────
+//
+// A third ledger read follows from the link: the card's spend, priced by the membership's earn
+// rules, for the estimate and the comparison. It lives in `loyaltyEarn.ts`, through the same gift
+// read path and as the same viewer `null` as the fee watch, and only the rounded, priced total
+// leaves the database — never a row, a name or an amount. The description is configuration and is
+// written here only through `replaceEarn`, inside the membership PATCH's one transaction.
+//
 // ─── APPEND-ONLY OBSERVATIONS ─────────────────────────────────────────────────────────────────
 //
 // `addObservation` INSERTs. There is no statement here, or anywhere in loyalty code, that updates or
@@ -46,6 +54,7 @@ import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import db from './db';
 import { createLogger } from './logger';
 import { visibleTransactions } from './giftReadPath';
+import { earnDescriptionsOf, earnFiguresOf, replaceEarn } from './loyaltyEarn';
 import {
   currentObservationByMembership,
   maskMemberNumber,
@@ -57,6 +66,7 @@ import { LOYALTY_BENEFIT_DEFAULT_WINDOW_DAYS } from '@b8/contracts/loyalty';
 import type {
   LoyaltyBenefit,
   LoyaltyCardAccount,
+  LoyaltyEarn,
   LoyaltyErrorCode,
   LoyaltyFeeWatch,
   LoyaltyFeeWatchState,
@@ -115,6 +125,9 @@ function fromPgError(err: unknown): LoyaltyFailure {
       case 'household_members_display_name_ci': return fail('MEMBER_NAME_TAKEN');
       case 'household_members_user_id_key': return fail('MEMBER_USER_TAKEN');
       case 'loyalty_memberships_one_per_card': return fail('CARD_ALREADY_LINKED');
+      // Positions are written one to n inside one transaction, so this cannot happen on a body the
+      // contract accepted; if it ever does it is the request's 400, never a 500.
+      case 'loyalty_earn_rules_membership_position_key': return fail('INVALID_INPUT');
     }
   }
   if (e?.code === '23503') return fail('INVALID_INPUT', 'A referenced member, program, membership or user does not exist.');
@@ -162,9 +175,10 @@ interface MembershipRow {
   benefit_kind: LoyaltyInstrumentKind | null;
   benefit_description: string | null;
   benefit_window_days: number | null;
+  program_default_unit: LoyaltyUnit;
 }
 
-interface ObservationRow {
+export interface ObservationRow {
   membershipId: number;
   id: number;
   asOf: string;
@@ -305,7 +319,8 @@ function benefitFrom(row: MembershipRow): LoyaltyBenefit | null {
 function membershipFrom(
   row: MembershipRow,
   current: ObservationRow | undefined,
-  watches: Map<number, LoyaltyFeeWatch>
+  watches: Map<number, LoyaltyFeeWatch>,
+  earn: Earning
 ): LoyaltyMembership {
   const linked = row.card_account_id !== null;
   return {
@@ -324,16 +339,41 @@ function membershipFrom(
     cardAccountName: linked ? (row.card_account_name ?? '') : null,
     benefit: benefitFrom(row),
     feeWatch: linked ? (watches.get(row.id) ?? { feeDate: null, expectedBy: null, state: null }) : null,
+    earn: earn.descriptions.get(row.id) ?? null,
+    earnEstimate: earn.figures.get(row.id)?.earnEstimate ?? null,
+    earnComparison: earn.figures.get(row.id)?.earnComparison ?? null,
   };
 }
 
-// The account is LEFT JOINed for its name alone: one account per id, so it cannot repeat a line.
+/** The earn descriptions and the figures derived from them, for a set of membership rows. */
+type Earning = { descriptions: Map<number, LoyaltyEarn>; figures: Awaited<ReturnType<typeof earnFiguresOf>> };
+
+/**
+ * The earn description and the derived figures of `rows`. `ids` scopes the description read (null:
+ * every membership, for the overview). Reads only; the figures are computed afresh on every call.
+ */
+async function earningOf(q: Queryable, rows: MembershipRow[], ids: number[] | null, observations: ObservationRow[]): Promise<Earning> {
+  const descriptions = await earnDescriptionsOf(q, ids);
+  const figures = await earnFiguresOf(
+    q,
+    rows.map((r) => ({ id: r.id, cardAccountId: r.card_account_id, programDefaultUnit: r.program_default_unit })),
+    descriptions,
+    observations
+  );
+  return { descriptions, figures };
+}
+
+// The account is LEFT JOINed for its name alone: one account per id, so it cannot repeat a line. The
+// program is joined for its default unit, the earn estimate's unit when there is no reading (one
+// program per membership, by the foreign key, so it cannot repeat a line either).
 const MEMBERSHIP_SELECT = `
   SELECT m.id, m.member_id, hm.display_name AS member_display_name, m.program_id, m.member_number, m.tier,
          m.card_account_id, a.name AS card_account_name,
-         m.benefit_kind, m.benefit_description, m.benefit_window_days
+         m.benefit_kind, m.benefit_description, m.benefit_window_days,
+         p.default_unit AS program_default_unit
     FROM loyalty_memberships m
     JOIN household_members hm ON hm.id = m.member_id
+    JOIN loyalty_programs p ON p.id = m.program_id
     LEFT JOIN accounts a ON a.id = m.card_account_id`;
 
 /** The membership view for one id, or null when there is no such membership. */
@@ -342,7 +382,8 @@ export async function membershipView(id: number, q: Queryable = db): Promise<Loy
   if (r.rows.length === 0) return null;
   const [observations, watches] = await Promise.all([observationsOf(q, [id]), feeWatchesOf(q, [id])]);
   const current = currentObservationByMembership(observations).get(id);
-  return membershipFrom(r.rows[0], current, watches);
+  const earn = await earningOf(q, r.rows, [id], observations);
+  return membershipFrom(r.rows[0], current, watches, earn);
 }
 
 /**
@@ -410,9 +451,10 @@ export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> 
   const aliasesOf = new Map<number, string[]>();
   for (const a of aliases.rows) aliasesOf.set(a.program_id, [...(aliasesOf.get(a.program_id) ?? []), a.alias]);
   const current = currentObservationByMembership(observations);
+  const earn = await earningOf(q, memberships.rows, null, observations);
   const membershipsOf = new Map<number, LoyaltyMembership[]>();
   for (const row of memberships.rows) {
-    membershipsOf.set(row.program_id, [...(membershipsOf.get(row.program_id) ?? []), membershipFrom(row, current.get(row.id), watches)]);
+    membershipsOf.set(row.program_id, [...(membershipsOf.get(row.program_id) ?? []), membershipFrom(row, current.get(row.id), watches, earn)]);
   }
 
   const programList: LoyaltyProgram[] = programs.rows.map((p) => ({
@@ -575,6 +617,10 @@ export async function createMembership(body: LoyaltyMembershipCreateRequest): Pr
  * give one 200 and one 409 and never a 500. `null` unlinks and touches nothing else: instruments and
  * the benefit stay.
  *
+ * THE EARN DESCRIPTION (P8-42b2). `earn` replaces the base rate and every rule, in submitted order,
+ * inside the same transaction (`replaceEarn`); `null` clears both. Accepted on an unlinked membership,
+ * where it is inert until a card is linked, and kept across an unlink, as the benefit is.
+ *
  * THE BENEFIT. Stored trimmed, with `LOYALTY_BENEFIT_DEFAULT_WINDOW_DAYS` when no window is given:
  * the column has no DEFAULT (it would fill rows that describe no benefit), so the route is where the
  * default is written. `null` clears all three columns together.
@@ -604,11 +650,16 @@ export async function patchMembership(id: number, body: LoyaltyMembershipPatchRe
           benefit === null ? null : (benefit.windowDays ?? LOYALTY_BENEFIT_DEFAULT_WINDOW_DAYS),
         ]
       );
-      return r.rows.length === 0 ? 'missing' : 'done';
+      if (r.rows.length === 0) return 'missing';
+      // The earn description, whole or cleared, in this same transaction: a refusal anywhere above or
+      // in it rolls back the link, the benefit and the description together.
+      if (body.earn !== undefined) await replaceEarn(client, id, body.earn);
+      return 'done';
     });
     if (outcome === 'missing') return notFound();
     if (outcome === 'not_credit') return fail('INVALID_INPUT', 'Only an existing credit card account can be linked.');
     if ('cardAccountId' in body) log.info('loyalty card link changed', { count: 1 });
+    if (body.earn !== undefined) log.info('loyalty earn description changed', { count: body.earn === null ? 0 : body.earn.rules.length });
     return { ok: true, value: (await membershipView(id)) as LoyaltyMembership };
   } catch (err) {
     return fromPgError(err);

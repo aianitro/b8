@@ -393,7 +393,7 @@ describe('wiring', () => {
     const surface = read('scripts/gifts-surface-check.mjs');
     expect(surface).toContain(`'app/travel/page.tsx': { cls: 'numeric-only', url: () => '/travel' }`);
     expect(surface).toMatch(/current = 'H11';/);
-    expect(surface).toContain(`console.log('OK H1-H12');`);
+    expect(surface).toContain(`console.log('OK H1-H13');`);
 
     // Every route resolves its caller first, through the helper that calls the boundary's authorize.
     const helper = read('app/api/v1/loyalty/loyaltyResponses.ts');

@@ -8,11 +8,16 @@
 // fee date and the state here are the ones there. Nothing is edited here; the link and the benefit
 // are managed on /travel, which the card links to.
 //
-// The accounts pages are `slate-*`, so the fee line is asked for its slate palette.
+// P8-42b2: under the fee line, what this card's spend should have earned since the program's last
+// reading and how the last estimate compared (`LoyaltyEarnLine`, the same component /travel renders),
+// or the phrase saying no rates are set. The rates themselves are set on /travel.
+//
+// The accounts pages are `slate-*`, so the fee and earn lines are asked for their slate palette.
 
 import Link from 'next/link';
 import type { LoyaltyMembership } from '@b8/contracts/loyalty';
 import LoyaltyFeeWatchLine from './LoyaltyFeeWatchLine';
+import LoyaltyEarnLine from './LoyaltyEarnLine';
 
 export default function AccountEarnsInto({ programName, membership }: { programName: string; membership: LoyaltyMembership }) {
   const watch = membership.feeWatch;
@@ -32,6 +37,9 @@ export default function AccountEarnsInto({ programName, membership }: { programN
           <LoyaltyFeeWatchLine watch={watch} benefit={membership.benefit} tone="slate" />
         </p>
       )}
+      <p className="text-xs mt-1">
+        <LoyaltyEarnLine m={membership} tone="slate" />
+      </p>
     </div>
   );
 }

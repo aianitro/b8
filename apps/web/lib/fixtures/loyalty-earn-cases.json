@@ -1,0 +1,159 @@
+{
+  "note": "FABRICATED TEST DATA. Every name, amount, rate and expected figure in this file is invented for tests and has no relation to any real account, card, merchant or program. Day fields are offsets in calendar days from the database's CURRENT_DATE.",
+  "version": 1,
+  "defaults": {
+    "row": { "day": -5, "amount": "100.00", "name": "ZQ42B2 SHOP", "category": "ZQ42B2 Shop", "account": "card", "hidden": false, "transferGroup": false },
+    "reading": { "day": -30, "balance": "1000", "unit": "points" },
+    "baseRate": "1",
+    "spendBaselineExpected": "100",
+    "matchRules": [
+      { "kind": "category", "match": "ZQ42B2 Hotel", "rate": "3" },
+      { "kind": "merchant", "match": "zq42b2 hotelco", "rate": "5" }
+    ]
+  },
+  "configCases": [
+    { "id": "K1", "baseRate": "1.5", "rules": [ { "kind": "category", "match": "ZQ42B2 Hotel", "rate": "3" }, { "kind": "merchant", "match": "zq42b2 hotelco", "rate": "5" } ], "emitted": { "baseRate": "1.5000", "rules": [ "3.0000", "5.0000" ] }, "why": "rates come back with exactly four decimals and the rules keep their submitted order" },
+    { "id": "K2", "baseRate": "2", "rules": [], "emitted": { "baseRate": "2.0000", "rules": [] }, "why": "a base rate with no rules is a valid description" }
+  ],
+  "estimateCases": [
+    { "id": "E1", "baseRate": "1.5", "rows": [ { "amount": "123.45" } ], "expected": "185", "why": "the exact product is a long decimal and is rounded once at the end" },
+    { "id": "E2", "baseRate": "5", "rows": [ { "amount": "0.10" } ], "expected": "1", "why": "an exact half rounds away from zero" },
+    { "id": "E3", "baseRate": "5", "rows": [ { "amount": "0.30" } ], "expected": "2", "why": "an exact half rounds away from zero" },
+    { "id": "E4", "baseRate": "5", "rows": [ { "amount": "0.08" } ], "expected": "0", "why": "below a half rounds down" },
+    { "id": "E5", "baseRate": "5", "rows": [ { "amount": "-0.10", "name": "ZQ42B2 STORE" } ], "expected": "-1", "why": "a negative exact half rounds away from zero" },
+    { "id": "E6", "baseRate": "5", "rows": [ { "amount": "-0.08", "name": "ZQ42B2 STORE" } ], "expected": "0", "why": "a small negative rounds to a plain zero, never a negative zero" },
+    { "id": "E7", "baseRate": "2.5", "rules": [ { "kind": "category", "match": "ZQ42B2 A", "rate": "5" } ], "rows": [ { "amount": "0.10", "category": "ZQ42B2 A" }, { "amount": "0.20" } ], "expected": "1", "why": "two terms of exactly one half sum to exactly one; rounding each term first would give two" },
+    { "id": "E8", "baseRate": "1.5", "rules": [ { "kind": "category", "match": "ZQ42B2 Travel", "rate": "3" } ], "rows": [ { "amount": "1000.00", "category": "ZQ42B2 Travel" }, { "amount": "20.00" } ], "expected": "3030", "why": "a bonus rule and the base rate are summed exactly" },
+    { "id": "E9", "baseRate": "0.3333", "rows": [ { "amount": "1000.00" } ], "expected": "333", "why": "a four-decimal rate is used at full precision" },
+    { "id": "E10", "readingUnit": "usd", "readingBalance": "1000.00", "baseRate": "0.0125", "rows": [ { "amount": "100.40" } ], "expected": "1.26", "why": "cash has two decimals and an exact half rounds up" },
+    { "id": "E11", "readingUnit": "usd", "readingBalance": "1000.00", "baseRate": "0.0125", "rows": [ { "amount": "100.25" } ], "expected": "1.25", "why": "cash rounds down below a half" },
+    { "id": "E12", "readingUnit": "usd", "readingBalance": "1000.00", "baseRate": "0.0125", "rows": [ { "amount": "-100.40", "name": "ZQ42B2 STORE" } ], "expected": "-1.26", "why": "a negative cash half rounds away from zero" },
+    { "id": "E13", "baseRate": "1", "rules": [ { "kind": "category", "match": "ZQ42B2 Bank Fees", "rate": "0" } ], "rows": [ { "amount": "25.00", "category": "ZQ42B2 Bank Fees" }, { "amount": "10.00" } ], "expected": "10", "why": "a rule with rate zero earns nothing and is a way to exclude a category" },
+    { "id": "E14", "baseRate": "1.5", "rows": [], "expected": "0", "why": "nothing spent is a number, not a missing value" },
+    { "id": "E15", "noEarn": true, "rows": [ { "amount": "100.00" } ], "expected": null, "why": "no earn description means no estimate, not zero" },
+    { "id": "E16", "baseRate": "2", "rows": [ { "amount": "10.00" } ], "expected": "20", "why": "points unit, rate is units per currency unit" },
+    { "id": "E17", "readingUnit": "miles", "baseRate": "2", "rows": [ { "amount": "10.00" } ], "expected": "20", "why": "miles use the same scale as points" },
+    { "id": "E18", "readingUnit": "usd", "readingBalance": "1000.00", "baseRate": "0.02", "rows": [ { "amount": "10.00" } ], "expected": "0.20", "why": "cash unit gives two decimals" },
+    { "id": "E19", "readingUnit": "nights", "baseRate": "2", "rows": [ { "amount": "10.00" } ], "expected": null, "why": "nights have no per-currency earn, so the estimate is missing rather than zero" }
+  ],
+  "spendCases": [
+    { "id": "S1", "rows": [ { "amount": "-500.00", "name": "ZQ42B2 PAYMENT THANK YOU", "category": "ZQ42B2 Payments" } ], "expected": "100", "why": "a card payment is not a refund" },
+    { "id": "S2", "rows": [ { "amount": "-500.00", "name": "ZQ42B2 AUTOPAY", "category": "ZQ42B2 Payments" } ], "expected": "100", "why": "an autopay credit is not a refund" },
+    { "id": "S3", "rows": [ { "amount": "-500.00", "name": "ZQ42B2 ONLINE TRANSFER", "transferGroup": true } ], "expected": "100", "why": "a credit in a transfer group is not spend" },
+    { "id": "S4", "rows": [ { "amount": "700.00", "name": "ZQ42B2 XFER OUT", "transferGroup": true } ], "expected": "100", "why": "a purchase in a transfer group is not spend" },
+    { "id": "S5", "rows": [ { "amount": "300.00", "name": "ZQ42B2 MOVE", "category": "ZQ42B2 Transfer" } ], "expected": "100", "why": "a half-paired transfer, categorised as a transfer with no group, is not spend" },
+    { "id": "S6", "setup": { "budgetCategories": [ { "name": "ZQ42B2 Salary", "isIncome": true, "excludeFromBudget": false } ] }, "rows": [ { "amount": "-200.00", "name": "ZQ42B2 EMPLOYER", "category": "ZQ42B2 Salary" } ], "expected": "100", "why": "an income credit is not a refund" },
+    { "id": "S7", "rows": [ { "amount": "-900.00", "name": "ZQ42B2 LOAN DISBURSEMENT" } ], "expected": "100", "why": "loan money in is not a refund" },
+    { "id": "S8", "rows": [ { "amount": "-50.00", "name": "ZQ42B2 STORE", "category": null } ], "expected": "100", "why": "an uncategorised credit is not trusted to be a refund" },
+    { "id": "S9", "rows": [ { "amount": "61.29", "name": "ZQ42B2 ANNUAL MEMBERSHIP FEE", "category": "ZQ42B2 Bank Fees" } ], "expected": "100", "why": "the annual fee is not spend" },
+    { "id": "S10", "rows": [ { "amount": "61.29", "name": "ZQ42B2 ANNUAL MEMBERSHIP FEE", "category": "ZQ42B2 Bank Fees" }, { "day": -3, "amount": "-61.29", "name": "ZQ42B2 ANNUAL MEMBERSHIP FEE REFUND" } ], "expected": "100", "why": "a refunded annual fee is not spend and its refund does not reduce spend" },
+    { "id": "S11", "rows": [ { "amount": "61.29", "name": "ZQ42B2 ANNUAL MEMBERSHIP FEE", "category": "ZQ42B2 Bank Fees" }, { "day": -3, "amount": "-61.29", "name": "ZQ42B2 STATEMENT REFUND" } ], "expected": "100", "why": "a refund-worded credit equal to the fee is the fee's refund, not a spend refund" },
+    { "id": "S12", "rows": [ { "amount": "0.00", "name": "ZQ42B2 ZERO" } ], "expected": "100", "why": "a row of exactly zero counts for nothing" },
+    { "id": "S13", "rows": [ { "amount": "-40.00", "name": "ZQ42B2 REWARDS REDEMPTION" } ], "expected": "100", "why": "a reward redemption credit is not a refund" },
+    { "id": "S14", "rows": [ { "day": -20, "amount": "61.29", "name": "ZQ42B2 ANNUAL MEMBERSHIP FEE", "category": "ZQ42B2 Bank Fees" }, { "day": -5, "amount": "95.00", "name": "ZQ42B2 ANNUAL FEE", "category": "ZQ42B2 Bank Fees" } ], "expected": "100", "why": "every annual-fee debit is excluded, not only the latest" },
+    { "id": "S15", "rows": [ { "amount": "300.00", "name": "ZQ42B2 SHOP", "account": "other" } ], "expected": "100", "why": "another credit account's spend is not this card's" },
+    { "id": "S16", "rows": [ { "amount": "40.00", "name": "ZQ42B2 ELECTRIC PAYMENT" } ], "expected": "140", "why": "a purchase whose name says payment is still spend" },
+    { "id": "S17", "rows": [ { "amount": "-40.00", "name": "ZQ42B2 STORE" } ], "expected": "60", "why": "a categorised ordinary credit is a refund and reduces spend" },
+    { "id": "S18", "rows": [ { "amount": "61.00", "name": "ZQ42B2 BIANNUAL FEE" } ], "expected": "161", "why": "a similar word is not the annual fee, so it is spend" },
+    { "id": "S19", "rows": [ { "amount": "25.00", "name": "ZQ42B2 HIDDEN BUY", "hidden": true } ], "expected": "125", "why": "a hidden purchase still earned" },
+    { "id": "S20", "rows": [ { "amount": "80.00", "name": "ZQ42B2 NO CATEGORY", "category": null } ], "expected": "180", "why": "an uncategorised purchase is spend at the base rate" },
+    { "id": "S21", "setup": { "budgetCategories": [ { "name": "ZQ42B2 Excluded", "isIncome": false, "excludeFromBudget": true } ] }, "rows": [ { "amount": "30.00", "name": "ZQ42B2 EXCLUDED BUY", "category": "ZQ42B2 Excluded" } ], "expected": "130", "why": "a purchase in a category excluded from the budget still earned" }
+  ],
+  "matchCases": [
+    { "id": "M1", "rows": [ { "name": "ZQ42B2 HOTELCO STAY", "category": "ZQ42B2 Hotel" } ], "expected": "300", "why": "a row matching two rules takes the first" },
+    { "id": "M2", "rulesOrder": "reversed", "rows": [ { "name": "ZQ42B2 HOTELCO STAY", "category": "ZQ42B2 Hotel" } ], "expected": "500", "why": "the same row after the rules are re-submitted in reverse order takes the other rule" },
+    { "id": "M3", "rows": [ { "name": "ZQ42B2 UNRELATED", "category": "zq42b2 hotel " } ], "expected": "300", "why": "category match ignores case and surrounding space" },
+    { "id": "M4", "rows": [ { "name": "ZQ42B2 HOTELCOS" } ], "expected": "100", "why": "a merchant phrase inside a longer word is not a whole-word match" },
+    { "id": "M5", "rows": [ { "name": "ZQ42B2 HOTELCO-NYC" } ], "expected": "500", "why": "a hyphen is a word boundary" },
+    { "id": "M6", "rows": [ { "name": "ZQ42B2   HOTELCO" } ], "expected": "500", "why": "runs of spaces in the row are collapsed" },
+    { "id": "M7", "rows": [ { "name": "ZQ42B2 POS 0001", "merchantName": "ZQ42B2 HotelCo" } ], "expected": "500", "why": "the merchant name is read as well as the name" },
+    { "id": "M8", "rows": [ { "name": "ZQ42B2 HOTELCOLLECTION" } ], "expected": "100", "why": "a longer word that begins with the phrase does not match" },
+    { "id": "M9", "rows": [ { "name": "ZQ42B2 UNRELATED", "category": "ZQ42B2 Dining" } ], "expected": "100", "why": "a rule for another category is not applied" },
+    { "id": "M10", "rows": [ { "name": "ZQ42B2 UNRELATED", "category": "ZQ42B2 Hotel Taxes" } ], "expected": "100", "why": "category match is exact, not a prefix or substring" },
+    { "id": "M11", "rows": [ { "name": "ZQ42B2 UNRELATED", "category": null } ], "expected": "100", "why": "no category matches no category rule" },
+    { "id": "M12", "rows": [ { "name": "ZQ42B2 STAY", "category": "ZQ42B2 Hotel" }, { "amount": "-10.00", "name": "ZQ42B2 HOTELCO REFUND", "category": "ZQ42B2 Hotel" } ], "expected": "270", "why": "a refund is priced by the first matching rule, here the category rule, and reduces the estimate" },
+    { "id": "M13", "rules": [ { "kind": "category", "match": "ZQ42B2 %", "rate": "3" } ], "rows": [ { "name": "ZQ42B2 UNRELATED", "category": "ZQ42B2 Hotel" } ], "expected": "100", "why": "a percent sign in a category rule is a literal character, not a wildcard" },
+    { "id": "M14", "rows": [ { "name": "ZQ42B2 HOTELCO (A+B)" } ], "expected": "500", "why": "pattern characters in a row's own name do not break a literal merchant match" }
+  ],
+  "periodCases": [
+    { "id": "P1", "readings": [ { "day": -30, "balance": "1000" } ], "rows": [ { "day": -31 }, { "day": -30 }, { "day": -29 }, { "day": 0 }, { "day": 1 } ], "expected": { "amount": "200", "sinceDay": -30, "basis": "reading" }, "why": "spend on the reading's own date and before it is excluded, the next day and today are included, tomorrow is excluded" },
+    { "id": "P2", "readings": [ { "day": -30, "balance": "1000" } ], "rows": [ { "day": -30, "authorizedDay": -29 } ], "expected": { "amount": "0", "sinceDay": -30, "basis": "reading" }, "why": "the posted date decides, not a later authorized date" },
+    { "id": "P3", "readings": [ { "day": -30, "balance": "1000" } ], "rows": [ { "day": -29, "authorizedDay": -35 } ], "expected": { "amount": "100", "sinceDay": -30, "basis": "reading" }, "why": "the posted date decides, not an earlier authorized date" },
+    { "id": "P4", "readings": [ { "day": -30, "balance": "1000" }, { "day": -10, "balance": "1500" } ], "rows": [ { "day": -20 }, { "day": -5 } ], "expected": { "amount": "100", "sinceDay": -10, "basis": "reading" }, "why": "a newer reading moves the start of the period" },
+    { "id": "P5", "readings": [ { "day": -30, "balance": "1000" }, { "day": -10, "balance": "1500" }, { "day": -90, "balance": "500" } ], "rows": [ { "day": -20 }, { "day": -5 } ], "expected": { "amount": "100", "sinceDay": -10, "basis": "reading" }, "why": "an older-dated reading entered later changes nothing" },
+    { "id": "P6", "readings": [ { "day": -30, "balance": "1000" }, { "day": -10, "balance": "1500" }, { "day": -10, "balance": "1600" } ], "rows": [ { "day": -20 }, { "day": -5 } ], "expected": { "amount": "100", "sinceDay": -10, "basis": "reading" }, "why": "a typed correction on the current reading's date leaves the period unchanged" },
+    { "id": "P7", "readings": [ { "day": 0, "balance": "1000" } ], "rows": [ { "day": -1 }, { "day": 0 } ], "expected": { "amount": "0", "sinceDay": 0, "basis": "reading" }, "why": "a reading dated today leaves an empty period and a true zero" },
+    { "id": "P8", "readings": [ { "day": 1, "balance": "1000" } ], "rows": [ { "day": 0 } ], "expected": { "amount": "0", "sinceDay": 1, "basis": "reading" }, "why": "a reading dated tomorrow leaves an empty period and a true zero" },
+    { "id": "P9", "readings": [], "programDefaultUnit": "points", "rows": [ { "day": -30 }, { "day": -29 } ], "expected": { "amount": "100", "sinceDay": -30, "basis": "last_30_days", "unit": "points" }, "why": "with no reading the period is the last 30 days and the unit is the program's default" },
+    { "id": "P10", "readings": [], "programDefaultUnit": "usd", "baseRate": "0.05", "rows": [ { "day": -5 } ], "expected": { "amount": "5.00", "sinceDay": -30, "basis": "last_30_days", "unit": "usd" }, "why": "with no reading a cash program gives two decimals" },
+    { "id": "P11", "readings": [], "programDefaultUnit": "nights", "rows": [ { "day": -5 } ], "expected": { "amount": null }, "why": "with no reading and a nights program there is no estimate" }
+  ],
+  "comparisonCases": [
+    { "id": "C1", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1450" } ], "rows": [ { "day": -45 } ], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "400", "actual": "450", "differencePercent": "12.5", "worthALook": false }, "why": "a small positive difference is not a miss" },
+    { "id": "C2", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1250" } ], "rows": [ { "day": -45 } ], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "400", "actual": "250", "differencePercent": "-37.5", "worthALook": true }, "why": "a large shortfall is a miss" },
+    { "id": "C3", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1500" } ], "rows": [ { "day": -45 } ], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "400", "actual": "500", "differencePercent": "25.0", "worthALook": false }, "why": "exactly the threshold above the estimate is not a miss" },
+    { "id": "C4", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1501" } ], "rows": [ { "day": -45 } ], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "400", "actual": "501", "differencePercent": "25.3", "worthALook": true }, "why": "just above the threshold is a miss and the percentage rounds half away from zero" },
+    { "id": "C5", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1300" } ], "rows": [ { "day": -45 } ], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "400", "actual": "300", "differencePercent": "-25.0", "worthALook": false }, "why": "exactly the threshold below the estimate is not a miss" },
+    { "id": "C6", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1299" } ], "rows": [ { "day": -45 } ], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "400", "actual": "299", "differencePercent": "-25.3", "worthALook": true }, "why": "just below the threshold is a miss and the negative percentage rounds half away from zero" },
+    { "id": "C7", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1000" } ], "rows": [], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "0", "actual": "0", "differencePercent": null, "worthALook": false }, "why": "zero against zero has no percentage and is not a miss" },
+    { "id": "C8", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1010" } ], "rows": [], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "0", "actual": "10", "differencePercent": null, "worthALook": true }, "why": "a zero estimate against a non-zero actual has no percentage and is a miss" },
+    { "id": "C9", "baseRate": "5", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1003" } ], "rows": [ { "day": -45, "amount": "0.08" } ], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "0", "actual": "3", "differencePercent": null, "worthALook": true }, "why": "the verdict uses the emitted estimate, which rounded to zero" },
+    { "id": "C10", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1800" } ], "rows": [ { "day": -60 }, { "day": -59 }, { "day": -30 }, { "day": -29 } ], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "800", "actual": "800", "differencePercent": "0.0", "worthALook": false }, "estimateExpected": "400", "why": "the window excludes the earlier reading's date and includes the later one; the day after the later reading belongs to the estimate" },
+    { "id": "C11", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1450" }, { "day": -10, "balance": "1850" } ], "rows": [ { "day": -45 }, { "day": -20 }, { "day": -5 } ], "expected": { "fromDay": -30, "toDay": -10, "unit": "points", "estimated": "400", "actual": "400", "differencePercent": "0.0", "worthALook": false }, "estimateExpected": "400", "why": "with three readings the comparison is the latest pair and each purchase is counted in exactly one window" },
+    { "id": "C12", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000" }, { "day": -30, "balance": "1450" }, { "day": -30, "balance": "1500" } ], "rows": [ { "day": -45 } ], "expected": { "fromDay": -60, "toDay": -30, "unit": "points", "estimated": "400", "actual": "500", "differencePercent": "25.0", "worthALook": false }, "why": "a typed correction on the same date replaces the current balance and is not itself the previous reading" },
+    { "id": "C13", "baseRate": "4", "readings": [ { "day": -60, "balance": "1000", "unit": "points" }, { "day": -30, "balance": "1450", "unit": "miles" } ], "rows": [ { "day": -45 } ], "expected": null, "estimateExpected": "0", "estimateUnit": "miles", "why": "readings in two units are not compared, while the estimate keeps the current unit" },
+    { "id": "C14", "baseRate": "4", "readings": [ { "day": -30, "balance": "1000" } ], "rows": [ { "day": -20 } ], "expected": null, "why": "one reading has nothing to compare with" },
+    { "id": "C15", "baseRate": "4", "readings": [ { "day": -30, "balance": "1000" }, { "day": -30, "balance": "1100" } ], "rows": [ { "day": -20 } ], "expected": null, "why": "two readings on one date are one moment, not two" }
+  ],
+  "giftCase": {
+    "baseRate": "1",
+    "rules": [ { "kind": "merchant", "match": "zq42b2 hotelco", "rate": "5" } ],
+    "reading": { "day": -30, "balance": "1000", "unit": "points" },
+    "rows": [ { "ref": "ordinary", "day": -5, "amount": "100.00", "name": "ZQ42B2 SHOP" }, { "ref": "held", "day": -5, "amount": "73.19", "name": "ZQ42B2 HOTELCO HELD", "heldByGift": true } ],
+    "controlRow": { "account": "second card", "day": -5, "amount": "10.00", "name": "ZQ42B2 HOTELCO CONTROL", "expected": "50", "why": "an ordinary row with a matching name on another card is priced at the merchant rule throughout, so the test is not vacuous" },
+    "steps": [
+      { "id": "G1", "revealDay": 30, "expected": "100", "why": "held for a long time, not spend for anyone" },
+      { "id": "G2", "revealDay": 1, "expected": "100", "why": "still held on the day before the reveal date" },
+      { "id": "G3", "revealDay": 0, "expected": "466", "why": "on the reveal date the row is ordinary and the merchant rule prices it" },
+      { "id": "G4", "revealDay": -1, "expected": "466", "why": "after the reveal date the row is ordinary" },
+      { "id": "G5", "revealDay": 30, "expected": "100", "why": "moved back to held, it stops counting again" }
+    ],
+    "forbiddenText": [ "HOTELCO", "73.19" ],
+    "viewers": [ "owner", "second user", "read-scope bearer token" ]
+  },
+  "contractCases": {
+    "rateAccept": [ "1.5", "0", "100", "0.0001", "2" ],
+    "rateRefuse": [ "100.0001", "-1", "1e2", ".5", "1.", "1,5", "1.23456", " 1", "", "1000" ],
+    "rateRefuseNonString": [ 1.5, null ],
+    "rateRoundTrip": [ [ "1.5", "1.5000" ], [ "2", "2.0000" ], [ "0", "0.0000" ] ],
+    "merchantMatchAccept": [ "zq42b2 hotelco", "ZQ42B2 Hotel & Co", "o'brien", "a-b" ],
+    "merchantMatchRefuse": [ "zq42b2 %", "a_b", "a.b", "a*b", "(a)", "a\\b", "a/b", "-a", "&a", "'a", "", " " ],
+    "lengths": { "categoryMax": 100, "merchantMax": 60, "rulesMax": 20 },
+    "amountAccept": { "points": [ "0", "-1", "1500" ], "miles": [ "0", "12" ], "usd": [ "0.00", "1.26", "-1.26" ] },
+    "amountRefuse": { "points": [ "-0", "01", "1.5" ], "usd": [ "1", "1.2", "-0.00", "01.00" ] },
+    "percentAccept": [ "12.5", "-37.5", "0.0" ],
+    "percentRefuse": [ "12", "12.50", "-0.0" ]
+  },
+  "h13": {
+    "reading": { "day": -20, "balance": "1000", "unit": "points" },
+    "rows": [
+      { "ref": "stay", "day": -10, "amount": "1000.00", "name": "ZQ42B2 STAY" },
+      { "ref": "payment", "day": -9, "amount": "-300.00", "name": "ZQ42B2 PAYMENT THANK YOU" },
+      { "ref": "held", "day": -8, "amount": "40.00", "name": "ZQ42B2 HOTELCO HELD", "heldByGift": true, "revealDay": 30 },
+      { "ref": "fee", "day": -7, "amount": "88.00", "name": "ZQ42B2 ANNUAL MEMBERSHIP FEE" }
+    ],
+    "earn": { "baseRate": "1.5", "rules": [ { "kind": "merchant", "match": "zq42b2 hotelco", "rate": "5" } ] },
+    "forbiddenOn": [ "/travel", "/api/v1/loyalty" ],
+    "forbiddenText": [ "HOTELCO HELD", "88.00", "300.00", "40.00" ],
+    "steps": [
+      { "id": "H1", "do": "link the card, no earn description", "expect": { "earn": null, "earnEstimate": null, "earnComparison": null, "htmlHas": [ "No earn rates set" ] } },
+      { "id": "H2", "do": "set the earn description", "expect": { "earnEstimate": { "sinceDay": -20, "basis": "reading", "unit": "points", "amount": "1500" }, "htmlHas": [ "≈ 1,500 points estimated since", "no caps, tiers or rotating categories" ] } },
+      { "id": "H3", "do": "move the held row's reveal date to the day before today", "expect": { "earnEstimate": { "amount": "1700" }, "htmlHas": [ "≈ 1,700 points estimated since" ] } },
+      { "id": "H4", "do": "move the reveal date 30 days ahead", "expect": { "earnEstimate": { "amount": "1500" }, "htmlHas": [ "≈ 1,500 points estimated since" ] } },
+      { "id": "H5", "do": "reveal again and add a second reading", "reading": { "day": -5, "balance": "2500", "unit": "points" }, "expect": { "earnEstimate": { "sinceDay": -5, "amount": "0" }, "earnComparison": { "fromDay": -20, "toDay": -5, "unit": "points", "estimated": "1700", "actual": "1500", "differencePercent": "-11.8", "worthALook": false }, "htmlHas": [ "≈ 0 points estimated since", "Estimate vs actual", "estimated 1,700", "reported 1,500", "-11.8%" ], "htmlAbsent": [ "worth a look" ] } },
+      { "id": "H6", "do": "type a correction to the second reading's date", "reading": { "day": -5, "balance": "1000", "unit": "points" }, "expect": { "earnComparison": { "estimated": "1700", "actual": "0", "differencePercent": "-100.0", "worthALook": true }, "htmlHas": [ "worth a look" ] } },
+      { "id": "H7", "do": "clear the earn description", "expect": { "earn": null, "earnEstimate": null, "earnComparison": null, "htmlHas": [ "No earn rates set" ] } },
+      { "id": "H8", "do": "unlink the card", "expect": { "earnEstimate": null, "htmlAbsent": [ "Earns into", "estimated since" ] } }
+    ]
+  }
+}

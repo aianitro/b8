@@ -10,10 +10,15 @@
 //
 // FIXTURES ARE FABRICATED and carry `ZQ42A`. No figure here is anyone's balance.
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import * as loyalty from './loyalty';
 import {
+  LOYALTY_EARN_FALLBACK_DAYS,
+  LOYALTY_EARN_MAX_RATE,
+  LOYALTY_EARN_MAX_RULES,
+  LOYALTY_EARN_MISS_PERCENT,
   LOYALTY_INSTRUMENT_KINDS,
   LOYALTY_INSTRUMENT_SOURCES,
   LOYALTY_OBSERVATION_SOURCES,
@@ -40,8 +45,24 @@ import {
 
 const membership = (over: Record<string, unknown> = {}) => ({
   id: 1, memberId: 2, memberDisplayName: 'ZQ42AAnna', programId: 3, memberNumberMasked: '••••0001',
-  tier: null, balance: '1500', unit: 'points', asOf: '2026-01-15', source: 'typed', cardAccountId: null, cardAccountName: null, benefit: null, feeWatch: null, ...over,
+  tier: null, balance: '1500', unit: 'points', asOf: '2026-01-15', source: 'typed', cardAccountId: null, cardAccountName: null, benefit: null, feeWatch: null, earn: null, earnEstimate: null, earnComparison: null, ...over,
 });
+
+/** The pinned, fabricated P8-42b2 fixture: only the groups these tests read, typed loosely on purpose. */
+type EarnRuleCase = { kind: string; match: string; rate: string };
+const EARN_CASES = JSON.parse(
+  readFileSync(new URL('../../apps/web/lib/fixtures/loyalty-earn-cases.json', import.meta.url), 'utf8')
+) as {
+  configCases: { id: string; baseRate: string; rules: EarnRuleCase[]; emitted: { baseRate: string; rules: string[] } }[];
+  comparisonCases: { id: string; expected: unknown }[];
+  contractCases: {
+    rateAccept: string[]; rateRefuse: string[]; rateRefuseNonString: unknown[];
+    merchantMatchAccept: string[]; merchantMatchRefuse: string[];
+    lengths: { categoryMax: number; merchantMax: number; rulesMax: number };
+    amountAccept: Record<string, string[]>; amountRefuse: Record<string, string[]>;
+    percentAccept: string[]; percentRefuse: string[];
+  };
+};
 
 /** Every key of a schema's object shape, through refinements and the envelope's union. */
 function keysOf(schema: z.ZodType): string[] {
@@ -214,5 +235,183 @@ describe('the loyalty contract', () => {
       expect(LoyaltyErrorCodeSchema.safeParse(code).success, code).toBe(true);
     }
     expect(LoyaltyErrorCodeSchema.safeParse('CARD_TAKEN').success).toBe(false);
+  });
+
+  // ─── P8-42b2 — the earn description and its derived figures ─────────────────────────────────────
+  //
+  // Every rate, figure and percentage spelling comes from the pinned, fabricated fixture
+  // `apps/web/lib/fixtures/loyalty-earn-cases.json` (group `contractCases`, plus `configCases` and one
+  // comparison case for consistent shapes). None is restated here: a test that chose its own numbers
+  // could agree with a wrong implementation. Each list the fixture gives is walked into `seen` and
+  // compared with the fixture's own list, so a case cannot be silently skipped. Other fixtures carry
+  // `ZQ42B2`.
+
+  it('T42b2-U1: the membership PATCH takes a bounded, strict, ordered earn description as decimal text, and refuses everything else', () => {
+    const ok = (b: unknown) => LoyaltyMembershipPatchRequestSchema.safeParse(b).success;
+    const c = EARN_CASES.contractCases;
+    const rule = (over: Record<string, unknown> = {}) => ({ kind: 'category', match: 'ZQ42B2 Hotel', rate: c.rateAccept[0], ...over });
+    const earn = (over: Record<string, unknown> = {}) => ({ earn: { baseRate: c.rateAccept[0], rules: [rule()], ...over } });
+
+    // Rates: accepted and refused, as the base rate and as a rule's rate alike.
+    let seen: unknown[] = [];
+    for (const rate of c.rateAccept) {
+      expect(ok(earn({ baseRate: rate })), `base ${rate}`).toBe(true);
+      expect(ok(earn({ rules: [rule({ rate })] })), `rule ${rate}`).toBe(true);
+      seen.push(rate);
+    }
+    expect(seen).toEqual(c.rateAccept);
+    seen = [];
+    for (const rate of [...c.rateRefuse, ...c.rateRefuseNonString]) {
+      expect(ok(earn({ baseRate: rate })), `base ${JSON.stringify(rate)}`).toBe(false);
+      expect(ok(earn({ rules: [rule({ rate })] })), `rule ${JSON.stringify(rate)}`).toBe(false);
+      seen.push(rate);
+    }
+    expect(seen).toEqual([...c.rateRefuse, ...c.rateRefuseNonString]);
+
+    // Merchant text: a restricted, literal charset.
+    seen = [];
+    for (const match of c.merchantMatchAccept) {
+      expect(ok(earn({ rules: [rule({ kind: 'merchant', match })] })), match).toBe(true);
+      seen.push(match);
+    }
+    expect(seen).toEqual(c.merchantMatchAccept);
+    seen = [];
+    for (const match of c.merchantMatchRefuse) {
+      expect(ok(earn({ rules: [rule({ kind: 'merchant', match })] })), JSON.stringify(match)).toBe(false);
+      seen.push(match);
+    }
+    expect(seen).toEqual(c.merchantMatchRefuse);
+
+    // The bounds, at the maximum and one past it.
+    const L = c.lengths;
+    expect(ok(earn({ rules: [rule({ match: 'Z'.repeat(L.categoryMax) })] }))).toBe(true);
+    expect(ok(earn({ rules: [rule({ match: 'Z'.repeat(L.categoryMax + 1) })] }))).toBe(false);
+    expect(ok(earn({ rules: [rule({ kind: 'merchant', match: 'z'.repeat(L.merchantMax) })] }))).toBe(true);
+    expect(ok(earn({ rules: [rule({ kind: 'merchant', match: 'z'.repeat(L.merchantMax + 1) })] }))).toBe(false);
+    const many = (n: number) => Array.from({ length: n }, (_, i) => rule({ match: `ZQ42B2 Category ${i}` }));
+    expect(ok(earn({ rules: many(L.rulesMax) }))).toBe(true);
+    expect(ok(earn({ rules: many(L.rulesMax + 1) }))).toBe(false);
+
+    // Everything else refused.
+    for (const body of [
+      earn({ rules: [rule({ match: '' })] }), earn({ rules: [rule({ match: '   ' })] }),
+      earn({ rules: [rule({ kind: 'merchant', match: '   ' })] }),
+      earn({ rules: [rule({ kind: 'mcc' })] }),
+      earn({ zq42b2Extra: 1 }), earn({ rules: [rule({ zq42b2Extra: 1 })] }),
+      { earn: {} },
+      { earn: { rules: [rule()] } },
+      { earn: { baseRate: c.rateAccept[0] } },
+      earn({ rules: [rule(), rule({ match: 'zq42b2 hotel', rate: c.rateAccept[1] })] }),
+      earn({ rules: [rule({ kind: 'merchant', match: 'zq42b2 hotelco' }), rule({ kind: 'merchant', match: 'ZQ42B2 HotelCo' })] }),
+      {},
+    ]) expect(ok(body), JSON.stringify(body)).toBe(false);
+    // The same text under two kinds is two rules, not a duplicate.
+    expect(ok(earn({ rules: [rule({ match: 'zq42b2 hotelco' }), rule({ kind: 'merchant', match: 'zq42b2 hotelco' })] }))).toBe(true);
+
+    // Accepted: a clear, and the description beside every other field.
+    expect(ok({ earn: null })).toBe(true);
+    expect(ok({ ...earn(), benefit: { kind: 'free_night', description: 'ZQ42B2 night' }, cardAccountId: 'zq42b2_card', tier: 'ZQ42B2 Gold' })).toBe(true);
+  });
+
+  it('T42b2-U2: a membership carries the earn description and the derived figures, which cannot contradict themselves or carry spend', () => {
+    const c = EARN_CASES.contractCases;
+    const k1 = EARN_CASES.configCases[0];
+    const stored = { baseRate: k1.emitted.baseRate, rules: k1.rules.map((r, i) => ({ kind: r.kind, match: r.match, rate: k1.emitted.rules[i] })) };
+    const ref = EARN_CASES.comparisonCases[0].expected as { estimated: string; actual: string; differencePercent: string; worthALook: boolean };
+    const estimate = (over: Record<string, unknown> = {}) => ({ since: '2026-01-15', basis: 'reading', unit: 'points', amount: c.amountAccept.points[0], ...over });
+    const comparison = (over: Record<string, unknown> = {}) => ({
+      from: '2025-12-16', to: '2026-01-15', unit: 'points', estimated: ref.estimated, actual: ref.actual,
+      differencePercent: ref.differencePercent, worthALook: ref.worthALook, ...over,
+    });
+    const linked = (over: Record<string, unknown> = {}) => membership({
+      cardAccountId: 'zq42b2_card', cardAccountName: 'ZQ42B2 Card', feeWatch: { feeDate: null, expectedBy: null, state: null },
+      earn: stored, earnEstimate: estimate(), earnComparison: comparison(), ...over,
+    });
+    const parses = (m: unknown) => LoyaltyMembershipSchema.safeParse(m).success;
+
+    expect(parses(membership())).toBe(true);
+    expect(parses(membership({ earn: stored }))).toBe(true);
+    expect(parses(linked())).toBe(true);
+    expect(parses(linked({ earnEstimate: null, earnComparison: null }))).toBe(true);
+    expect(LoyaltyMembershipSchema.parse(linked()).earn?.rules.map((r) => r.match)).toEqual(k1.rules.map((r) => r.match));
+
+    // The figure spellings, per unit, from the fixture.
+    let seen: string[] = [];
+    for (const [unit, amounts] of Object.entries(c.amountAccept)) {
+      for (const amount of amounts) {
+        expect(parses(linked({ earnEstimate: estimate({ unit, amount }) })), `${unit} ${amount}`).toBe(true);
+        seen.push(`${unit}:${amount}`);
+      }
+    }
+    expect(seen).toEqual(Object.entries(c.amountAccept).flatMap(([u, xs]) => xs.map((x) => `${u}:${x}`)));
+    seen = [];
+    for (const [unit, amounts] of Object.entries(c.amountRefuse)) {
+      for (const amount of amounts) {
+        expect(parses(linked({ earnEstimate: estimate({ unit, amount }) })), `${unit} ${amount}`).toBe(false);
+        seen.push(`${unit}:${amount}`);
+      }
+    }
+    expect(seen).toEqual(Object.entries(c.amountRefuse).flatMap(([u, xs]) => xs.map((x) => `${u}:${x}`)));
+    seen = [];
+    for (const differencePercent of c.percentAccept) {
+      expect(parses(linked({ earnComparison: comparison({ differencePercent }) })), differencePercent).toBe(true);
+      seen.push(differencePercent);
+    }
+    for (const differencePercent of c.percentRefuse) {
+      expect(parses(linked({ earnComparison: comparison({ differencePercent }) })), differencePercent).toBe(false);
+      seen.push(differencePercent);
+    }
+    expect(seen).toEqual([...c.percentAccept, ...c.percentRefuse]);
+
+    // Contradictions, a stray key, nights, a missing key.
+    const zero = c.amountAccept.points[0];
+    for (const [label, m] of [
+      ['nights estimate', linked({ earnEstimate: estimate({ unit: 'nights' }) })],
+      ['nights comparison', linked({ earnComparison: comparison({ unit: 'nights' }) })],
+      ['basis', linked({ earnEstimate: estimate({ basis: 'last_week' }) })],
+      ['since', linked({ earnEstimate: estimate({ since: '2026-1-15' }) })],
+      ['from after to', linked({ earnComparison: comparison({ from: '2026-01-15', to: '2025-12-16' }) })],
+      ['from equals to', linked({ earnComparison: comparison({ from: '2026-01-15' }) })],
+      ['null percent, non-zero estimate', linked({ earnComparison: comparison({ differencePercent: null }) })],
+      ['percent with a zero estimate', linked({ earnComparison: comparison({ estimated: zero }) })],
+      ['worthALook flipped', linked({ earnComparison: comparison({ worthALook: !ref.worthALook }) })],
+      ['spend key on the estimate', linked({ earnEstimate: { ...estimate(), spend: zero } })],
+      ['rows key on the estimate', linked({ earnEstimate: { ...estimate(), rows: [] } })],
+      ['merchant key on the comparison', linked({ earnComparison: { ...comparison(), merchant: 'ZQ42B2' } })],
+      ['stray key on the description', linked({ earn: { ...stored, zq42b2Extra: 1 } })],
+      ['estimate with no card', membership({ earn: stored, earnEstimate: estimate() })],
+      ['estimate with no description', linked({ earn: null, earnComparison: null })],
+      ['comparison with no card', membership({ earn: stored, earnComparison: comparison() })],
+      ['comparison with no description', linked({ earn: null, earnEstimate: null })],
+    ] as [string, unknown][]) expect(parses(m), label).toBe(false);
+    for (const key of ['earn', 'earnEstimate', 'earnComparison']) {
+      const m: Record<string, unknown> = membership();
+      delete m[key];
+      expect(parses(m), `missing ${key}`).toBe(false);
+    }
+
+    // The overview still parses with memberships carrying the keys.
+    expect(LoyaltyOverviewSchema.safeParse({
+      members: [], programs: [], instruments: [], cardAccounts: [],
+      cards: [{ programId: 3, programName: 'ZQ42B2 Program', programKind: 'hotel', memberships: [membership(), linked()] }],
+    }).success).toBe(true);
+
+    expect([LOYALTY_EARN_MAX_RULES, LOYALTY_EARN_MAX_RATE, LOYALTY_EARN_FALLBACK_DAYS, LOYALTY_EARN_MISS_PERCENT]).toEqual([20, 100, 30, 25]);
+    expect(LOYALTY_EARN_MAX_RULES).toBe(c.lengths.rulesMax);
+  });
+
+  it('T42b2-U3: the create schema still refuses an earn description, the error codes are unchanged, and the P8-42b bodies still pass', () => {
+    const k2 = EARN_CASES.configCases[1];
+    expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2, earn: { baseRate: k2.baseRate, rules: k2.rules } }).success).toBe(false);
+    expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2, earn: null }).success).toBe(false);
+    expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2 }).success).toBe(true);
+    const codes = ['INVALID_INPUT', 'NOT_FOUND', 'INSUFFICIENT_SCOPE', 'BROWSER_SESSION_REQUIRED', 'MEMBERSHIP_EXISTS',
+      'ALIAS_TAKEN', 'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED'];
+    for (const code of codes) expect(LoyaltyErrorCodeSchema.safeParse(code).success, code).toBe(true);
+    expect([...LoyaltyErrorCodeSchema.options].sort()).toEqual([...codes].sort());
+    const night = { kind: 'free_night', description: 'ZQ42B night' };
+    for (const body of [{ cardAccountId: 'zq42b_a' }, { cardAccountId: null }, { benefit: night }, { benefit: { ...night, windowDays: 45 } }, { benefit: null }]) {
+      expect(LoyaltyMembershipPatchRequestSchema.safeParse(body).success, JSON.stringify(body)).toBe(true);
+    }
   });
 });

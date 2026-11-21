@@ -549,7 +549,7 @@ describe('loyalty card link, annual fee and benefit state (P8-42b)', () => {
 
     const view = await viewOf(m.id);
     expect(Object.keys(view).sort()).toEqual(['id', 'memberId', 'memberDisplayName', 'programId', 'memberNumberMasked', 'tier', 'balance', 'unit',
-      'asOf', 'source', 'cardAccountId', 'cardAccountName', 'benefit', 'feeWatch'].sort());
+      'asOf', 'source', 'cardAccountId', 'cardAccountName', 'benefit', 'feeWatch', 'earn', 'earnEstimate', 'earnComparison'].sort());
     expect(Object.keys(view.feeWatch ?? {}).sort()).toEqual(['expectedBy', 'feeDate', 'state']);
     expect(Object.keys(view.benefit ?? {}).sort()).toEqual(['description', 'kind', 'windowDays']);
     const overview = await read(api.overview(owner));
