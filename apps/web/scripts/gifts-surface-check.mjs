@@ -11,8 +11,15 @@
 // P8-42b added H12 (a credit card linked to a membership, its annual fee held by a second gift, the
 // fee watch on /travel, /accounts/<card> and the API through every state). P8-42b2 added H13 (the
 // earn estimate and its comparison with the next reading, with a gift-held row that must not count,
-// driven by the pinned fixture `lib/fixtures/loyalty-earn-cases.json`), so the final success line is
-// now `OK H1-H13`.
+// driven by the pinned fixture `lib/fixtures/loyalty-earn-cases.json`). P8-42c1 added H14 (the
+// loyalty inbox panel on /travel and the on-demand poll route, against a mailbox that cannot be
+// reached), so the final success line is now `OK H1-H14`.
+//
+// THE MAILBOX VARIABLES. The dev server never inherits a `LOYALTY_IMAP_` variable from the shell that
+// runs this script: every one is removed from its environment, and five are then set to fabricated
+// values — the loopback address, a port this script bound and closed a moment before spawning, TLS,
+// and the canary user and password of `lib/fixtures/loyalty-inbox/cases.json`. A poll therefore
+// always fails to connect, and a real credential cannot be reached from here whatever is exported.
 //
 // ─── Why it needs its own database ────────────────────────────────────────────────────────────
 //
@@ -31,6 +38,7 @@
 // and that is what a leak would be found in. H9 asks for the flight payload alone (`RSC: 1`).
 
 import { spawn, execFileSync } from 'node:child_process';
+import { createServer } from 'node:net';
 import { createHash, randomBytes } from 'node:crypto';
 import { createWriteStream, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -196,11 +204,37 @@ let server = null;
 let exitCode = 0;
 let current = 'H1';
 
+/** The fabricated mailbox canaries H14 hands the server and then looks for in every response. */
+const INBOX = JSON.parse(readFileSync(join(WEB, 'lib/fixtures/loyalty-inbox/cases.json'), 'utf8'));
+
+/** A loopback port nothing listens on: bound by the OS, then closed before the server starts. */
+const closedPort = () => new Promise((done, fail) => {
+  const probe = createServer();
+  probe.on('error', fail);
+  probe.listen(0, '127.0.0.1', () => {
+    const { port } = probe.address();
+    probe.close(() => done(port));
+  });
+});
+
+/** The server's environment: no inherited mailbox variable, then the five fabricated ones. */
+function serverEnv(mailPort) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('LOYALTY_IMAP_')));
+  env.LOYALTY_IMAP_HOST = '127.0.0.1';
+  env.LOYALTY_IMAP_PORT = String(mailPort);
+  env.LOYALTY_IMAP_TLS = 'true';
+  env.LOYALTY_IMAP_USER = INBOX.canaries.user;
+  env.LOYALTY_IMAP_PASSWORD = INBOX.canaries.password;
+  return { ...env, DATABASE_URL: `postgresql://localhost/${db}`, SCHEDULER_IN_PROCESS: 'false' };
+}
+let mailPort;
+
 try {
   w = prepareDatabase();
+  mailPort = await closedPort();
   server = spawn('npx', ['next', 'dev', '-H', '127.0.0.1', '-p', String(PORT)], {
     cwd: WEB,
-    env: { ...process.env, DATABASE_URL: `postgresql://localhost/${db}`, SCHEDULER_IN_PROCESS: 'false' },
+    env: serverEnv(mailPort),
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   });
@@ -587,7 +621,72 @@ try {
   const atH5 = shown[4].earnComparison;
   pass('H13', `both users, ${H.steps.length} fixture steps over /travel, /accounts/${w.card} and /api/v1/loyalty: estimate ${atH2.amount} ${atH2.unit} since ${atH2.since} (${atH2.basis}) with the held row excluded for both, counted once revealed, excluded again when held; comparison ${atH5.from} to ${atH5.to} estimated ${atH5.estimated} reported ${atH5.actual} (${atH5.differencePercent}%, worth a look ${atH5.worthALook}); cleared and unlinked show no figure; the held row's name and the payment, fee and held amounts appear on neither /travel nor the API`);
 
-  console.log('OK H1-H13');
+  // ── H14 ── (P8-42c1) The loyalty inbox panel on /travel and the on-demand poll, over real HTTP for
+  // both people. Seeded by SQL on this scratch database with fabricated rows only: a program with a
+  // sender domain last seen two days ago, a member with a forwarding address, one stored message
+  // whose bytes are the body canary, three unknown-sender rows over two domains, and a second member
+  // whose address last received mail 46 days ago (one past the 45-day silence threshold, so quiet).
+  // The mailbox the server was given is a closed loopback port, so the poll must fail as
+  // `connect_failed` and the panel must then say so. Nothing the mail holds, nor the password, the
+  // user or the loopback host, may appear in any response of the step.
+  current = 'H14';
+  const brand = INBOX.programs.brand;
+  psql(`
+    INSERT INTO loyalty_programs (name, kind, default_unit) VALUES ('ZQ42C Surface Stays', 'hotel', 'points');
+    INSERT INTO loyalty_sender_domains (program_id, domain, last_seen_on)
+      VALUES ((SELECT id FROM loyalty_programs WHERE name = 'ZQ42C Surface Stays'), '${brand.domain}', CURRENT_DATE - 2);
+    INSERT INTO household_members (display_name) VALUES ('ZQ42C Surface Anna'), ('ZQ42C Surface Quiet');
+    INSERT INTO household_member_addresses (member_id, address, added_on, last_received_on) VALUES
+      ((SELECT id FROM household_members WHERE display_name = 'ZQ42C Surface Anna'), '${INBOX.people.A}', CURRENT_DATE - 10, CURRENT_DATE - 2),
+      ((SELECT id FROM household_members WHERE display_name = 'ZQ42C Surface Quiet'), '${INBOX.people.B}', CURRENT_DATE - 60, CURRENT_DATE - 46);
+    INSERT INTO loyalty_inbox_messages (dedupe_key, received_on, program_id, sender_domain, origin, attribution, member_id, raw_mail)
+      VALUES (repeat('a', 64), CURRENT_DATE - 2, (SELECT id FROM loyalty_programs WHERE name = 'ZQ42C Surface Stays'), '${brand.domain}',
+              'direct', 'matched', (SELECT id FROM household_members WHERE display_name = 'ZQ42C Surface Anna'),
+              convert_to('${INBOX.canaries.body}', 'UTF8'));
+    INSERT INTO loyalty_inbox_unknown_senders (dedupe_key, received_on, domain) VALUES
+      (repeat('b', 64), CURRENT_DATE - 1, 'attacker.test'), (repeat('c', 64), CURRENT_DATE - 3, 'attacker.test'),
+      (repeat('d', 64), CURRENT_DATE - 1, 'other-sender.test');`);
+  const secrets = [INBOX.canaries.body, INBOX.canaries.password, INBOX.canaries.user, '127.0.0.1', `:${mailPort}`];
+  const said = [];
+  const panelText = (html) => uncommented(html).replace(/<[^>]+>/g, '\n').split('\n').map((t) => t.trim()).filter(Boolean);
+  const before = [
+    'Loyalty inbox', 'Check inbox now', 'Not checked yet', 'Mail from unknown senders: 3', 'attacker.test × 2', 'other-sender.test × 1',
+    'ZQ42C Surface Quiet: forwarding quiet for 46 days', 'Last mail seen: ', 'Raw mail is kept 30 days, then deleted.',
+  ];
+  for (const [who, token] of [['owner', w.owner], ['second user', w.two]]) {
+    const page = await get('/travel', token);
+    check('H14', page.status === 200, `/travel answered ${page.status} for the ${who}`);
+    for (const t of before) check('H14', hasText(uncommented(page.text), t), `/travel lacks "${t}" for the ${who}`);
+    said.push(page.text);
+    const api = await get('/api/v1/loyalty', token);
+    check('H14', api.status === 200, `/api/v1/loyalty answered ${api.status} for the ${who}`);
+    said.push(api.text);
+  }
+  const sample = panelText((await get('/travel', w.owner)).text);
+  const from = sample.indexOf('Loyalty inbox');
+  const poll = async (headers) => {
+    const res = await fetch(`${ORIGIN}/api/v1/loyalty/inbox/poll`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: '{}' });
+    const text = await res.text();
+    said.push(text);
+    return { status: res.status, text };
+  };
+  const unauth = await poll({});
+  check('H14', unauth.status === 401, `the poll with no cookie answered ${unauth.status}`);
+  const polled = await poll({ cookie: `b8_session=${w.owner}` });
+  check('H14', polled.status === 200, `the poll answered ${polled.status}`);
+  const result = JSON.parse(polled.text).data;
+  check('H14', result?.outcome === 'error' && result?.errorCode === 'connect_failed', `the poll answered ${result?.outcome} ${result?.errorCode}`);
+  for (const [who, token] of [['owner', w.owner], ['second user', w.two]]) {
+    const page = await get('/travel', token);
+    for (const t of ['Last check: ', 'failed (connect_failed)']) check('H14', hasText(uncommented(page.text), t), `/travel after the poll lacks "${t}" for the ${who}`);
+    said.push(page.text);
+    said.push((await get('/api/v1/loyalty', token)).text);
+  }
+  for (const text of said) for (const t of secrets) check('H14', !holds(text, t), `a response of the step holds "${t}"`);
+  console.log(`H14 sample ${sample.slice(from, from + 24).join(' | ')}`);
+  pass('H14', `both users, /travel and /api/v1/loyalty before and after the poll: the panel shows ${before.length} phrases, the unauthenticated poll is 401, the owner's poll is 200 error connect_failed against a closed loopback port, /travel then shows the failed check; ${said.length} responses hold none of the body canary, the password, the user or the loopback host`);
+
+  console.log('OK H1-H14');
 } catch (error) {
   exitCode = 1;
   if (error instanceof StepFailure) console.log(`${error.step} FAIL ${error.message}`);

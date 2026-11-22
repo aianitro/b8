@@ -1,0 +1,764 @@
+{
+  "note": "FABRICATED TEST DATA for P8-42c1. Every address, domain, name, message and value here is invented; people use example.com/.net/.org, program senders use .test. Pinned by sha256 in SPEC.md command 16; do not edit. Each .eml carries {{DAY:-n}} date tokens that the test harness replaces via Postgres.",
+  "version": 1,
+  "people": {
+    "A": "zq42c-anna@example.com",
+    "B": "zq42c-boris@example.net",
+    "stranger": "zq42c-stranger@example.org",
+    "inbox": "zq42c-inbox@example.net"
+  },
+  "programs": {
+    "brand": {
+      "name": "ZQ42C Stays",
+      "domain": "zq42c-brand.test"
+    },
+    "air": {
+      "name": "ZQ42C Air",
+      "domain": "zq42c-air.test"
+    }
+  },
+  "messages": [
+    {
+      "id": "F01",
+      "file": "F01-direct.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "direct",
+        "attribution": "matched",
+        "member": "A"
+      }
+    },
+    {
+      "id": "F02",
+      "file": "F02-subdomain.eml",
+      "day": -5,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "direct",
+        "attribution": "matched",
+        "member": "A"
+      }
+    },
+    {
+      "id": "F03",
+      "file": "F03-lookalike-suffix.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "zq42c-brand.test.attacker.test"
+      }
+    },
+    {
+      "id": "F04",
+      "file": "F04-lookalike-prefix.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "notzq42c-brand.test"
+      }
+    },
+    {
+      "id": "F05",
+      "file": "F05-display-name-spoof.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "attacker.test"
+      }
+    },
+    {
+      "id": "F06",
+      "file": "F06-brand-in-local-part.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "attacker.test"
+      }
+    },
+    {
+      "id": "F07",
+      "file": "F07-other-headers.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "attacker.test"
+      }
+    },
+    {
+      "id": "F08",
+      "file": "F08-forward-attachment.eml",
+      "day": -4,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "attachment",
+        "attribution": "matched",
+        "member": "A"
+      }
+    },
+    {
+      "id": "F09",
+      "file": "F09-forward-inline.eml",
+      "day": -6,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "inline",
+        "attribution": "matched",
+        "member": "B"
+      }
+    },
+    {
+      "id": "F10",
+      "file": "F10-forward-from-stranger.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "example.org"
+      }
+    },
+    {
+      "id": "F11",
+      "file": "F11-unmatched.eml",
+      "day": -7,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "direct",
+        "attribution": "unmatched"
+      }
+    },
+    {
+      "id": "F12",
+      "file": "F12-no-recipient.eml",
+      "day": -8,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "direct",
+        "attribution": "none_found"
+      }
+    },
+    {
+      "id": "F13",
+      "file": "F13-ambiguous.eml",
+      "day": -9,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "direct",
+        "attribution": "ambiguous"
+      }
+    },
+    {
+      "id": "F14",
+      "file": "F14-tier-one-wins.eml",
+      "day": -10,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "attachment",
+        "attribution": "matched",
+        "member": "B"
+      }
+    },
+    {
+      "id": "F15",
+      "file": "F15-received-chain.eml",
+      "day": -11,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "direct",
+        "attribution": "matched",
+        "member": "B"
+      }
+    },
+    {
+      "id": "F16",
+      "file": "F16-no-message-id.eml",
+      "day": -12,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "direct",
+        "attribution": "matched",
+        "member": "A"
+      }
+    },
+    {
+      "id": "F17",
+      "file": "F17-duplicate.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "duplicate",
+        "of": "F01"
+      }
+    },
+    {
+      "id": "F18",
+      "file": "F18-two-mailboxes.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "(unreadable)"
+      }
+    },
+    {
+      "id": "F19",
+      "file": "F19-non-ascii-domain.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "(unreadable)"
+      }
+    },
+    {
+      "id": "F20",
+      "file": "F20-expired.eml",
+      "day": -60,
+      "expect": {
+        "outcome": "expired"
+      }
+    },
+    {
+      "id": "F21",
+      "file": "F21-other-sender-a.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "other-sender.test"
+      }
+    },
+    {
+      "id": "F22",
+      "file": "F22-other-sender-b.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "other-sender.test"
+      }
+    },
+    {
+      "id": "F23",
+      "file": "F23-air.eml",
+      "day": -20,
+      "expect": {
+        "outcome": "stored",
+        "program": "air",
+        "origin": "direct",
+        "attribution": "matched",
+        "member": "A"
+      }
+    },
+    {
+      "id": "F24",
+      "file": "F24-no-from.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "(unreadable)"
+      }
+    },
+    {
+      "id": "F25",
+      "file": "F25-upper-case-domain.eml",
+      "day": -2,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "direct",
+        "attribution": "matched",
+        "member": "A"
+      }
+    },
+    {
+      "id": "F26",
+      "file": "F26-begin-forwarded.eml",
+      "day": -13,
+      "expect": {
+        "outcome": "stored",
+        "program": "brand",
+        "origin": "inline",
+        "attribution": "matched",
+        "member": "A"
+      }
+    },
+    {
+      "id": "F27",
+      "file": "F27-member-forwards-unknown.eml",
+      "day": -3,
+      "expect": {
+        "outcome": "unknown",
+        "domain": "attacker.test"
+      }
+    }
+  ],
+  "totals": {
+    "fetched": 27,
+    "stored": 13,
+    "duplicates": 1,
+    "expired": 1,
+    "unknown": 12,
+    "oversize": 0,
+    "unknownByDomain": {
+      "attacker.test": 4,
+      "(unreadable)": 3,
+      "other-sender.test": 2,
+      "zq42c-brand.test.attacker.test": 1,
+      "notzq42c-brand.test": 1,
+      "example.org": 1
+    },
+    "storedByProgram": {
+      "brand": 12,
+      "air": 1
+    },
+    "storedByAttribution": {
+      "matchedA": 7,
+      "matchedB": 3,
+      "unmatched": 1,
+      "none_found": 1,
+      "ambiguous": 1
+    },
+    "unattributed": 3,
+    "downloaded": [
+      "F01",
+      "F02",
+      "F08",
+      "F09",
+      "F11",
+      "F12",
+      "F13",
+      "F14",
+      "F15",
+      "F16",
+      "F23",
+      "F25",
+      "F26",
+      "F27"
+    ],
+    "after": {
+      "brand": {
+        "lastSeenDay": -2,
+        "storedInWindow": 12
+      },
+      "air": {
+        "lastSeenDay": -20,
+        "storedInWindow": 1
+      },
+      "A": {
+        "lastReceivedDay": -2
+      },
+      "B": {
+        "lastReceivedDay": -6
+      }
+    }
+  },
+  "canaries": {
+    "body": "ZQ42C-BODY-CANARY",
+    "subject": "ZQ42C-SUBJECT-CANARY",
+    "memberNumber": "ZQ42C-MEMBER-0000",
+    "password": "ZQ42C-PASSWORD-CANARY",
+    "user": "zq42c-login@example.net"
+  },
+  "domainAccept": [
+    {
+      "input": "zq42c-brand.test",
+      "stored": "zq42c-brand.test"
+    },
+    {
+      "input": "  ZQ42C-Brand.TEST  ",
+      "stored": "zq42c-brand.test"
+    },
+    {
+      "input": "mail.zq42c-brand.test",
+      "stored": "mail.zq42c-brand.test"
+    },
+    {
+      "input": "xn--zq42c-test.test",
+      "stored": "xn--zq42c-test.test"
+    }
+  ],
+  "domainRefuse": [
+    "",
+    "   ",
+    "test",
+    ".zq42c-brand.test",
+    "zq42c-brand.test.",
+    "*.zq42c-brand.test",
+    "zq42c-brand.test/path",
+    "https://zq42c-brand.test",
+    "user@zq42c-brand.test",
+    "zq42c brand.test",
+    "zq42c-brand..test",
+    "-zq42c.test",
+    "zq42c-.test",
+    "zq42c_brand.test",
+    "zq42c.t",
+    "zq42c.123",
+    "127.0.0.1",
+    "zq42c-brànd.test",
+    "gmail.com",
+    "mail.gmail.com",
+    "Outlook.com",
+    "co.uk",
+    "com.au"
+  ],
+  "addressAccept": [
+    {
+      "input": "zq42c-anna@example.com",
+      "stored": "zq42c-anna@example.com"
+    },
+    {
+      "input": "  ZQ42C-Anna@Example.COM  ",
+      "stored": "zq42c-anna@example.com"
+    },
+    {
+      "input": "zq42c+tag@example.net",
+      "stored": "zq42c+tag@example.net"
+    }
+  ],
+  "addressRefuse": [
+    "",
+    "zq42c-anna",
+    "@example.com",
+    "zq42c-anna@",
+    "zq42c anna@example.com",
+    "\"ZQ42C Anna\" <zq42c-anna@example.com>",
+    "zq42c-anna@example",
+    "zq42c-annà@example.com",
+    "a@b@example.com"
+  ],
+  "lengths": {
+    "domainMax": 253,
+    "addressMax": 254,
+    "localMax": 64,
+    "domainsMax": 20,
+    "addressesMax": 10
+  },
+  "envMatrix": [
+    {
+      "name": "all unset",
+      "env": {},
+      "expect": {
+        "configured": false,
+        "problem": "unset",
+        "missing": [
+          "LOYALTY_IMAP_HOST",
+          "LOYALTY_IMAP_PORT",
+          "LOYALTY_IMAP_TLS",
+          "LOYALTY_IMAP_USER",
+          "LOYALTY_IMAP_PASSWORD"
+        ]
+      }
+    },
+    {
+      "name": "only the password",
+      "env": {
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "incomplete",
+        "missing": [
+          "LOYALTY_IMAP_HOST",
+          "LOYALTY_IMAP_PORT",
+          "LOYALTY_IMAP_TLS",
+          "LOYALTY_IMAP_USER"
+        ]
+      }
+    },
+    {
+      "name": "implicit TLS",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "993",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": true,
+        "problem": null,
+        "missing": [],
+        "mailbox": "INBOX",
+        "timeoutSeconds": 60
+      }
+    },
+    {
+      "name": "STARTTLS",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "143",
+        "LOYALTY_IMAP_TLS": "starttls",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": true,
+        "problem": null,
+        "missing": [],
+        "mailbox": "INBOX",
+        "timeoutSeconds": 60
+      }
+    },
+    {
+      "name": "TLS false",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "993",
+        "LOYALTY_IMAP_TLS": "false",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "invalid_tls",
+        "missing": []
+      }
+    },
+    {
+      "name": "TLS upper case",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "993",
+        "LOYALTY_IMAP_TLS": "TRUE",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "invalid_tls",
+        "missing": []
+      }
+    },
+    {
+      "name": "port zero",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "0",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "invalid_port",
+        "missing": []
+      }
+    },
+    {
+      "name": "port too high",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "65536",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "invalid_port",
+        "missing": []
+      }
+    },
+    {
+      "name": "port not a number",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "99x",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "invalid_port",
+        "missing": []
+      }
+    },
+    {
+      "name": "port negative",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "-1",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "invalid_port",
+        "missing": []
+      }
+    },
+    {
+      "name": "whitespace-only host",
+      "env": {
+        "LOYALTY_IMAP_HOST": "   ",
+        "LOYALTY_IMAP_PORT": "993",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "incomplete",
+        "missing": [
+          "LOYALTY_IMAP_HOST"
+        ]
+      }
+    },
+    {
+      "name": "mailbox unset",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "993",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY"
+      },
+      "expect": {
+        "configured": true,
+        "problem": null,
+        "missing": [],
+        "mailbox": "INBOX",
+        "timeoutSeconds": 60
+      }
+    },
+    {
+      "name": "mailbox set",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "993",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY",
+        "LOYALTY_IMAP_MAILBOX": "ZQ42C Folder"
+      },
+      "expect": {
+        "configured": true,
+        "problem": null,
+        "missing": [],
+        "mailbox": "ZQ42C Folder",
+        "timeoutSeconds": 60
+      }
+    },
+    {
+      "name": "timeout zero",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "993",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY",
+        "LOYALTY_IMAP_TIMEOUT_SECONDS": "0"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "invalid_timeout",
+        "missing": []
+      }
+    },
+    {
+      "name": "timeout not a number",
+      "env": {
+        "LOYALTY_IMAP_HOST": "zq42c-imap.example.net",
+        "LOYALTY_IMAP_PORT": "993",
+        "LOYALTY_IMAP_TLS": "true",
+        "LOYALTY_IMAP_USER": "zq42c-login@example.net",
+        "LOYALTY_IMAP_PASSWORD": "ZQ42C-PASSWORD-CANARY",
+        "LOYALTY_IMAP_TIMEOUT_SECONDS": "x"
+      },
+      "expect": {
+        "configured": false,
+        "problem": "invalid_timeout",
+        "missing": []
+      }
+    }
+  ],
+  "health": [
+    {
+      "name": "mail 44 days ago",
+      "lastReceivedDaysAgo": 44,
+      "addedDaysAgo": 90,
+      "expect": {
+        "state": "ok",
+        "quietDays": 44
+      }
+    },
+    {
+      "name": "mail 45 days ago",
+      "lastReceivedDaysAgo": 45,
+      "addedDaysAgo": 90,
+      "expect": {
+        "state": "ok",
+        "quietDays": 45
+      }
+    },
+    {
+      "name": "mail 46 days ago",
+      "lastReceivedDaysAgo": 46,
+      "addedDaysAgo": 90,
+      "expect": {
+        "state": "quiet",
+        "quietDays": 46
+      }
+    },
+    {
+      "name": "no mail, added 45 days ago",
+      "lastReceivedDaysAgo": null,
+      "addedDaysAgo": 45,
+      "expect": {
+        "state": "no_mail_yet"
+      }
+    },
+    {
+      "name": "no mail, added 46 days ago",
+      "lastReceivedDaysAgo": null,
+      "addedDaysAgo": 46,
+      "expect": {
+        "state": "quiet"
+      }
+    },
+    {
+      "name": "no address",
+      "lastReceivedDaysAgo": null,
+      "addedDaysAgo": null,
+      "expect": {
+        "state": "not_set_up",
+        "quietDays": null
+      }
+    },
+    {
+      "name": "only unattributed mail",
+      "lastReceivedDaysAgo": null,
+      "addedDaysAgo": 46,
+      "unattributedMailDaysAgo": 1,
+      "expect": {
+        "state": "quiet"
+      }
+    }
+  ],
+  "retention": [
+    {
+      "daysAgo": 29,
+      "kept": true
+    },
+    {
+      "daysAgo": 30,
+      "kept": true
+    },
+    {
+      "daysAgo": 31,
+      "kept": false
+    },
+    {
+      "daysAgo": 60,
+      "kept": false
+    }
+  ]
+}

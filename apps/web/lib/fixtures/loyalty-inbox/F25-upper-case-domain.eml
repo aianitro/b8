@@ -1,0 +1,9 @@
+Message-ID: <zq42c-f25@zq42c-brand.test>
+From: statements@ZQ42C-BRAND.TEST
+X-Forwarded-For: zq42c-anna@example.com
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Subject: ZQ42C-SUBJECT-CANARY F25
+Date: {{DAY:-2}}
+
+ZQ42C-BODY-CANARY F25 ZQ42C-MEMBER-0000

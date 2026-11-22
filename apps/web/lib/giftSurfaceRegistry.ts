@@ -76,6 +76,9 @@ export const ROUTES: Surface[] = [
   // P8-42b: the four routes that answer with a membership view became numeric-only — the view now
   // carries a linked card's annual-fee date, read through `visibleTransactions` and identical for
   // every viewer (a gift-held row is never a fee). The other seven still read no ledger row.
+  // P8-42c1: the inbox poll reads the environment and the five inbox tables and writes the inbox
+  // tables alone. Collected mail is not a ledger row, and the poll answers counts and a code only.
+  { file: 'app/api/v1/loyalty/inbox/poll/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/instruments/[id]/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/instruments/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/members/[id]/route.ts', classes: ['no-transaction-data'] },

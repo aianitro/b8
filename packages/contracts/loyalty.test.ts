@@ -122,7 +122,7 @@ describe('the loyalty contract', () => {
 
     // Exactly one response schema carries a field for the full number.
     const responses = Object.entries(loyalty).filter(([name]) => /ResponseSchema$/.test(name)) as [string, z.ZodType][];
-    expect(responses.length).toBe(6);
+    expect(responses.length).toBe(7);
     const carrying = responses.filter(([, s]) => keysOf(s).includes('memberNumber')).map(([n]) => n);
     expect(carrying).toEqual(['LoyaltyMemberNumberResponseSchema']);
     // Every response is the envelope: success with data, or the error branch.
@@ -132,7 +132,7 @@ describe('the loyalty contract', () => {
     }
     expect(LoyaltyMembershipResponseSchema.safeParse({ success: true, data: membership() }).success).toBe(true);
     expect(LoyaltyMemberNumberResponseSchema.safeParse({ success: true, data: { membershipId: 1, memberNumber: 'ZQ42A0000001' } }).success).toBe(true);
-    expect(LoyaltyOverviewResponseSchema.safeParse({ success: true, data: { members: [], programs: [], cards: [], instruments: [], cardAccounts: [] } }).success).toBe(true);
+    expect(LoyaltyOverviewResponseSchema.safeParse({ success: true, data: { members: [], programs: [], cards: [], instruments: [], cardAccounts: [], inbox: EMPTY_INBOX } }).success).toBe(true);
 
     // The vocabularies, by set equality with SPEC.md Conventions.
     const set = (xs: readonly string[]) => [...xs].sort();
@@ -219,7 +219,7 @@ describe('the loyalty contract', () => {
     expect(LoyaltyFeeWatchSchema.safeParse({ feeDate: null, expectedBy: '2026-02-19', state: null }).success).toBe(false);
     expect(LoyaltyFeeWatchSchema.safeParse({ feeDate: '2026-01-05', expectedBy: '2026-02-19', state: 'overdue', amount: '12.34' }).success).toBe(false);
     // The overview requires the link picker's list.
-    const overview = { members: [], programs: [], cards: [], instruments: [] };
+    const overview = { members: [], programs: [], cards: [], instruments: [], inbox: EMPTY_INBOX };
     expect(LoyaltyOverviewSchema.safeParse(overview).success).toBe(false);
     expect(LoyaltyOverviewSchema.safeParse({ ...overview, cardAccounts: [] }).success).toBe(true);
     expect(LoyaltyOverviewSchema.safeParse({ ...overview, cardAccounts: [{ id: 'zq42b_card', name: 'ZQ42B Card' }] }).success).toBe(true);
@@ -392,7 +392,7 @@ describe('the loyalty contract', () => {
 
     // The overview still parses with memberships carrying the keys.
     expect(LoyaltyOverviewSchema.safeParse({
-      members: [], programs: [], instruments: [], cardAccounts: [],
+      members: [], programs: [], instruments: [], cardAccounts: [], inbox: EMPTY_INBOX,
       cards: [{ programId: 3, programName: 'ZQ42B2 Program', programKind: 'hotel', memberships: [membership(), linked()] }],
     }).success).toBe(true);
 
@@ -406,12 +406,135 @@ describe('the loyalty contract', () => {
     expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2, earn: null }).success).toBe(false);
     expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2 }).success).toBe(true);
     const codes = ['INVALID_INPUT', 'NOT_FOUND', 'INSUFFICIENT_SCOPE', 'BROWSER_SESSION_REQUIRED', 'MEMBERSHIP_EXISTS',
-      'ALIAS_TAKEN', 'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED'];
+      'ALIAS_TAKEN', 'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED', 'DOMAIN_TAKEN', 'ADDRESS_TAKEN'];
     for (const code of codes) expect(LoyaltyErrorCodeSchema.safeParse(code).success, code).toBe(true);
     expect([...LoyaltyErrorCodeSchema.options].sort()).toEqual([...codes].sort());
     const night = { kind: 'free_night', description: 'ZQ42B night' };
     for (const body of [{ cardAccountId: 'zq42b_a' }, { cardAccountId: null }, { benefit: night }, { benefit: { ...night, windowDays: 45 } }, { benefit: null }]) {
       expect(LoyaltyMembershipPatchRequestSchema.safeParse(body).success, JSON.stringify(body)).toBe(true);
     }
+  });
+});
+
+// ─── P8-42c1: the loyalty inbox ─────────────────────────────────────────────────────────────────
+//
+// The pinned, fabricated fixture `apps/web/lib/fixtures/loyalty-inbox/cases.json` (SHA-256 in that
+// spec's command 16) supplies every domain and address case; the inbox fixtures below are hand-built
+// and carry `zq42c`. EMPTY_INBOX is also the `inbox` the older overview fixtures above now need.
+
+const INBOX_CASES = JSON.parse(
+  readFileSync(new URL('../../apps/web/lib/fixtures/loyalty-inbox/cases.json', import.meta.url), 'utf8')
+) as {
+  domainAccept: { input: string; stored: string }[]; domainRefuse: string[];
+  addressAccept: { input: string; stored: string }[]; addressRefuse: string[];
+  lengths: { domainsMax: number; addressesMax: number };
+};
+
+/** A never-polled, unconfigured inbox with nothing in it: the smallest valid `inbox`. */
+const EMPTY_INBOX = {
+  configured: false, problem: 'unset', missing: [...loyalty.LOYALTY_INBOX_REQUIRED_ENV], retentionDays: 30, silenceDays: 45,
+  lastCheck: null, senderDomains: [], coverage: [], forwarding: [], unknownSenders: [], unknownSenderTotal: 0, unattributed: 0,
+};
+
+describe('the loyalty inbox contract (P8-42c1)', () => {
+  it('T42c1-U1: the inbox requests, the overview panel and the poll answer accept and refuse exactly the described shapes', () => {
+    const seen: string[] = [];
+    const accepts = (schema: z.ZodType, body: unknown, label: string) => { expect(schema.safeParse(body).success, label).toBe(true); seen.push(`+${label}`); };
+    const refuses = (schema: z.ZodType, body: unknown, label: string) => { expect(schema.safeParse(body).success, label).toBe(false); seen.push(`-${label}`); };
+    const P = LoyaltyProgramPatchRequestSchema;
+    const M = LoyaltyMemberPatchRequestSchema;
+
+    // Sender domains: every accepted and refused case, the empty list, the bound, a repeat, a stray key.
+    for (const d of INBOX_CASES.domainAccept) accepts(P, { senderDomains: [d.input] }, `domain ${d.input}`);
+    for (const d of INBOX_CASES.domainRefuse) refuses(P, { senderDomains: [d] }, `domain ${d}`);
+    accepts(P, { senderDomains: [] }, 'no domains');
+    const domains = (n: number) => Array.from({ length: n }, (_, i) => `zq42c-d${i}.test`);
+    accepts(P, { senderDomains: domains(INBOX_CASES.lengths.domainsMax) }, 'domains at the bound');
+    refuses(P, { senderDomains: domains(INBOX_CASES.lengths.domainsMax + 1) }, 'domains over the bound');
+    refuses(P, { senderDomains: ['zq42c-brand.test', ' ZQ42C-BRAND.test'] }, 'a repeated domain');
+    refuses(P, { senderDomains: ['zq42c-brand.test'], senderDomain: 'zq42c-brand.test' }, 'a stray program key');
+
+    // Forwarding addresses: the same.
+    for (const a of INBOX_CASES.addressAccept) accepts(M, { forwardingAddresses: [a.input] }, `address ${a.input}`);
+    for (const a of INBOX_CASES.addressRefuse) refuses(M, { forwardingAddresses: [a] }, `address ${a}`);
+    accepts(M, { forwardingAddresses: [] }, 'no addresses');
+    const addresses = (n: number) => Array.from({ length: n }, (_, i) => `zq42c-${i}@example.com`);
+    accepts(M, { forwardingAddresses: addresses(INBOX_CASES.lengths.addressesMax) }, 'addresses at the bound');
+    refuses(M, { forwardingAddresses: addresses(INBOX_CASES.lengths.addressesMax + 1) }, 'addresses over the bound');
+    refuses(M, { forwardingAddresses: ['zq42c-anna@example.com', 'ZQ42C-Anna@example.com'] }, 'a repeated address');
+    refuses(M, { forwardingAddresses: [], forwardingAddress: 'zq42c-anna@example.com' }, 'a stray member key');
+
+    // The overview's inbox, in every state, then each contradiction.
+    const forwarding = (state: string, over: Record<string, unknown> = {}) => ({
+      memberId: 1, addresses: ['zq42c-anna@example.com'], state, lastReceivedOn: null, quietDays: 3, ...over,
+    });
+    const inbox = (over: Record<string, unknown> = {}) => ({
+      ...EMPTY_INBOX, configured: true, problem: null, missing: [],
+      senderDomains: [{ programId: 2, domains: ['zq42c-brand.test'] }],
+      coverage: [{ programId: 2, lastSeenOn: '2026-01-05', storedInWindow: 4 }],
+      forwarding: [
+        forwarding('not_set_up', { memberId: 1, addresses: [], quietDays: null }),
+        forwarding('no_mail_yet', { memberId: 2, quietDays: 45 }),
+        forwarding('ok', { memberId: 3, lastReceivedOn: '2026-01-05', quietDays: 44 }),
+        forwarding('quiet', { memberId: 4, lastReceivedOn: '2026-01-05', quietDays: 46 }),
+        forwarding('quiet', { memberId: 5, quietDays: 46 }),
+      ],
+      unknownSenders: [{ domain: 'attacker.test', count: 2 }, { domain: '(unreadable)', count: 1 }],
+      unknownSenderTotal: 3, unattributed: 1, ...over,
+    });
+    const overview = (i: unknown) => ({ members: [], programs: [], cards: [], instruments: [], cardAccounts: [], inbox: i });
+    const O = LoyaltyOverviewSchema;
+    accepts(O, overview(EMPTY_INBOX), 'the empty inbox');
+    accepts(O, overview(inbox()), 'every forwarding state');
+    accepts(O, overview(inbox({ lastCheck: { on: '2026-01-06', outcome: 'ok', errorCode: null } })), 'last check ok');
+    accepts(O, overview(inbox({ lastCheck: { on: '2026-01-06', outcome: 'error', errorCode: 'auth_failed' } })), 'last check error');
+    accepts(O, overview({ ...EMPTY_INBOX, problem: 'incomplete', missing: ['LOYALTY_IMAP_HOST'] }), 'incomplete');
+    refuses(O, { members: [], programs: [], cards: [], instruments: [], cardAccounts: [] }, 'no inbox');
+    refuses(O, overview({ ...inbox(), subject: 'ZQ42C-SUBJECT-CANARY' }), 'a stray inbox key');
+    refuses(O, overview({ ...EMPTY_INBOX, missing: ['LOYALTY_IMAP_HOST', 'LOYALTY_IMAP_PORT', 'LOYALTY_IMAP_TLS', 'LOYALTY_IMAP_USER', 'ZQ42C_PASSWORD_VALUE'] }), 'a missing entry that is no variable');
+    refuses(O, overview(inbox({ forwarding: [forwarding('not_set_up', { addresses: [], quietDays: 0 })] })), 'quietDays for not_set_up');
+    refuses(O, overview(inbox({ forwarding: [forwarding('quiet', { quietDays: null })] })), 'no quietDays for quiet');
+    refuses(O, overview(inbox({ forwarding: [forwarding('ok', { lastReceivedOn: '2026-01-05', quietDays: 46 })] })), 'ok past the threshold');
+    refuses(O, overview(inbox({ unattributed: -1 })), 'a negative count');
+    refuses(O, overview(inbox({ unknownSenderTotal: 2 })), 'listed unknowns above the total');
+    refuses(O, overview(inbox({ lastCheck: { on: '2026-01-06', outcome: 'ok', errorCode: 'timeout' } })), 'a code on an ok check');
+    refuses(O, overview(inbox({ unknownSenders: [{ domain: '<b>zq42c</b>.test', count: 1 }], unknownSenderTotal: 1 })), 'markup as a domain');
+
+    // The poll answer.
+    const poll = (over: Record<string, unknown> = {}) => ({
+      outcome: 'ok', fetched: 3, stored: 1, duplicates: 1, unknown: 1, expired: 0, oversize: 0, errorCode: null, ...over,
+    });
+    const zero = { fetched: 0, stored: 0, duplicates: 0, unknown: 0, expired: 0, oversize: 0 };
+    const R = loyalty.LoyaltyInboxPollResponseSchema;
+    accepts(R, { success: true, data: poll() }, 'poll ok');
+    accepts(R, { success: true, data: poll({ ...zero, outcome: 'disabled' }) }, 'poll disabled');
+    accepts(R, { success: true, data: poll({ ...zero, outcome: 'already_running' }) }, 'poll already running');
+    accepts(R, { success: true, data: poll({ outcome: 'error', errorCode: 'connect_failed' }) }, 'poll error');
+    refuses(R, { success: true, data: poll({ errorCode: 'timeout' }) }, 'a code on an ok poll');
+    refuses(R, { success: true, data: poll({ outcome: 'error' }) }, 'an error with no code');
+    refuses(R, { success: true, data: poll({ outcome: 'disabled' }) }, 'counts on a disabled poll');
+    const noStored: Record<string, unknown> = poll();
+    delete noStored.stored;
+    refuses(R, { success: true, data: noStored }, 'a missing count');
+    for (const key of ['subject', 'body', 'raw']) refuses(R, { success: true, data: { ...poll(), [key]: 'ZQ42C-BODY-CANARY' } }, `a stray ${key}`);
+    refuses(R, { success: true, data: poll({ fetched: -1 }) }, 'a negative count');
+    refuses(R, { success: true, data: poll({ fetched: 1.5 }) }, 'a fractional count');
+
+    // The error codes: the nine of P8-42a to P8-42b2 and the two new ones, exactly.
+    const codes = ['INVALID_INPUT', 'NOT_FOUND', 'INSUFFICIENT_SCOPE', 'BROWSER_SESSION_REQUIRED', 'MEMBERSHIP_EXISTS', 'ALIAS_TAKEN',
+      'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED', 'DOMAIN_TAKEN', 'ADDRESS_TAKEN'];
+    for (const code of codes) accepts(LoyaltyErrorCodeSchema, code, `code ${code}`);
+    expect([...LoyaltyErrorCodeSchema.options].sort()).toEqual([...codes].sort());
+
+    // The six constants.
+    expect([loyalty.LOYALTY_INBOX_RETENTION_DAYS, loyalty.LOYALTY_INBOX_SILENCE_DAYS, loyalty.LOYALTY_INBOX_MAX_BYTES,
+      loyalty.LOYALTY_INBOX_MAX_DOMAINS, loyalty.LOYALTY_INBOX_MAX_ADDRESSES, loyalty.LOYALTY_INBOX_UNKNOWN_LIMIT]).toEqual([30, 45, 5242880, 20, 10, 20]);
+
+    // Every case above was walked: the accepted and refused domain and address groups in full.
+    const walked = (sign: string, prefix: string) => seen.filter((s) => s.startsWith(`${sign}${prefix} `)).map((s) => s.slice(prefix.length + 2));
+    expect(walked('+', 'domain')).toEqual(INBOX_CASES.domainAccept.map((d) => d.input));
+    expect(walked('-', 'domain')).toEqual(INBOX_CASES.domainRefuse);
+    expect(walked('+', 'address')).toEqual(INBOX_CASES.addressAccept.map((a) => a.input));
+    expect(walked('-', 'address')).toEqual(INBOX_CASES.addressRefuse);
   });
 });

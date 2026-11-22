@@ -1525,3 +1525,134 @@ CREATE INDEX IF NOT EXISTS loyalty_instruments_membership ON loyalty_instruments
 -- One imported instrument per membership: a second import run creates none.
 CREATE UNIQUE INDEX IF NOT EXISTS loyalty_instruments_one_import
   ON loyalty_instruments (membership_id) WHERE source = 'import';
+
+-- ─── Loyalty inbox (step 42c, migration 1793000000000_loyalty_inbox) ─────────────────────────
+-- Forwarded loyalty mail from a dedicated mailbox polled read-only. Two configuration tables
+-- (the sender allowlist and the members' forwarding addresses) and three the poller writes (kept
+-- raw mail, counted unknown senders, the last poll). NOTHING DERIVED FROM A MESSAGE IS STORED
+-- except sender_domain, origin, attribution, member_id, received_on, the dedupe hash and the raw
+-- bytes: no subject, sender local part or address, recipient, snippet, parsed text or extracted
+-- value. Mail and unknown rows are kept 30 days by received_on (strictly older is purged); the
+-- configuration, the state row and the two durable dates are never purged. Dates are compared with
+-- CURRENT_DATE in SQL. Hostname shape below: lower-case ASCII letters, digits and hyphens, two or
+-- more labels of 1 to 63 characters not starting or ending with a hyphen, at most 253 characters.
+-- The application refuses more on input (shared mail providers, shared multi-label suffixes).
+
+-- The allowlist. A sender matches a domain it equals or is a dot-subdomain of; the longest stored
+-- domain wins. UNIQUE across programs (a taken domain is the route's 409 DOMAIN_TAKEN). The final
+-- label must be 2 to 24 letters or xn-- punycode, so no IP literal can be trusted.
+--   last_seen_on — received_on of the newest stored message this domain decided; NULL = no mail seen
+--                  yet. MONOTONE (only moves forward) and durable (outlives the mail it observed).
+-- Seeded by the migration with every catalog program's public mail domain, a starting point.
+CREATE TABLE loyalty_sender_domains (
+  id            SERIAL PRIMARY KEY,
+  program_id    INTEGER NOT NULL REFERENCES loyalty_programs(id) ON DELETE CASCADE,
+  domain        TEXT NOT NULL
+                  CONSTRAINT loyalty_sender_domains_domain_key UNIQUE
+                  CONSTRAINT loyalty_sender_domains_domain_shape CHECK (
+                    char_length(domain) <= 253
+                    AND domain ~ '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24}|xn--[a-z0-9-]{0,58}[a-z0-9])$'),
+  last_seen_on  DATE
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_sender_domains_program ON loyalty_sender_domains (program_id);
+
+-- Where each household member forwards from. Compared exactly, case-folded: stored lower-case, no
+-- plus-tag or dot normalisation, no display name. UNIQUE across members (409 ADDRESS_TAKEN).
+--   added_on         — registration day; with no mail yet, quiet days count from the earliest one.
+--   last_received_on — received_on of the newest message ATTRIBUTED to this member through this
+--                      address; NULL = none yet. Unattributed mail never sets it. MONOTONE, durable.
+CREATE TABLE household_member_addresses (
+  id                SERIAL PRIMARY KEY,
+  member_id         INTEGER NOT NULL REFERENCES household_members(id) ON DELETE CASCADE,
+  address           TEXT NOT NULL
+                      CONSTRAINT household_member_addresses_address_key UNIQUE
+                      CONSTRAINT household_member_addresses_address_shape CHECK (
+                        char_length(address) <= 254
+                        AND address ~ '^[a-z0-9.!#$%&''*+/=?^_`{|}~-]{1,64}@([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'),
+  added_on          DATE NOT NULL DEFAULT CURRENT_DATE,
+  last_received_on  DATE
+);
+
+CREATE INDEX IF NOT EXISTS household_member_addresses_member ON household_member_addresses (member_id);
+
+-- Kept mail. raw_mail is the RFC 822 bytes; no route, page or log returns them.
+--   dedupe_key    — lower-case hex SHA-256 of the outer Message-ID (brackets and whitespace removed),
+--                   or of 'raw:' plus the bytes when there is none. Shared key space with
+--                   loyalty_inbox_unknown_senders: a key in either table is a duplicate (the
+--                   poller's check across tables; this UNIQUE within one).
+--   received_on   — UTC date of the server's received time (INTERNALDATE), never the Date header.
+--   program_id    — the program whose domain matched. No ON DELETE: mail must not cascade away.
+--   sender_domain — the original sender's domain only, hostname shape.
+--   origin        — direct (outer From) · attachment (message/rfc822 part) · inline (forward
+--                   marker); the last two only from a registered member address.
+--   attribution   — matched · unmatched · none_found · ambiguous. Only matched sets member_id, and a
+--                   matched row is never re-attributed.
+--   member_id     — NULL = attributed to nobody. NOT an inheriting column.
+--   raw_mail      — NULL exactly when oversize (over LOYALTY_INBOX_MAX_BYTES, recorded, never fetched).
+CREATE TABLE loyalty_inbox_messages (
+  id             SERIAL PRIMARY KEY,
+  dedupe_key     TEXT NOT NULL
+                   CONSTRAINT loyalty_inbox_messages_dedupe_key_key UNIQUE
+                   CONSTRAINT loyalty_inbox_messages_dedupe_key_shape CHECK (dedupe_key ~ '^[0-9a-f]{64}$'),
+  received_on    DATE NOT NULL,
+  stored_on      DATE NOT NULL DEFAULT CURRENT_DATE,
+  program_id     INTEGER NOT NULL REFERENCES loyalty_programs(id),
+  sender_domain  TEXT NOT NULL
+                   CONSTRAINT loyalty_inbox_messages_sender_domain_shape CHECK (
+                     char_length(sender_domain) <= 253
+                     AND sender_domain ~ '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'),
+  origin         TEXT NOT NULL
+                   CONSTRAINT loyalty_inbox_messages_origin_check
+                     CHECK (origin IN ('direct', 'attachment', 'inline')),
+  attribution    TEXT NOT NULL
+                   CONSTRAINT loyalty_inbox_messages_attribution_check
+                     CHECK (attribution IN ('matched', 'unmatched', 'none_found', 'ambiguous')),
+  member_id      INTEGER REFERENCES household_members(id),
+  raw_mail       BYTEA,
+  oversize       BOOLEAN NOT NULL DEFAULT FALSE,
+  CONSTRAINT loyalty_inbox_messages_member_iff_matched
+    CHECK ((attribution = 'matched') = (member_id IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_messages_bytes_iff_not_oversize
+    CHECK ((raw_mail IS NULL) = oversize)
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_inbox_messages_received ON loyalty_inbox_messages (received_on);
+CREATE INDEX IF NOT EXISTS loyalty_inbox_messages_program ON loyalty_inbox_messages (program_id, received_on);
+
+-- Mail from senders nobody allowlisted: counted, never downloaded, never kept. The hash keeps the
+-- count idempotent across re-polls; domain is a hostname or the exact sentinel '(unreadable)', so
+-- no attacker-chosen text is stored.
+CREATE TABLE loyalty_inbox_unknown_senders (
+  dedupe_key   TEXT PRIMARY KEY
+                 CONSTRAINT loyalty_inbox_unknown_senders_dedupe_key_shape CHECK (dedupe_key ~ '^[0-9a-f]{64}$'),
+  received_on  DATE NOT NULL,
+  domain       TEXT NOT NULL
+                 CONSTRAINT loyalty_inbox_unknown_senders_domain_shape CHECK (
+                   domain = '(unreadable)'
+                   OR (char_length(domain) <= 253
+                       AND domain ~ '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'))
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_inbox_unknown_senders_received ON loyalty_inbox_unknown_senders (received_on);
+
+-- The last poll: exactly one row (id 1, seeded by the migration). All NULL = never polled ("Not
+-- checked yet"). last_error_code is a classified code only, never library text or a credential,
+-- and is set exactly when last_outcome is error. A disabled or already-running poll writes nothing.
+CREATE TABLE loyalty_inbox_state (
+  id               SMALLINT PRIMARY KEY
+                     CONSTRAINT loyalty_inbox_state_single_row CHECK (id = 1),
+  last_polled_on   DATE,
+  last_outcome     TEXT
+                     CONSTRAINT loyalty_inbox_state_last_outcome_check
+                       CHECK (last_outcome IS NULL OR last_outcome IN ('ok', 'error')),
+  last_error_code  TEXT
+                     CONSTRAINT loyalty_inbox_state_last_error_code_check
+                       CHECK (last_error_code IS NULL
+                              OR last_error_code IN ('connect_failed', 'tls_failed', 'auth_failed',
+                                                     'timeout', 'mailbox_missing', 'source_failed')),
+  CONSTRAINT loyalty_inbox_state_outcome_dated
+    CHECK ((last_polled_on IS NULL) = (last_outcome IS NULL)),
+  CONSTRAINT loyalty_inbox_state_code_iff_error
+    CHECK ((last_error_code IS NOT NULL) = (last_outcome IS NOT DISTINCT FROM 'error'))
+);

@@ -7,6 +7,7 @@ import { recordCloses } from './unspentStore';
 import { writeYearEndSnapshot } from './yearEndSnapshots';
 import { writeNetWorthSnapshot } from './netWorth';
 import { runGiftSweep } from './giftStore';
+import { runLoyaltyInboxDaily } from './loyaltyInbox';
 import { createLogger } from './logger';
 
 const log = createLogger('scheduler');
@@ -74,6 +75,12 @@ export async function runDailyJob() {
   // The charges for photographed receipts, among what this run pulled — before the digest, so a
   // mismatch opened this morning is on the dashboard when the owner opens it. Resolves always.
   await watchReceipts();
+
+  // The loyalty inbox (P8-42c1): poll the dedicated mailbox, then purge mail past its retention —
+  // after the syncs and before the digest, on this job rather than a timer of its own. The purge
+  // runs even with the poller unconfigured, so retention never waits on a mailbox. Resolves rather
+  // than rejects: a mailbox outage must never cost the digest below it.
+  await runLoyaltyInboxDaily();
 
   // Last, and after the syncs, so the outlook it reads is computed over the transactions this run
   // just pulled rather than yesterday's — an alert about a month the job has not finished loading

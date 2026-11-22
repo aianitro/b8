@@ -1,6 +1,6 @@
 // Loyalty (P8-42a) — household members, the program catalog with its aliases, memberships with a
-// derived current balance, append-only balance observations, and instruments. The eleven endpoints,
-// stated once:
+// derived current balance, append-only balance observations, instruments, and (P8-42c1) the loyalty
+// inbox. The twelve endpoints, stated once:
 //
 //   GET   /api/v1/loyalty                                 —                                → LoyaltyOverviewResponseSchema
 //   POST  /api/v1/loyalty/members                         LoyaltyMemberCreateRequestSchema → LoyaltyMemberResponseSchema (201)
@@ -13,6 +13,7 @@
 //   POST  /api/v1/loyalty/memberships/[id]/observations   LoyaltyObservationCreateRequestSchema → LoyaltyMembershipResponseSchema (201)
 //   POST  /api/v1/loyalty/instruments                     LoyaltyInstrumentCreateRequestSchema → LoyaltyInstrumentResponseSchema (201)
 //   PATCH /api/v1/loyalty/instruments/[id]                LoyaltyInstrumentPatchRequestSchema → LoyaltyInstrumentResponseSchema
+//   POST  /api/v1/loyalty/inbox/poll                      — (no body)                      → LoyaltyInboxPollResponseSchema (200 for every outcome)
 //
 // There is no route that updates or deletes an observation, and none that deletes a member, a
 // program, a membership or an instrument. An edited balance is a POST of a new observation.
@@ -142,6 +143,135 @@ export const LOYALTY_EARN_CATEGORY_MATCH_MAX_CHARS = 100;
 /** A merchant rule's text, in characters once trimmed. Tighter than the table's shared bound. */
 export const LOYALTY_EARN_MERCHANT_MATCH_MAX_CHARS = 60;
 
+/**
+ * THE LOYALTY INBOX (P8-42c1). Forwarded loyalty mail is collected from a dedicated mailbox polled
+ * read-only; only allowlisted senders are kept (raw bytes plus four header-derived facts), each kept
+ * message is attributed to a household member, and the mail is deleted after the retention window.
+ * Tables in migrations/1793000000000_loyalty_inbox.sql. Nothing here carries a message body, a
+ * subject, a sender's address, a Message-ID, the mailbox host, user or password.
+ *
+ * Raw mail and unknown-sender rows are kept this many days by received date: a row whose received
+ * date is strictly before CURRENT_DATE minus this is purged (exactly this many days old is kept).
+ * The fetch window uses the same boundary, so a message is never fetched after it was purged.
+ */
+export const LOYALTY_INBOX_RETENTION_DAYS = 30;
+/**
+ * A member is `quiet` when strictly more than this many days have passed since their reference date
+ * (newest mail received through their addresses, else the earliest address's added date). Exactly
+ * this many is not quiet. One constant, the one 42c2 replaces with the longest statement cycle.
+ */
+export const LOYALTY_INBOX_SILENCE_DAYS = 45;
+/** A message larger than this many bytes is recorded without its bytes (`oversize`), never fetched. */
+export const LOYALTY_INBOX_MAX_BYTES = 5242880;
+/** At most this many sender domains per program (one PATCH list). */
+export const LOYALTY_INBOX_MAX_DOMAINS = 20;
+/** At most this many forwarding addresses per member (one PATCH list). */
+export const LOYALTY_INBOX_MAX_ADDRESSES = 10;
+/** At most this many entries in the overview's unknown-sender list (the total counts every row). */
+export const LOYALTY_INBOX_UNKNOWN_LIMIT = 20;
+/** The exact domain text under which a sender that cannot be read as a hostname is counted. */
+export const LOYALTY_INBOX_UNREADABLE = '(unreadable)';
+
+/**
+ * Where a kept message's original sender was read. Equals `loyalty_inbox_messages_origin_check`.
+ *   direct     — the outer From header.
+ *   attachment — the From of the first message/rfc822 part; honoured only when the outer From is a
+ *                registered member address.
+ *   inline     — the From: line after a forward marker in the text body; likewise member-only.
+ */
+export const LOYALTY_INBOX_ORIGINS = ['direct', 'attachment', 'inline'] as const;
+/**
+ * Who a kept message was for. Equals `loyalty_inbox_messages_attribution_check`. Only `matched`
+ * names a member; the other three are "unattributed" and are never guessed.
+ */
+export const LOYALTY_INBOX_ATTRIBUTIONS = ['matched', 'unmatched', 'none_found', 'ambiguous'] as const;
+/**
+ * The classified codes of a failed poll. Equals `loyalty_inbox_state_last_error_code_check`. NOT
+ * `LoyaltyErrorCode`: a failed poll is HTTP 200 with outcome `error`, never an error envelope. No
+ * library error text ever accompanies a code.
+ */
+export const LOYALTY_INBOX_POLL_ERROR_CODES = [
+  'connect_failed',
+  'tls_failed',
+  'auth_failed',
+  'timeout',
+  'mailbox_missing',
+  'source_failed',
+] as const;
+/**
+ * What a poll did. `disabled` (the environment is unset or invalid) and `already_running` (another
+ * poll holds the lock) ran nothing and changed nothing; `ok` and `error` ran and recorded the state.
+ */
+export const LOYALTY_INBOX_POLL_OUTCOMES = ['ok', 'disabled', 'already_running', 'error'] as const;
+/**
+ * Why the poller is not configured. `unset`: none of the five required variables is set.
+ * `incomplete`: some but not all. Then TLS, port and timeout are validated in that order and the
+ * first failure is the problem.
+ */
+export const LOYALTY_INBOX_CONFIG_PROBLEMS = [
+  'unset',
+  'incomplete',
+  'invalid_tls',
+  'invalid_port',
+  'invalid_timeout',
+] as const;
+/**
+ * The five required environment variable NAMES, in the order `missing` lists them. Names only: no
+ * schema here can carry a value. (`LOYALTY_IMAP_MAILBOX` and `LOYALTY_IMAP_TIMEOUT_SECONDS` are
+ * optional and are never missing.)
+ */
+export const LOYALTY_INBOX_REQUIRED_ENV = [
+  'LOYALTY_IMAP_HOST',
+  'LOYALTY_IMAP_PORT',
+  'LOYALTY_IMAP_TLS',
+  'LOYALTY_IMAP_USER',
+  'LOYALTY_IMAP_PASSWORD',
+] as const;
+/**
+ * A member's forwarding health. NEVER STORED: derived on every read from the member's addresses and
+ * CURRENT_DATE.
+ *   not_set_up  — no address; quietDays null.
+ *   no_mail_yet — an address, no attributed mail yet, quietDays at most LOYALTY_INBOX_SILENCE_DAYS.
+ *   ok          — attributed mail received, quietDays at most LOYALTY_INBOX_SILENCE_DAYS.
+ *   quiet       — quietDays strictly greater than LOYALTY_INBOX_SILENCE_DAYS, mail or not.
+ */
+export const LOYALTY_INBOX_FORWARDING_STATES = ['not_set_up', 'no_mail_yet', 'ok', 'quiet'] as const;
+
+/**
+ * Shared mail providers: a sender domain equal to one of these, or a subdomain of one, is refused on
+ * input, because allowlisting it would trust every stranger with a free mailbox. Data, and a stated
+ * limit: a provider not on the list is not caught (the editor is owner-only).
+ */
+export const LOYALTY_INBOX_SHARED_MAIL_PROVIDERS = [
+  'gmail.com',
+  'googlemail.com',
+  'outlook.com',
+  'hotmail.com',
+  'live.com',
+  'yahoo.com',
+  'icloud.com',
+  'me.com',
+  'aol.com',
+  'proton.me',
+  'protonmail.com',
+  'gmx.com',
+  'mail.com',
+] as const;
+/**
+ * Shared multi-label public suffixes: a sender domain EQUAL to one of these is refused on input (a
+ * subdomain such as a company's own domain under it is allowed). No public-suffix list is consulted;
+ * this short list is data and a stated limit: a suffix not on it is not caught.
+ */
+export const LOYALTY_INBOX_SHARED_SUFFIXES = [
+  'co.uk',
+  'org.uk',
+  'com.au',
+  'co.nz',
+  'co.jp',
+  'com.br',
+  'co.za',
+] as const;
+
 export const LoyaltyUnitSchema = z.enum(LOYALTY_UNITS);
 export const LoyaltyProgramKindSchema = z.enum(LOYALTY_PROGRAM_KINDS);
 export const LoyaltyInstrumentKindSchema = z.enum(LOYALTY_INSTRUMENT_KINDS);
@@ -151,6 +281,13 @@ export const LoyaltyFeeWatchStateSchema = z.enum(LOYALTY_FEE_WATCH_STATES);
 export const LoyaltyEarnMatchKindSchema = z.enum(LOYALTY_EARN_MATCH_KINDS);
 export const LoyaltyEarnBasisSchema = z.enum(LOYALTY_EARN_BASES);
 export const LoyaltyEarnUnitSchema = z.enum(LOYALTY_EARN_UNITS);
+export const LoyaltyInboxOriginSchema = z.enum(LOYALTY_INBOX_ORIGINS);
+export const LoyaltyInboxAttributionSchema = z.enum(LOYALTY_INBOX_ATTRIBUTIONS);
+export const LoyaltyInboxPollErrorCodeSchema = z.enum(LOYALTY_INBOX_POLL_ERROR_CODES);
+export const LoyaltyInboxPollOutcomeSchema = z.enum(LOYALTY_INBOX_POLL_OUTCOMES);
+export const LoyaltyInboxConfigProblemSchema = z.enum(LOYALTY_INBOX_CONFIG_PROBLEMS);
+export const LoyaltyInboxRequiredEnvSchema = z.enum(LOYALTY_INBOX_REQUIRED_ENV);
+export const LoyaltyInboxForwardingStateSchema = z.enum(LOYALTY_INBOX_FORWARDING_STATES);
 
 /**
  * The codes these endpoints define. A SUBSET, NOT A CLOSURE: the boundary's `UNAUTHENTICATED` (401)
@@ -180,6 +317,13 @@ export const LoyaltyEarnUnitSchema = z.enum(LOYALTY_EARN_UNITS);
  *   `CARD_ALREADY_LINKED`      409 — a membership PATCH linking a card another membership already
  *                                    holds (one card, one membership; decided by the unique index,
  *                                    so a lost race is this and never a 500). Nothing changed.
+ *   `DOMAIN_TAKEN`             409 — a program PATCH whose `senderDomains` list contains a domain
+ *                                    another program already holds (unique across programs, decided
+ *                                    by the constraint, so a lost race is this and never a 500). The
+ *                                    old list is unchanged. The message never echoes the domain.
+ *   `ADDRESS_TAKEN`            409 — a member PATCH whose `forwardingAddresses` list contains an
+ *                                    address another member already holds. Nothing changed. The
+ *                                    message never echoes the address.
  *
  * Linking an account that does not exist, or whose type is not `credit`, is `INVALID_INPUT` (400)
  * with nothing changed. The message never echoes a submitted benefit description.
@@ -194,6 +338,8 @@ export const LoyaltyErrorCodeSchema = z.enum([
   'MEMBER_NAME_TAKEN',
   'MEMBER_USER_TAKEN',
   'CARD_ALREADY_LINKED',
+  'DOMAIN_TAKEN',
+  'ADDRESS_TAKEN',
 ]);
 
 // ─── Primitives ─────────────────────────────────────────────────────────────────────────────────
@@ -394,6 +540,73 @@ export const LoyaltyEarnInputSchema = z
     path: ['rules'],
   });
 
+/**
+ * THE INBOX INPUT RULES (P8-42c1), in one place. `lib/domain/loyaltyInbox.ts` imports these rather
+ * than restating them: a second copy of "what is a trustworthy sender domain" is the defect this
+ * package exists to prevent.
+ *
+ * Normalisation: trim, then lower-case, but only when the trimmed text is printable ASCII. A
+ * non-ASCII entry is left as it is so the shape test refuses it (lower-casing some non-ASCII
+ * characters yields ASCII ones, which must not turn a look-alike into a valid entry). The handler
+ * stores exactly this normalised form.
+ */
+export function normaliseLoyaltyInboxEntry(text: string): string {
+  const t = text.trim();
+  return /^[\x21-\x7e]*$/.test(t) ? t.toLowerCase() : t;
+}
+
+/** One hostname label: 1 to 63 of letters, digits and hyphens, not starting or ending with a hyphen. */
+const HOST_LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+const HOSTNAME = new RegExp(`^(?:${HOST_LABEL}\\.)+${HOST_LABEL}$`);
+/** An allowlistable domain also needs a final label of 2 to 24 letters or the punycode `xn--` form. */
+const ALLOWLIST_DOMAIN = new RegExp(`^(?:${HOST_LABEL}\\.)+(?:[a-z]{2,24}|xn--[a-z0-9-]{0,58}[a-z0-9])$`);
+const ADDRESS = new RegExp(`^[a-z0-9.!#$%&'*+/=?^_\`{|}~-]{1,64}@(?:${HOST_LABEL}\\.)+${HOST_LABEL}$`);
+
+/**
+ * The hostname shape (already normalised): lower-case ASCII, at least two labels, at most 253
+ * characters. Equals the domain CHECKs of loyalty_inbox_messages and loyalty_inbox_unknown_senders.
+ * A sender domain that fails it is counted as `LOYALTY_INBOX_UNREADABLE`.
+ */
+export function isLoyaltyHostname(domain: string): boolean {
+  return domain.length <= 253 && HOSTNAME.test(domain);
+}
+
+/**
+ * Whether an already-normalised domain may be allowlisted for a program: the hostname shape with a
+ * letter or punycode final label (equals `loyalty_sender_domains_domain_shape`), and neither a shared
+ * mail provider nor a subdomain of one, nor exactly a shared multi-label suffix. No wildcard, scheme,
+ * path, port, `@`, leading or trailing dot can pass the shape.
+ */
+export function isLoyaltySenderDomain(domain: string): boolean {
+  if (!(domain.length <= 253 && ALLOWLIST_DOMAIN.test(domain))) return false;
+  if (LOYALTY_INBOX_SHARED_MAIL_PROVIDERS.some((p) => domain === p || domain.endsWith(`.${p}`))) return false;
+  return !(LOYALTY_INBOX_SHARED_SUFFIXES as readonly string[]).includes(domain);
+}
+
+/**
+ * Whether an already-normalised text is a forwarding address: a plain `local@domain`, ASCII, local
+ * part 1 to 64 characters of letters, digits and ``.!#$%&'*+/=?^_`{|}~-``, a hostname-shaped domain
+ * of at least two labels, at most 254 characters. No display name, angle brackets or quoted local
+ * part. Equals `household_member_addresses_address_shape`. Shared mail providers ARE allowed here:
+ * a person forwards from whatever mailbox they have.
+ */
+export function isLoyaltyForwardingAddress(address: string): boolean {
+  return address.length <= 254 && ADDRESS.test(address);
+}
+
+/** A list must not hold the same entry twice once normalised (the handler would store one row). */
+const distinctOnceNormalised = (xs: string[]) => new Set(xs.map(normaliseLoyaltyInboxEntry)).size === xs.length;
+
+/** A sender domain AS SUBMITTED. The message never echoes the input. */
+export const LoyaltySenderDomainInputSchema = z
+  .string()
+  .refine((s) => isLoyaltySenderDomain(normaliseLoyaltyInboxEntry(s)), 'not a sender domain that can be allowlisted');
+
+/** A forwarding address AS SUBMITTED. The message never echoes the input. */
+export const LoyaltyForwardingAddressInputSchema = z
+  .string()
+  .refine((s) => isLoyaltyForwardingAddress(normaliseLoyaltyInboxEntry(s)), 'not a plain email address');
+
 // ─── Requests ───────────────────────────────────────────────────────────────────────────────────
 
 /** `POST /api/v1/loyalty/members`. `userId` absent or null: this person is not a b8 user. */
@@ -402,11 +615,27 @@ export const LoyaltyMemberCreateRequestSchema = z.strictObject({
   userId: UserIdSchema.nullable().optional(),
 });
 
-/** `PATCH /api/v1/loyalty/members/[id]`. At least one field; `userId: null` unlinks. */
+/**
+ * `PATCH /api/v1/loyalty/members/[id]`. At least one field; `userId: null` unlinks.
+ *
+ * `forwardingAddresses` (P8-42c1), when present, is the COMPLETE new list of addresses this member
+ * forwards from, a replacement and not an addition; `[]` clears it. 0 to
+ * `LOYALTY_INBOX_MAX_ADDRESSES` entries, each a plain address once normalised, no repeat once
+ * normalised. The handler stores the normalised forms in one transaction: an address another member
+ * holds is 409 `ADDRESS_TAKEN` and nothing changes. An address that stays keeps its `added_on`.
+ * After a successful replace, retained not-yet-matched messages are re-attributed; a matched one is
+ * never changed. The response is the unchanged `LoyaltyMemberSchema` (it does not echo the list;
+ * the page reads it from the overview's `inbox.forwarding`).
+ */
 export const LoyaltyMemberPatchRequestSchema = z
   .strictObject({
     displayName: typedName(100, 'a display name').optional(),
     userId: UserIdSchema.nullable().optional(),
+    forwardingAddresses: z
+      .array(LoyaltyForwardingAddressInputSchema)
+      .max(LOYALTY_INBOX_MAX_ADDRESSES, `at most ${LOYALTY_INBOX_MAX_ADDRESSES} forwarding addresses`)
+      .refine(distinctOnceNormalised, 'the same address appears twice')
+      .optional(),
   })
   .refine((b) => Object.keys(b).length > 0, 'nothing to change');
 
@@ -428,6 +657,13 @@ export const LoyaltyProgramCreateRequestSchema = z.strictObject({
  * one entry. The handler normalises each, collapses duplicates, and applies the whole list in one
  * transaction: an alias held by another program answers 409 `ALIAS_TAKEN` and leaves the program's
  * aliases exactly as they were. Absent means the aliases are unchanged.
+ *
+ * `senderDomains` (P8-42c1), when present, is the COMPLETE new allowlist for this program, a
+ * replacement and not an addition; `[]` clears it. 0 to `LOYALTY_INBOX_MAX_DOMAINS` entries, each
+ * passing `isLoyaltySenderDomain` once normalised, no repeat once normalised. Applied in one
+ * transaction: a domain another program holds is 409 `DOMAIN_TAKEN` and the old list is unchanged.
+ * A domain that stays keeps its `last_seen_on`. The response is the unchanged
+ * `LoyaltyProgramSchema` (it does not echo the list; the page reads it from `inbox.senderDomains`).
  */
 export const LoyaltyProgramPatchRequestSchema = z
   .strictObject({
@@ -438,6 +674,11 @@ export const LoyaltyProgramPatchRequestSchema = z
       .array(LoyaltyAliasInputSchema)
       .min(1, 'a program needs at least one alias')
       .max(100, 'a program has at most 100 aliases')
+      .optional(),
+    senderDomains: z
+      .array(LoyaltySenderDomainInputSchema)
+      .max(LOYALTY_INBOX_MAX_DOMAINS, `at most ${LOYALTY_INBOX_MAX_DOMAINS} sender domains`)
+      .refine(distinctOnceNormalised, 'the same domain appears twice')
       .optional(),
   })
   .refine((b) => Object.keys(b).length > 0, 'nothing to change');
@@ -869,6 +1110,191 @@ export const LoyaltyInstrumentSchema = z.strictObject({
   source: LoyaltyInstrumentSourceSchema,
 });
 
+/** A whole count as emitted: a non-negative JSON integer, never fractional, never negative. */
+const InboxCountSchema = z.int().nonnegative();
+
+/**
+ * The last poll that ran, from `loyalty_inbox_state`. `on` is its CURRENT_DATE as Postgres text.
+ * `errorCode` is set exactly when `outcome` is `error`, and is a classified code only.
+ */
+export const LoyaltyInboxLastCheckSchema = z
+  .strictObject({
+    on: calendarDate,
+    outcome: z.enum(['ok', 'error']),
+    errorCode: LoyaltyInboxPollErrorCodeSchema.nullable(),
+  })
+  .refine((c) => (c.errorCode !== null) === (c.outcome === 'error'), {
+    message: 'errorCode is set exactly when the outcome is error',
+    path: ['errorCode'],
+  });
+
+/** A program's stored allowlist, for a program with at least one domain, domains ascending. */
+export const LoyaltyInboxSenderDomainsSchema = z.strictObject({
+  programId: LoyaltyIdSchema,
+  domains: z.array(z.string().refine(isLoyaltyHostname, 'expected a hostname')).min(1).max(LOYALTY_INBOX_MAX_DOMAINS),
+});
+
+/**
+ * Coverage of one program with at least one domain. `lastSeenOn`: the greatest `last_seen_on` over
+ * its domains, null = no mail seen yet (never a date, never the epoch). `storedInWindow`: retained
+ * messages for the program with received date on or after CURRENT_DATE minus the retention days.
+ */
+export const LoyaltyInboxCoverageSchema = z.strictObject({
+  programId: LoyaltyIdSchema,
+  lastSeenOn: calendarDate.nullable(),
+  storedInWindow: InboxCountSchema,
+});
+
+/**
+ * One member's forwarding health (see `LOYALTY_INBOX_FORWARDING_STATES`). `addresses` is the owner's
+ * own configuration, ascending. `lastReceivedOn`: the greatest `last_received_on` over the addresses,
+ * or null. `quietDays`: CURRENT_DATE minus the reference date in whole days (Postgres), null exactly
+ * for `not_set_up`. Never negative: received dates are UTC calendar dates while CURRENT_DATE follows
+ * the session time zone, so a message received this evening can carry tomorrow's date for a few
+ * hours; the producer computes `GREATEST(0, CURRENT_DATE - reference)` in SQL rather than emit a
+ * negative day count. The refinements make a state that contradicts its fields unparseable.
+ */
+export const LoyaltyInboxForwardingSchema = z
+  .strictObject({
+    memberId: LoyaltyIdSchema,
+    addresses: z
+      .array(z.string().refine(isLoyaltyForwardingAddress, 'expected a plain address'))
+      .max(LOYALTY_INBOX_MAX_ADDRESSES),
+    state: LoyaltyInboxForwardingStateSchema,
+    lastReceivedOn: calendarDate.nullable(),
+    quietDays: InboxCountSchema.nullable(),
+  })
+  .refine((f) => (f.state === 'not_set_up') === (f.addresses.length === 0), {
+    message: 'not_set_up exactly when the member has no address',
+    path: ['state'],
+  })
+  .refine((f) => (f.state === 'not_set_up') === (f.quietDays === null), {
+    message: 'quietDays is null exactly for not_set_up',
+    path: ['quietDays'],
+  })
+  .refine((f) => f.state !== 'not_set_up' || f.lastReceivedOn === null, {
+    message: 'not_set_up has no received date',
+    path: ['lastReceivedOn'],
+  })
+  .refine((f) => f.state !== 'no_mail_yet' || f.lastReceivedOn === null, {
+    message: 'no_mail_yet has no received date',
+    path: ['lastReceivedOn'],
+  })
+  .refine((f) => f.state !== 'ok' || f.lastReceivedOn !== null, {
+    message: 'ok has a received date',
+    path: ['lastReceivedOn'],
+  })
+  .refine(
+    (f) =>
+      f.quietDays === null ||
+      (f.state === 'quiet') === (f.quietDays > LOYALTY_INBOX_SILENCE_DAYS),
+    { message: 'quiet exactly when quietDays is above the silence threshold', path: ['state'] }
+  );
+
+/** One unknown sender domain (or `LOYALTY_INBOX_UNREADABLE`) and its count of retained rows. */
+export const LoyaltyInboxUnknownSenderSchema = z.strictObject({
+  domain: z.string().refine((d) => d === LOYALTY_INBOX_UNREADABLE || isLoyaltyHostname(d), 'expected a hostname'),
+  count: z.int().positive(),
+});
+
+/**
+ * THE OVERVIEW'S INBOX PANEL (P8-42c1). Every count and day difference is computed in Postgres.
+ *
+ *   configured, problem, missing — the password-free view of the environment. `configured` exactly
+ *        when `problem` is null. `missing` lists required variable NAMES only (never values): all
+ *        five for `unset`, one to four for `incomplete`, none otherwise.
+ *   retentionDays, silenceDays — the two constants, so the page states them without importing logic.
+ *   lastCheck       — null = never polled ("Not checked yet").
+ *   senderDomains   — one entry per program with at least one domain.
+ *   coverage        — one entry per program with at least one domain (the same programs).
+ *   forwarding      — one entry per household member.
+ *   unknownSenders  — retained unknown rows by domain, count descending then domain ascending, at most
+ *                     `LOYALTY_INBOX_UNKNOWN_LIMIT` entries.
+ *   unknownSenderTotal — the count of all retained unknown rows (not just the listed ones).
+ *   unattributed    — retained kept messages whose attribution is not `matched`.
+ *
+ * No key can hold a message body, a subject, a sender's address, a Message-ID, the host, the user
+ * or the password: the objects are strict and every string is shape-checked.
+ */
+export const LoyaltyInboxSchema = z
+  .strictObject({
+    configured: z.boolean(),
+    problem: LoyaltyInboxConfigProblemSchema.nullable(),
+    missing: z.array(LoyaltyInboxRequiredEnvSchema),
+    retentionDays: z.literal(LOYALTY_INBOX_RETENTION_DAYS),
+    silenceDays: z.literal(LOYALTY_INBOX_SILENCE_DAYS),
+    lastCheck: LoyaltyInboxLastCheckSchema.nullable(),
+    senderDomains: z.array(LoyaltyInboxSenderDomainsSchema),
+    coverage: z.array(LoyaltyInboxCoverageSchema),
+    forwarding: z.array(LoyaltyInboxForwardingSchema),
+    unknownSenders: z.array(LoyaltyInboxUnknownSenderSchema).max(LOYALTY_INBOX_UNKNOWN_LIMIT),
+    unknownSenderTotal: InboxCountSchema,
+    unattributed: InboxCountSchema,
+  })
+  .refine((i) => i.configured === (i.problem === null), {
+    message: 'configured exactly when there is no problem',
+    path: ['configured'],
+  })
+  .refine((i) => new Set(i.missing).size === i.missing.length, {
+    message: 'a missing name appears twice',
+    path: ['missing'],
+  })
+  .refine(
+    (i) =>
+      i.problem === 'unset'
+        ? i.missing.length === LOYALTY_INBOX_REQUIRED_ENV.length
+        : i.problem === 'incomplete'
+          ? i.missing.length >= 1 && i.missing.length < LOYALTY_INBOX_REQUIRED_ENV.length
+          : i.missing.length === 0,
+    { message: 'missing does not agree with the problem', path: ['missing'] }
+  )
+  .refine(
+    (i) =>
+      [...i.coverage.map((c) => c.programId)].sort((a, b) => a - b).join() ===
+      [...i.senderDomains.map((s) => s.programId)].sort((a, b) => a - b).join(),
+    { message: 'coverage covers exactly the programs with sender domains', path: ['coverage'] }
+  )
+  .refine((i) => i.unknownSenders.reduce((n, u) => n + u.count, 0) <= i.unknownSenderTotal, {
+    message: 'the listed unknown senders exceed the total',
+    path: ['unknownSenderTotal'],
+  });
+
+/**
+ * `POST /api/v1/loyalty/inbox/poll` (P8-42c1), no body. HTTP 200 for all four outcomes.
+ *
+ *   fetched    — envelopes listed in the window.
+ *   stored     — new messages kept (an oversize one included).
+ *   duplicates — envelopes whose dedupe key was already known (never downloaded again).
+ *   unknown    — new unknown-sender rows (counted by domain only).
+ *   expired    — envelopes older than the window (dropped, not stored, not counted unknown).
+ *   oversize   — new messages recorded without their bytes.
+ *   errorCode  — set exactly when `outcome` is `error`; a classified code only.
+ *
+ * `disabled` and `already_running` ran nothing, so every count is zero. An `error` may carry the
+ * counts reached before the failure. Strict: no subject, body, raw byte, address or library text.
+ */
+export const LoyaltyInboxPollSchema = z
+  .strictObject({
+    outcome: LoyaltyInboxPollOutcomeSchema,
+    fetched: InboxCountSchema,
+    stored: InboxCountSchema,
+    duplicates: InboxCountSchema,
+    unknown: InboxCountSchema,
+    expired: InboxCountSchema,
+    oversize: InboxCountSchema,
+    errorCode: LoyaltyInboxPollErrorCodeSchema.nullable(),
+  })
+  .refine((p) => (p.errorCode !== null) === (p.outcome === 'error'), {
+    message: 'errorCode is set exactly when the outcome is error',
+    path: ['errorCode'],
+  })
+  .refine(
+    (p) =>
+      (p.outcome !== 'disabled' && p.outcome !== 'already_running') ||
+      [p.fetched, p.stored, p.duplicates, p.unknown, p.expired, p.oversize].every((n) => n === 0),
+    { message: 'a poll that did not run has zero counts', path: ['outcome'] }
+  );
+
 /**
  * `GET /api/v1/loyalty` — the whole picture, masked numbers only.
  *
@@ -879,6 +1305,8 @@ export const LoyaltyInstrumentSchema = z.strictObject({
  *                 ascending (the page's order, decided by the server).
  *   cardAccounts — every account whose type is `credit`, linked or not, by name then id: the
  *                 choices for "Link a card". Never an account of another type.
+ *   inbox       — the loyalty inbox panel (P8-42c1, `LoyaltyInboxSchema`). Required. Identical for
+ *                 every viewer; it reads no ledger row.
  */
 export const LoyaltyOverviewSchema = z.strictObject({
   members: z.array(LoyaltyMemberSchema),
@@ -886,6 +1314,7 @@ export const LoyaltyOverviewSchema = z.strictObject({
   cards: z.array(LoyaltyProgramCardSchema),
   instruments: z.array(LoyaltyInstrumentSchema),
   cardAccounts: z.array(LoyaltyCardAccountSchema),
+  inbox: LoyaltyInboxSchema,
 });
 
 /**
@@ -909,6 +1338,8 @@ export const LoyaltyMembershipResponseSchema = apiResponseSchema(LoyaltyMembersh
 export const LoyaltyMemberNumberResponseSchema = apiResponseSchema(LoyaltyMemberNumberSchema);
 /** `POST …/instruments`, `PATCH …/instruments/[id]`. */
 export const LoyaltyInstrumentResponseSchema = apiResponseSchema(LoyaltyInstrumentSchema);
+/** `POST …/inbox/poll`. */
+export const LoyaltyInboxPollResponseSchema = apiResponseSchema(LoyaltyInboxPollSchema);
 
 export type LoyaltyUnit = z.infer<typeof LoyaltyUnitSchema>;
 export type LoyaltyProgramKind = z.infer<typeof LoyaltyProgramKindSchema>;
@@ -946,3 +1377,17 @@ export type LoyaltyProgramCard = z.infer<typeof LoyaltyProgramCardSchema>;
 export type LoyaltyInstrument = z.infer<typeof LoyaltyInstrumentSchema>;
 export type LoyaltyOverview = z.infer<typeof LoyaltyOverviewSchema>;
 export type LoyaltyMemberNumber = z.infer<typeof LoyaltyMemberNumberSchema>;
+export type LoyaltyInboxOrigin = z.infer<typeof LoyaltyInboxOriginSchema>;
+export type LoyaltyInboxAttribution = z.infer<typeof LoyaltyInboxAttributionSchema>;
+export type LoyaltyInboxPollErrorCode = z.infer<typeof LoyaltyInboxPollErrorCodeSchema>;
+export type LoyaltyInboxPollOutcome = z.infer<typeof LoyaltyInboxPollOutcomeSchema>;
+export type LoyaltyInboxConfigProblem = z.infer<typeof LoyaltyInboxConfigProblemSchema>;
+export type LoyaltyInboxRequiredEnv = z.infer<typeof LoyaltyInboxRequiredEnvSchema>;
+export type LoyaltyInboxForwardingState = z.infer<typeof LoyaltyInboxForwardingStateSchema>;
+export type LoyaltyInboxLastCheck = z.infer<typeof LoyaltyInboxLastCheckSchema>;
+export type LoyaltyInboxSenderDomains = z.infer<typeof LoyaltyInboxSenderDomainsSchema>;
+export type LoyaltyInboxCoverage = z.infer<typeof LoyaltyInboxCoverageSchema>;
+export type LoyaltyInboxForwarding = z.infer<typeof LoyaltyInboxForwardingSchema>;
+export type LoyaltyInboxUnknownSender = z.infer<typeof LoyaltyInboxUnknownSenderSchema>;
+export type LoyaltyInbox = z.infer<typeof LoyaltyInboxSchema>;
+export type LoyaltyInboxPoll = z.infer<typeof LoyaltyInboxPollSchema>;

@@ -37,6 +37,8 @@ const STATUS: Record<LoyaltyErrorCode, number> = {
   MEMBER_NAME_TAKEN: 409,
   MEMBER_USER_TAKEN: 409,
   CARD_ALREADY_LINKED: 409,
+  DOMAIN_TAKEN: 409,
+  ADDRESS_TAKEN: 409,
 };
 
 const MESSAGE: Record<LoyaltyErrorCode, string> = {
@@ -49,6 +51,9 @@ const MESSAGE: Record<LoyaltyErrorCode, string> = {
   MEMBER_NAME_TAKEN: 'Another household member already has that name.',
   MEMBER_USER_TAKEN: 'Another household member is already linked to that user.',
   CARD_ALREADY_LINKED: 'That card already earns into another membership. Unlink it there first.',
+  // P8-42c1. Neither names the domain or address: an error body never echoes what was submitted.
+  DOMAIN_TAKEN: 'Another program already uses one of those sender domains.',
+  ADDRESS_TAKEN: 'Another household member already forwards from one of those addresses.',
 };
 
 /** A refusal as a response. One body shape for every code and every route. */

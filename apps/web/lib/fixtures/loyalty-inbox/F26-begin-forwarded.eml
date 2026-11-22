@@ -1,0 +1,15 @@
+Message-ID: <zq42c-f26@example.com>
+From: zq42c-anna@example.com
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Subject: ZQ42C-SUBJECT-CANARY F26
+Date: {{DAY:-13}}
+
+ZQ42C-BODY-CANARY F26 ZQ42C-MEMBER-0000
+
+Begin forwarded message:
+
+> From: ZQ42C Stays <statements@zq42c-brand.test>
+> Subject: ZQ42C-SUBJECT-CANARY inner
+> Date: {{DAY:-13}}
+> To: zq42c-anna@example.com

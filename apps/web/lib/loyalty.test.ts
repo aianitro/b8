@@ -304,6 +304,7 @@ const LOYALTY_ROUTE_FILES = [
   'app/api/v1/loyalty/memberships/[id]/observations/route.ts',
   'app/api/v1/loyalty/instruments/route.ts',
   'app/api/v1/loyalty/instruments/[id]/route.ts',
+  'app/api/v1/loyalty/inbox/poll/route.ts',
 ];
 
 /** The `href`s of the sidebar's NAV array, in order, and whether /travel carries its label. */
@@ -393,7 +394,7 @@ describe('wiring', () => {
     const surface = read('scripts/gifts-surface-check.mjs');
     expect(surface).toContain(`'app/travel/page.tsx': { cls: 'numeric-only', url: () => '/travel' }`);
     expect(surface).toMatch(/current = 'H11';/);
-    expect(surface).toContain(`console.log('OK H1-H13');`);
+    expect(surface).toContain(`console.log('OK H1-H14');`);
 
     // Every route resolves its caller first, through the helper that calls the boundary's authorize.
     const helper = read('app/api/v1/loyalty/loyaltyResponses.ts');

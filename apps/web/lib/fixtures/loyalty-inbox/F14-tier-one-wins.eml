@@ -1,0 +1,29 @@
+Message-ID: <zq42c-f14@example.com>
+From: zq42c-anna@example.com
+To: zq42c-anna@example.com
+X-Forwarded-For: zq42c-anna@example.com
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="zq42c-boundary-f14"
+Subject: ZQ42C-SUBJECT-CANARY F14
+Date: {{DAY:-10}}
+
+--zq42c-boundary-f14
+Content-Type: text/plain; charset=utf-8
+
+ZQ42C-BODY-CANARY F14 ZQ42C-MEMBER-0000
+
+--zq42c-boundary-f14
+Content-Type: message/rfc822
+
+From: ZQ42C Stays <statements@zq42c-brand.test>
+Delivered-To: zq42c-boris@example.net
+To: zq42c-boris@example.net
+Message-ID: <zq42c-f14-inner@zq42c-brand.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Subject: ZQ42C-SUBJECT-CANARY F14-INNER
+Date: {{DAY:-10}}
+
+ZQ42C-BODY-CANARY F14-INNER ZQ42C-MEMBER-0000
+
+--zq42c-boundary-f14--

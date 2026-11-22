@@ -1,0 +1,10 @@
+Message-ID: <zq42c-f15@zq42c-brand.test>
+From: ZQ42C Stays <statements@zq42c-brand.test>
+Received: from localhost by zq42c-mx.example.net for <zq42c-inbox@example.net>; {{DAY:-11}}
+Received: from localhost by zq42c-origin.example.com for <zq42c-boris@example.net>; {{DAY:-11}}
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Subject: ZQ42C-SUBJECT-CANARY F15
+Date: {{DAY:-11}}
+
+ZQ42C-BODY-CANARY F15 ZQ42C-MEMBER-0000

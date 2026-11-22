@@ -1,0 +1,11 @@
+Message-ID: <zq42c-f07@zq42c-brand.test>
+From: spoof@attacker.test
+Reply-To: statements@zq42c-brand.test
+Return-Path: <statements@zq42c-brand.test>
+Sender: statements@zq42c-brand.test
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Subject: ZQ42C-SUBJECT-CANARY F07
+Date: {{DAY:-3}}
+
+ZQ42C-BODY-CANARY F07 ZQ42C-MEMBER-0000

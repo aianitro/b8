@@ -49,12 +49,23 @@
 // `addObservation` INSERTs. There is no statement here, or anywhere in loyalty code, that updates or
 // deletes an observation: a corrected balance is a newer reading, and the current balance is derived
 // from all of them by the shared reducer.
+//
+// ─── THE LOYALTY INBOX (P8-42c1) ──────────────────────────────────────────────────────────────
+//
+// The overview's `inbox` panel, the program PATCH's `senderDomains` and the member PATCH's
+// `forwardingAddresses` are written here; everything that touches the collected mail itself, its
+// bytes above all, is `loyaltyInbox.ts`'s (`loadInboxOverview`, `reattributeInbox`). Both lists are
+// replaced whole inside the PATCH's one transaction, and the UNIQUE constraints decide a taken
+// domain or address (409), so a lost race is the same 409 and never a 500. An entry that stays in a
+// list keeps its row, and with it `last_seen_on`, `added_on` and `last_received_on`.
 
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import db from './db';
 import { createLogger } from './logger';
 import { visibleTransactions } from './giftReadPath';
 import { earnDescriptionsOf, earnFiguresOf, replaceEarn } from './loyaltyEarn';
+import { loadInboxOverview, reattributeInbox } from './loyaltyInbox';
+import { storedForwardingAddress, storedSenderDomain } from './domain/loyaltyInbox';
 import {
   currentObservationByMembership,
   maskMemberNumber,
@@ -125,6 +136,10 @@ function fromPgError(err: unknown): LoyaltyFailure {
       case 'household_members_display_name_ci': return fail('MEMBER_NAME_TAKEN');
       case 'household_members_user_id_key': return fail('MEMBER_USER_TAKEN');
       case 'loyalty_memberships_one_per_card': return fail('CARD_ALREADY_LINKED');
+      // P8-42c1: a domain or address is unique across the whole table, so another program or member
+      // holding it is this constraint, inside the replace's transaction (nothing changed).
+      case 'loyalty_sender_domains_domain_key': return fail('DOMAIN_TAKEN');
+      case 'household_member_addresses_address_key': return fail('ADDRESS_TAKEN');
       // Positions are written one to n inside one transaction, so this cannot happen on a body the
       // contract accepted; if it ever does it is the request's 400, never a 500.
       case 'loyalty_earn_rules_membership_position_key': return fail('INVALID_INPUT');
@@ -428,7 +443,7 @@ const INSTRUMENT_SELECT = `
  * loyalty accounts.
  */
 export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> {
-  const [members, programs, aliases, memberships, observations, instruments, watches, cardAccounts] = await Promise.all([
+  const [members, programs, aliases, memberships, observations, instruments, watches, cardAccounts, inbox] = await Promise.all([
     q.query<{ id: number; display_name: string; user_id: number | null }>(
       'SELECT id, display_name, user_id FROM household_members ORDER BY display_name, id'
     ),
@@ -446,6 +461,8 @@ export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> 
     q.query<LoyaltyCardAccount>(
       `SELECT id, coalesce(name, '') AS name FROM accounts WHERE type = 'credit' ORDER BY name, id`
     ),
+    // The inbox panel (P8-42c1): configuration, health and counts only, never a byte of mail.
+    loadInboxOverview(q),
   ]);
 
   const aliasesOf = new Map<number, string[]>();
@@ -473,6 +490,7 @@ export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> 
     cards,
     instruments: sortInstruments(instruments.rows),
     cardAccounts: cardAccounts.rows,
+    inbox,
   };
 }
 
@@ -495,19 +513,50 @@ export async function createMember(body: LoyaltyMemberCreateRequest): Promise<Lo
   }
 }
 
+/**
+ * Edits a member. `forwardingAddresses` (P8-42c1), when present, REPLACES the member's whole list in
+ * the same transaction as the other fields: addresses no longer listed are deleted, new ones
+ * inserted, kept ones untouched (so their `added_on` and `last_received_on` survive). An address
+ * another member holds is the unique constraint's 409 `ADDRESS_TAKEN` and nothing changes. Then, in
+ * that transaction still, the retained messages not yet matched to anyone are re-attributed with the
+ * new addresses; a matched message is never changed.
+ */
 export async function patchMember(id: number, body: LoyaltyMemberPatchRequest): Promise<LoyaltyResult<LoyaltyMember>> {
+  let addresses: string[] | null = null;
+  if (body.forwardingAddresses !== undefined) {
+    const stored = body.forwardingAddresses.map(storedForwardingAddress);
+    // The schema has refused these already; a second refusal here is the handler's 400, never a 500.
+    if (stored.some((a) => a === null)) return fail('INVALID_INPUT', 'A forwarding address must be a plain email address.');
+    addresses = stored as string[];
+  }
   try {
-    // A field absent from the body keeps its value; `userId: null` is an explicit unlink, so the
-    // "was it sent" flag travels separately from the value.
-    const r = await db.query<{ id: number; display_name: string; user_id: number | null }>(
-      `UPDATE household_members
-          SET display_name = COALESCE($2, display_name),
-              user_id = CASE WHEN $3 THEN $4::int ELSE user_id END
-        WHERE id = $1
-      RETURNING id, display_name, user_id`,
-      [id, storedText(body.displayName), 'userId' in body, body.userId ?? null]
-    );
-    return r.rows.length === 0 ? notFound() : { ok: true, value: memberFrom(r.rows[0]) };
+    const row = await inTransaction(async (client) => {
+      // A field absent from the body keeps its value; `userId: null` is an explicit unlink, so the
+      // "was it sent" flag travels separately from the value.
+      const r = await client.query<{ id: number; display_name: string; user_id: number | null }>(
+        `UPDATE household_members
+            SET display_name = COALESCE($2, display_name),
+                user_id = CASE WHEN $3 THEN $4::int ELSE user_id END
+          WHERE id = $1
+        RETURNING id, display_name, user_id`,
+        [id, storedText(body.displayName), 'userId' in body, body.userId ?? null]
+      );
+      if (r.rows.length === 0) return null;
+      if (addresses !== null) {
+        await client.query('DELETE FROM household_member_addresses WHERE member_id = $1 AND address <> ALL($2::text[])', [id, addresses]);
+        await client.query(
+          `INSERT INTO household_member_addresses (member_id, address)
+           SELECT $1, a FROM unnest($2::text[]) AS a
+            WHERE NOT EXISTS (SELECT 1 FROM household_member_addresses x WHERE x.member_id = $1 AND x.address = a)`,
+          [id, addresses]
+        );
+        await reattributeInbox(client);
+      }
+      return r.rows[0];
+    });
+    if (row === null) return notFound();
+    if (addresses !== null) log.info('loyalty forwarding addresses replaced', { count: addresses.length });
+    return { ok: true, value: memberFrom(row) };
   } catch (err) {
     return fromPgError(err);
   }
@@ -562,6 +611,13 @@ export async function patchProgram(id: number, body: LoyaltyProgramPatchRequest)
     if (normalised.some((a) => a === null)) return fail('INVALID_INPUT', 'An alias must contain a letter or a digit.');
     aliases = [...new Set(normalised as string[])];
   }
+  let senderDomains: string[] | null = null;
+  if (body.senderDomains !== undefined) {
+    const stored = body.senderDomains.map(storedSenderDomain);
+    // The schema has refused these already; a second refusal here is the handler's 400, never a 500.
+    if (stored.some((d) => d === null)) return fail('INVALID_INPUT', 'A sender domain cannot be allowlisted.');
+    senderDomains = stored as string[];
+  }
   try {
     const program = await inTransaction(async (client) => {
       const r = await client.query(
@@ -578,8 +634,21 @@ export async function patchProgram(id: number, body: LoyaltyProgramPatchRequest)
           [id, aliases]
         );
       }
+      // P8-42c1: the allowlist, replaced whole. A domain that stays keeps its row and its
+      // `last_seen_on`; a domain another program holds is the unique constraint's 409 DOMAIN_TAKEN,
+      // which rolls back this whole transaction, the other fields included.
+      if (senderDomains !== null) {
+        await client.query('DELETE FROM loyalty_sender_domains WHERE program_id = $1 AND domain <> ALL($2::text[])', [id, senderDomains]);
+        await client.query(
+          `INSERT INTO loyalty_sender_domains (program_id, domain)
+           SELECT $1, d FROM unnest($2::text[]) AS d
+            WHERE NOT EXISTS (SELECT 1 FROM loyalty_sender_domains x WHERE x.program_id = $1 AND x.domain = d)`,
+          [id, senderDomains]
+        );
+      }
       return programById(client, id);
     });
+    if (program !== null && senderDomains !== null) log.info('loyalty sender domains replaced', { count: senderDomains.length });
     return program === null ? notFound() : { ok: true, value: program };
   } catch (err) {
     return fromPgError(err);

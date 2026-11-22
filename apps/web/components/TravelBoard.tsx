@@ -13,6 +13,7 @@ import type { LoyaltyOverview } from '@b8/contracts/loyalty';
 import LoyaltyAddPanel from './LoyaltyAddPanel';
 import LoyaltyProgramCard from './LoyaltyProgramCard';
 import LoyaltyInstrumentList from './LoyaltyInstrumentList';
+import LoyaltyInboxPanel from './LoyaltyInboxPanel';
 
 export default function TravelBoard({ overview }: { overview: LoyaltyOverview }) {
   const programOf = new Map(overview.programs.map((p) => [p.id, p]));
@@ -44,6 +45,10 @@ export default function TravelBoard({ overview }: { overview: LoyaltyOverview })
       )}
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400">Certificates &amp; credits</h2>
       <LoyaltyInstrumentList instruments={overview.instruments} holderOf={holderOf} />
+      {/* P8-42c1: forwarded loyalty mail — polling, forwarding health and coverage. */}
+      <div className="mt-8">
+        <LoyaltyInboxPanel overview={overview} />
+      </div>
     </div>
   );
 }
