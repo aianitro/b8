@@ -13,13 +13,21 @@
 // earn estimate and its comparison with the next reading, with a gift-held row that must not count,
 // driven by the pinned fixture `lib/fixtures/loyalty-earn-cases.json`). P8-42c1 added H14 (the
 // loyalty inbox panel on /travel and the on-demand poll route, against a mailbox that cannot be
-// reached), so the final success line is now `OK H1-H14`.
+// reached). P8-42c2 added H15 (the reading queue, its wording and its three actions, and the read
+// route, with no API key and a model endpoint that cannot be reached), so the final success line is
+// now `OK H1-H15`.
 //
 // THE MAILBOX VARIABLES. The dev server never inherits a `LOYALTY_IMAP_` variable from the shell that
 // runs this script: every one is removed from its environment, and five are then set to fabricated
 // values — the loopback address, a port this script bound and closed a moment before spawning, TLS,
 // and the canary user and password of `lib/fixtures/loyalty-inbox/cases.json`. A poll therefore
 // always fails to connect, and a real credential cannot be reached from here whatever is exported.
+//
+// THE MODEL VARIABLES (P8-42c2). The same holds for Claude: every inherited `ANTHROPIC_` variable is
+// removed and `ANTHROPIC_API_KEY` is then set blank (so `.env.local` cannot supply one and reading is
+// disabled), and `ANTHROPIC_BASE_URL` is set
+// to another loopback port this script bound and closed, so even a client built by mistake could
+// reach nothing.
 //
 // ─── Why it needs its own database ────────────────────────────────────────────────────────────
 //
@@ -217,9 +225,20 @@ const closedPort = () => new Promise((done, fail) => {
   });
 });
 
-/** The server's environment: no inherited mailbox variable, then the five fabricated ones. */
-function serverEnv(mailPort) {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('LOYALTY_IMAP_')));
+/** The reading fixture (P8-42c2): H15 seeds its `surface` group and looks for its canaries. */
+const READ = JSON.parse(readFileSync(join(WEB, 'lib/fixtures/loyalty-read/cases.json'), 'utf8'));
+
+/**
+ * The server's environment: no inherited mailbox or Anthropic variable, then the five fabricated
+ * mailbox ones and a model base URL on a closed loopback port. `ANTHROPIC_API_KEY` stays absent.
+ */
+function serverEnv(mailPort, modelPort) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('LOYALTY_IMAP_') && !k.startsWith('ANTHROPIC_')));
+  env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${modelPort}`;
+  // Blank rather than deleted: `next dev` fills every variable the process lacks from `.env.local`,
+  // which may hold a real key, but never replaces one the process already has. A blank key is "not
+  // set up" to the reader (`readerAvailable` trims), so no key of any kind reaches the server.
+  env.ANTHROPIC_API_KEY = '';
   env.LOYALTY_IMAP_HOST = '127.0.0.1';
   env.LOYALTY_IMAP_PORT = String(mailPort);
   env.LOYALTY_IMAP_TLS = 'true';
@@ -228,13 +247,15 @@ function serverEnv(mailPort) {
   return { ...env, DATABASE_URL: `postgresql://localhost/${db}`, SCHEDULER_IN_PROCESS: 'false' };
 }
 let mailPort;
+let modelPort;
 
 try {
   w = prepareDatabase();
   mailPort = await closedPort();
+  modelPort = await closedPort();
   server = spawn('npx', ['next', 'dev', '-H', '127.0.0.1', '-p', String(PORT)], {
     cwd: WEB,
-    env: serverEnv(mailPort),
+    env: serverEnv(mailPort, modelPort),
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   });
@@ -686,7 +707,148 @@ try {
   console.log(`H14 sample ${sample.slice(from, from + 24).join(' | ')}`);
   pass('H14', `both users, /travel and /api/v1/loyalty before and after the poll: the panel shows ${before.length} phrases, the unauthenticated poll is 401, the owner's poll is 200 error connect_failed against a closed loopback port, /travel then shows the failed check; ${said.length} responses hold none of the body canary, the password, the user or the loopback host`);
 
-  console.log('OK H1-H14');
+  // ── H15 ── (P8-42c2) The reading queue on /travel and its actions, over real HTTP for both people.
+  // Seeded by SQL from the pinned fixture's `surface` group: three programs with sender domains, three
+  // memberships with fabricated numbers and baselines, three queued readings (a unique match, an
+  // ambiguous suffix, no date), an applied reading carrying an expiry and an instrument, a reading
+  // without a balance, a failed one and one waiting to retry. The server has no API key, so reading
+  // is "not set up" and the read route answers `disabled`; the queue actions still work, because a
+  // person's decision needs no model. No full member number, key or loopback host may appear.
+  current = 'H15';
+  {
+    const S = READ.surface;
+    const q = (t) => `'${String(t).replace(/'/g, "''")}'`;
+    const dayExpr = (v) => {
+      if (v === null || v === undefined) return 'NULL';
+      const m = /^\{\{DAY:(-?\d+)\}\}$/.exec(v);
+      return m ? `(CURRENT_DATE + ${Number(m[1])})` : `${q(v)}::date`;
+    };
+    const dateJson = (v) => JSON.parse(JSON.stringify(v ?? []).replace(/\{\{DAY:(-?\d+)\}\}/g, (_, n) => psql(`SELECT (CURRENT_DATE + ${Number(n)})::text`)));
+    const memberName = new Map(READ.members.map((m) => [m.id, m.displayName]));
+    const programName = new Map(S.programs.map((p) => [p.id, p.name]));
+    for (const p of S.programs) {
+      psql(`INSERT INTO loyalty_programs (name, kind, default_unit) VALUES (${q(p.name)}, ${q(p.kind)}, ${q(p.defaultUnit)});
+        INSERT INTO loyalty_sender_domains (program_id, domain) VALUES ((SELECT id FROM loyalty_programs WHERE name = ${q(p.name)}), ${q(p.domain)});`);
+    }
+    // A person holds at most one membership of a program (UNIQUE member_id, program_id) and the fixture
+    // gives one person two of one program, so each fixture membership gets its own household member,
+    // named after the fixture person and the membership. Nothing in the step reads who holds it.
+    const holderOf = (m) => `${memberName.get(m.member)} ${m.id}`;
+    for (const m of S.memberships) psql(`INSERT INTO household_members (display_name) VALUES (${q(holderOf(m))})`);
+    const membershipOf = new Map();
+    for (const m of S.memberships) {
+      const id = Number(psql(`INSERT INTO loyalty_memberships (member_id, program_id, member_number)
+        VALUES ((SELECT id FROM household_members WHERE display_name = ${q(holderOf(m))}),
+                (SELECT id FROM loyalty_programs WHERE name = ${q(programName.get(m.program))}), ${q(m.memberNumber)}) RETURNING id`).split('\n').pop());
+      membershipOf.set(m.id, id);
+      psql(`INSERT INTO loyalty_observations (membership_id, as_of, balance, unit, source)
+        VALUES (${id}, CURRENT_DATE + ${m.baseline.asOfOffset}, ${q(m.baseline.balance)}::numeric, ${q(m.baseline.unit)}, 'typed')`);
+    }
+    const readOf = new Map();
+    for (const r of S.reads) {
+      const program = `(SELECT id FROM loyalty_programs WHERE name = ${q(programName.get(r.program))})`;
+      const key = q(sha256(`zq42c2-surface-${r.id}`));
+      const received = `CURRENT_DATE + ${r.receivedOffset}`;
+      let values;
+      if (r.state === 'failed' || r.state === 'retry') {
+        values = `${key}, ${program}, ${received}, ${q(r.state)}, ${r.attempts}, ${q(r.errorCode)}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '[]', '[]'`;
+      } else {
+        const membership = r.membership === null ? 'NULL' : membershipOf.get(r.membership);
+        const observation = r.state === 'applied' ? `(SELECT max(id) FROM loyalty_observations WHERE membership_id = ${membership})` : 'NULL';
+        values = [key, program, received, q(r.state), 1, 'NULL', r.reason === null ? 'NULL' : q(r.reason), r.suffix === null ? 'NULL' : q(r.suffix),
+          r.balance === null ? 'NULL' : `${q(r.balance)}::numeric`, r.unit === null ? 'NULL' : q(r.unit), dayExpr(r.asOf),
+          q(r.suffix === null ? 'not_stated' : 'match'), 'CURRENT_DATE', r.state === 'pending' ? 'NULL' : 'CURRENT_DATE', membership, observation,
+          q(JSON.stringify(dateJson(r.expiryWarnings))), q(JSON.stringify(dateJson(r.instruments)))].join(', ');
+      }
+      readOf.set(r.id, Number(psql(`INSERT INTO loyalty_inbox_reads (dedupe_key, program_id, received_on, state, attempts, last_error_code, reason, suffix,
+          balance, unit, as_of, program_check, read_on, resolved_on, membership_id, observation_id, expiry_warnings, instruments)
+        VALUES (${values}) RETURNING id`).split('\n').pop()));
+    }
+    // A read-scope personal token of the owner, minted the way `createPersonalToken` stores one.
+    const readToken = randomBytes(32).toString('base64url');
+    psql(`INSERT INTO auth_sessions (token_hash, credential_id, kind, scope, label, expires_at)
+      VALUES ('${sha256(readToken)}', 'gifts-check-owner-cred', 'personal', 'read', 'zq42c2 read token', NOW() + interval '2 hours')`);
+
+    const readSecrets = [...S.memberships.map((m) => m.memberNumber), READ.canaries.key, READ.canaries.baseUrlHost, '127.0.0.1', `:${modelPort}`];
+    const heard = [];
+    const post = async (path, headers, body) => {
+      const res = await fetch(`${ORIGIN}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+      const text = await res.text();
+      heard.push(text);
+      let json = null;
+      try { json = JSON.parse(text); } catch { /* reported by the status checks */ }
+      return { status: res.status, json };
+    };
+    const owner = { cookie: `b8_session=${w.owner}` };
+    const travelOf = async (token) => {
+      const page = await get('/travel', token);
+      heard.push(page.text);
+      return { status: page.status, html: uncommented(page.text) };
+    };
+    const apiOf = async (token) => {
+      const api = await get('/api/v1/loyalty', token);
+      heard.push(api.text);
+      return { status: api.status, data: JSON.parse(api.text).data };
+    };
+
+    for (const [who, token] of [['owner', w.owner], ['second user', w.two]]) {
+      const page = await travelOf(token);
+      check('H15', page.status === 200, `/travel answered ${page.status} for the ${who}`);
+      for (const t of S.expectText) check('H15', hasText(page.html, t), `/travel lacks "${t}" for the ${who}`);
+      for (const t of S.expectAbsent) check('H15', !hasText(page.html, t), `/travel shows "${t}" for the ${who}`);
+      const api = await apiOf(token);
+      check('H15', api.status === 200 && api.data.inboxRead.readable === false, `/api/v1/loyalty answered ${api.status} for the ${who}`);
+    }
+    const [ownerView, twoView] = [await apiOf(w.owner), await apiOf(w.two)];
+    check('H15', JSON.stringify(ownerView.data.inboxRead) === JSON.stringify(twoView.data.inboxRead), 'the two users got different reading panels');
+
+    // The read route: 200 disabled for the owner, 401 with no credential, 403 for a read-scope token.
+    const readPath = '/api/v1/loyalty/inbox/read';
+    const disabled = await post(readPath, owner, {});
+    check('H15', disabled.status === 200 && disabled.json?.data?.outcome === 'disabled', `the read answered ${disabled.status} ${disabled.json?.data?.outcome}`);
+    const noCookie = await post(readPath, {}, {});
+    check('H15', noCookie.status === 401, `the read with no cookie answered ${noCookie.status}`);
+    const readScope = await post(readPath, { authorization: `Bearer ${readToken}` }, {});
+    check('H15', readScope.status === 403, `the read with a read-scope token answered ${readScope.status}`);
+    const actionByToken = await post(`/api/v1/loyalty/inbox/readings/${readOf.get(S.applyItem)}`, { authorization: `Bearer ${readToken}` }, { action: 'apply' });
+    check('H15', actionByToken.status === 403, `an apply with a read-scope token answered ${actionByToken.status}`);
+
+    // Apply the unique item: 200, it leaves the queue, the balance is the applied one; a second apply is 409.
+    const itemPath = (id) => `/api/v1/loyalty/inbox/readings/${readOf.get(id)}`;
+    const applied = await post(itemPath(S.applyItem), owner, { action: 'apply' });
+    check('H15', applied.status === 200 && applied.json?.data?.state === 'applied_by_hand', `the apply answered ${applied.status}`);
+    const after = await apiOf(w.owner);
+    const target = membershipOf.get(S.expectAfterApply.membership);
+    const shown = after.data.cards.flatMap((c) => c.memberships).find((m) => m.id === target);
+    check('H15', shown?.balance === S.expectAfterApply.balance, 'the applied balance is not the membership\'s current balance in the API');
+    check('H15', after.data.inboxRead.needsAttentionTotal === S.expectAfterApply.queueTotal
+      && !after.data.inboxRead.needsAttention.some((i) => i.id === readOf.get(S.applyItem)), 'the applied item is still queued');
+    const grouped = S.expectAfterApply.balance.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const travelAfter = await travelOf(w.owner);
+    check('H15', hasText(travelAfter.html, grouped), 'the applied balance is not shown on /travel');
+    check('H15', hasText(travelAfter.html, `Needs attention: ${S.expectAfterApply.queueTotal}`), '/travel does not show the new queue total');
+    const again = await post(itemPath(S.applyItem), owner, { action: 'apply' });
+    check('H15', again.status === 409 && again.json?.error?.code === 'ITEM_RESOLVED', `a second apply answered ${again.status}`);
+
+    // The ambiguous item refuses a membership of another program, then not_mine and ignore leave the queue.
+    const elsewhere = Number(psql(`INSERT INTO loyalty_memberships (member_id, program_id)
+      VALUES ((SELECT id FROM household_members WHERE display_name = ${q(holderOf(S.memberships[0]))}),
+              (SELECT id FROM loyalty_programs WHERE name = ${q(programName.get('sn'))})) RETURNING id`).split('\n').pop());
+    const wrong = await post(itemPath('q-ambiguous'), owner, { action: 'apply', membershipId: elsewhere });
+    check('H15', wrong.status === 400 && wrong.json?.error?.code === 'INVALID_INPUT', `an apply to another program's membership answered ${wrong.status}`);
+    const notMine = await post(itemPath('q-ambiguous'), owner, { action: 'not_mine' });
+    check('H15', notMine.status === 200 && notMine.json?.data?.state === 'not_mine', `not mine answered ${notMine.status}`);
+    const ignored = await post(itemPath('q-no-date'), owner, { action: 'ignore' });
+    check('H15', ignored.status === 200 && ignored.json?.data?.state === 'ignored', `ignore answered ${ignored.status}`);
+    const emptied = await apiOf(w.owner);
+    check('H15', emptied.data.inboxRead.needsAttentionTotal === 0, 'not mine and ignore left an item queued');
+    check('H15', hasText((await travelOf(w.two)).html, 'Nothing needs attention'), '/travel does not say the queue is empty');
+
+    for (const text of heard) for (const t of readSecrets) check('H15', !holds(text, t), `a response of the step holds "${t}"`);
+    pass('H15', `both users, /travel and /api/v1/loyalty: ${S.expectText.length} phrases present and ${S.expectAbsent.length} absent with reading not set up; the read route is 200 disabled for the owner, 401 with no cookie and 403 for a read-scope token; apply on the unique item is 200, reaches the membership's balance in the API and on /travel, and a second apply is 409; the ambiguous item refuses another program's membership with 400; not mine and ignore empty the queue; ${heard.length} responses hold no full member number, key or loopback host`);
+  }
+
+  console.log('OK H1-H15');
 } catch (error) {
   exitCode = 1;
   if (error instanceof StepFailure) console.log(`${error.step} FAIL ${error.message}`);

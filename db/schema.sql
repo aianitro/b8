@@ -1656,3 +1656,191 @@ CREATE TABLE loyalty_inbox_state (
   CONSTRAINT loyalty_inbox_state_code_iff_error
     CHECK ((last_error_code IS NOT NULL) = (last_outcome IS NOT DISTINCT FROM 'error'))
 );
+
+-- ─── Loyalty inbox reading (step 42c, migration 1793100000000_loyalty_inbox_read) ────────────
+-- What Claude read from each stored message, as a PROPOSAL. The current balance is still only the
+-- newest loyalty_observations row; a reading reaches it solely by an appended 'email' observation,
+-- written in the same transaction that marks the reads row applied or applied_by_hand. Nothing
+-- free-text from the model or the mail is stored: text columns hold enums or a 3 or 4 character
+-- suffix, the JSONB arrays hold fixed-key objects of enums, dates and canonical decimal text.
+-- Reads rows are kept 400 days by received_on (strictly older is purged, pending included), so
+-- they outlive the raw mail's thirty; the not-mine list and the state row are never purged.
+
+-- One row per attempted message. States:
+--   retry, failed    — not read yet: attempts and last_error_code set, nothing extracted. The
+--                      attempt is written before the model call as the outcome it would be on a
+--                      crash (retry, or failed on the third attempt, provisional code api_error).
+--   pending          — queued for a human, with a reason.
+--   applied          — every rule held; observation_id is the appended 'email' observation.
+--   stale, no_balance, not_mine_known — settled by the rules, never queued, nothing appended.
+--   applied_by_hand, not_mine, ignored — resolved by a person from pending; reason is KEPT.
+--   dedupe_key    — the 42c1 message key; deliberately NOT a foreign key (the message is purged first).
+--   suffix        — at most the last 4 printed letters or digits, upper-case; the only number fragment.
+--   balance, unit — the proposal, same single spelling as loyalty_observations (scale 0 for whole
+--                   units, exactly 2 for usd); NULL together = no usable balance, never zero.
+--   as_of         — NULL = the mail gave no date.
+--   program_check — the model's program name reduced to match, mismatch or not_stated, then dropped.
+--   membership_id — the unique suffix match, or the membership a person chose; NOT inheriting.
+-- The CHECKs below make a row that contradicts its state unstorable.
+CREATE TABLE loyalty_inbox_reads (
+  id               SERIAL PRIMARY KEY,
+  dedupe_key       TEXT NOT NULL
+                     CONSTRAINT loyalty_inbox_reads_dedupe_key_key UNIQUE
+                     CONSTRAINT loyalty_inbox_reads_dedupe_key_shape CHECK (dedupe_key ~ '^[0-9a-f]{64}$'),
+  program_id       INTEGER NOT NULL REFERENCES loyalty_programs(id),
+  received_on      DATE NOT NULL,
+  state            TEXT NOT NULL
+                     CONSTRAINT loyalty_inbox_reads_state_check
+                       CHECK (state IN ('retry', 'failed', 'pending', 'applied', 'applied_by_hand',
+                                        'stale', 'no_balance', 'not_mine_known', 'not_mine', 'ignored')),
+  attempts         SMALLINT NOT NULL
+                     CONSTRAINT loyalty_inbox_reads_attempts_range CHECK (attempts BETWEEN 0 AND 3),
+  last_error_code  TEXT
+                     CONSTRAINT loyalty_inbox_reads_last_error_code_check
+                       CHECK (last_error_code IS NULL
+                              OR last_error_code IN ('rate_limited', 'timeout', 'api_error', 'refused',
+                                                     'bad_output', 'empty_message')),
+  reason           TEXT
+                     CONSTRAINT loyalty_inbox_reads_reason_check
+                       CHECK (reason IS NULL
+                              OR reason IN ('no_suffix', 'unmatched_suffix', 'ambiguous_suffix',
+                                            'program_mismatch', 'unit_mismatch', 'no_as_of',
+                                            'as_of_future', 'no_baseline', 'implausible_jump')),
+  suffix           TEXT
+                     CONSTRAINT loyalty_inbox_reads_suffix_shape CHECK (suffix IS NULL OR suffix ~ '^[A-Z0-9]{3,4}$'),
+  balance          NUMERIC
+                     CONSTRAINT loyalty_inbox_reads_balance_range CHECK (balance >= 0 AND balance < 1e12),
+  unit             TEXT
+                     CONSTRAINT loyalty_inbox_reads_unit_check
+                       CHECK (unit IS NULL OR unit IN ('points', 'miles', 'nights', 'usd')),
+  as_of            DATE,
+  program_check    TEXT
+                     CONSTRAINT loyalty_inbox_reads_program_check_check
+                       CHECK (program_check IS NULL OR program_check IN ('match', 'mismatch', 'not_stated')),
+  membership_id    INTEGER REFERENCES loyalty_memberships(id),
+  observation_id   INTEGER REFERENCES loyalty_observations(id),
+  -- At most 5 of {what, expiresOn, amount}; amount NULL or canonical in the scale of what, always
+  -- NULL for status and other. Displayed only (42g evaluates nothing yet).
+  expiry_warnings  JSONB NOT NULL DEFAULT '[]'::jsonb
+                     CONSTRAINT loyalty_inbox_reads_expiry_warnings_shape CHECK (
+                       CASE WHEN jsonb_typeof(expiry_warnings) = 'array' THEN
+                         jsonb_array_length(expiry_warnings) <= 5
+                         AND NOT jsonb_path_exists(expiry_warnings, 'strict $[*] ? (@.type() != "object")')
+                         AND NOT jsonb_path_exists(expiry_warnings,
+                           '$[*].keyvalue() ? (!(@.key == "what" || @.key == "expiresOn" || @.key == "amount"))')
+                         AND NOT jsonb_path_exists(expiry_warnings,
+                           '$[*] ? (!(@.what.type() == "string" && (@.what == "points" || @.what == "miles" || @.what == "nights" || @.what == "usd" || @.what == "status" || @.what == "other")))')
+                         AND NOT jsonb_path_exists(expiry_warnings,
+                           '$[*] ? (!(@.expiresOn.type() == "string" && @.expiresOn like_regex "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"))')
+                         AND NOT jsonb_path_exists(expiry_warnings,
+                           '$[*] ? (!(@.amount.type() == "null" || (@.amount.type() == "string" && ((@.what == "usd" && @.amount like_regex "^(0|[1-9][0-9]{0,11})[.][0-9]{2}$") || ((@.what == "points" || @.what == "miles" || @.what == "nights") && @.amount like_regex "^(0|[1-9][0-9]{0,11})$")))))')
+                       ELSE false END),
+  -- At most 10 of {kind, expiresOn}; kind is a loyalty_instruments kind, expiresOn NULL = none
+  -- stated. Displayed only: never turned into a loyalty_instruments row.
+  instruments      JSONB NOT NULL DEFAULT '[]'::jsonb
+                     CONSTRAINT loyalty_inbox_reads_instruments_shape CHECK (
+                       CASE WHEN jsonb_typeof(instruments) = 'array' THEN
+                         jsonb_array_length(instruments) <= 10
+                         AND NOT jsonb_path_exists(instruments, 'strict $[*] ? (@.type() != "object")')
+                         AND NOT jsonb_path_exists(instruments,
+                           '$[*].keyvalue() ? (!(@.key == "kind" || @.key == "expiresOn"))')
+                         AND NOT jsonb_path_exists(instruments,
+                           '$[*] ? (!(@.kind.type() == "string" && (@.kind == "free_night" || @.kind == "companion_fare" || @.kind == "travel_credit" || @.kind == "other")))')
+                         AND NOT jsonb_path_exists(instruments,
+                           '$[*] ? (!(@.expiresOn.type() == "null" || (@.expiresOn.type() == "string" && @.expiresOn like_regex "^[0-9]{4}-[0-9]{2}-[0-9]{2}$")))')
+                       ELSE false END),
+  read_on          DATE,                                  -- NULL exactly while unread
+  resolved_on      DATE,                                  -- NULL exactly while retry, failed or pending
+  CONSTRAINT loyalty_inbox_reads_balance_with_unit
+    CHECK ((balance IS NULL) = (unit IS NULL)),
+  CONSTRAINT loyalty_inbox_reads_unit_scale
+    CHECK (balance IS NULL
+           OR (unit = 'usd' AND scale(balance) = 2)
+           OR (unit <> 'usd' AND scale(balance) = 0)),
+  CONSTRAINT loyalty_inbox_reads_retry_attempts
+    CHECK (state <> 'retry' OR attempts BETWEEN 1 AND 2),
+  CONSTRAINT loyalty_inbox_reads_failed_attempts
+    CHECK (state <> 'failed' OR attempts >= 1),
+  CONSTRAINT loyalty_inbox_reads_code_iff_unread
+    CHECK ((last_error_code IS NOT NULL) = (state IN ('retry', 'failed'))),
+  CONSTRAINT loyalty_inbox_reads_unread_holds_nothing
+    CHECK (state NOT IN ('retry', 'failed')
+           OR (suffix IS NULL AND balance IS NULL AND as_of IS NULL AND program_check IS NULL
+               AND read_on IS NULL AND membership_id IS NULL AND observation_id IS NULL
+               AND expiry_warnings = '[]'::jsonb AND instruments = '[]'::jsonb)),
+  CONSTRAINT loyalty_inbox_reads_read_is_checked_and_dated
+    CHECK (state IN ('retry', 'failed') OR (program_check IS NOT NULL AND read_on IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_reads_resolved_iff_settled
+    CHECK ((resolved_on IS NULL) = (state IN ('retry', 'failed', 'pending'))),
+  CONSTRAINT loyalty_inbox_reads_resolved_not_before_read
+    CHECK (resolved_on IS NULL OR read_on IS NULL OR resolved_on >= read_on),
+  CONSTRAINT loyalty_inbox_reads_reason_iff_queued
+    CHECK ((reason IS NOT NULL) = (state IN ('pending', 'applied_by_hand', 'not_mine', 'ignored'))),
+  CONSTRAINT loyalty_inbox_reads_balance_iff_reading_had_one
+    CHECK ((balance IS NULL) = (state IN ('retry', 'failed', 'no_balance'))),
+  CONSTRAINT loyalty_inbox_reads_applied_complete
+    CHECK (state NOT IN ('applied', 'applied_by_hand')
+           OR (membership_id IS NOT NULL AND observation_id IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_reads_observation_only_when_applied
+    CHECK (observation_id IS NULL OR state IN ('applied', 'applied_by_hand')),
+  CONSTRAINT loyalty_inbox_reads_rules_passed
+    CHECK (state NOT IN ('applied', 'stale') OR (suffix IS NOT NULL AND as_of IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_reads_not_mine_known_unmatched
+    CHECK (state <> 'not_mine_known' OR (suffix IS NOT NULL AND membership_id IS NULL)),
+  CONSTRAINT loyalty_inbox_reads_mismatch_queues
+    CHECK (program_check IS DISTINCT FROM 'mismatch'
+           OR state = 'no_balance'
+           OR reason IS NOT DISTINCT FROM 'program_mismatch'),
+  CONSTRAINT loyalty_inbox_reads_mismatch_reason_is_mismatch
+    CHECK (reason IS DISTINCT FROM 'program_mismatch' OR program_check IS NOT DISTINCT FROM 'mismatch'),
+  CONSTRAINT loyalty_inbox_reads_mismatch_no_balance_unmatched
+    CHECK (NOT (state = 'no_balance' AND program_check IS NOT DISTINCT FROM 'mismatch' AND membership_id IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_reads_reason_suffix
+    CHECK ((reason IS DISTINCT FROM 'no_suffix' OR suffix IS NULL)
+           AND (reason IS NULL OR reason IN ('no_suffix', 'program_mismatch') OR suffix IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_reads_reason_as_of
+    CHECK ((reason IS DISTINCT FROM 'no_as_of' OR as_of IS NULL)
+           AND (reason IS NULL OR reason NOT IN ('as_of_future', 'no_baseline', 'implausible_jump') OR as_of IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_reads_pending_membership
+    CHECK (state <> 'pending'
+           OR reason = 'program_mismatch'
+           OR (reason IN ('no_suffix', 'unmatched_suffix', 'ambiguous_suffix') AND membership_id IS NULL)
+           OR (reason IN ('unit_mismatch', 'no_as_of', 'as_of_future', 'no_baseline', 'implausible_jump')
+               AND membership_id IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_inbox_reads_received ON loyalty_inbox_reads (received_on);
+CREATE INDEX IF NOT EXISTS loyalty_inbox_reads_program ON loyalty_inbox_reads (program_id, received_on);
+CREATE INDEX IF NOT EXISTS loyalty_inbox_reads_membership ON loyalty_inbox_reads (membership_id) WHERE membership_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS loyalty_inbox_reads_pending ON loyalty_inbox_reads (received_on DESC, id DESC) WHERE state = 'pending';
+
+-- (program, suffix) pairs the household disowned. Suppresses a later reading only while the suffix
+-- matches NO membership of the program. Never purged.
+CREATE TABLE loyalty_inbox_not_mine (
+  id          SERIAL PRIMARY KEY,
+  program_id  INTEGER NOT NULL REFERENCES loyalty_programs(id),
+  suffix      TEXT NOT NULL
+                CONSTRAINT loyalty_inbox_not_mine_suffix_shape CHECK (suffix ~ '^[A-Z0-9]{3,4}$'),
+  added_on    DATE NOT NULL DEFAULT CURRENT_DATE,
+  CONSTRAINT loyalty_inbox_not_mine_program_suffix_key UNIQUE (program_id, suffix)
+);
+
+-- The last read run: exactly one row (id 1, seeded by the migration). All NULL = never read ("Not
+-- read yet"). last_error_code is a run code, set exactly when last_outcome is error. A disabled or
+-- already-running run writes nothing.
+CREATE TABLE loyalty_inbox_read_state (
+  id               SMALLINT PRIMARY KEY
+                     CONSTRAINT loyalty_inbox_read_state_single_row CHECK (id = 1),
+  last_read_on     DATE,
+  last_outcome     TEXT
+                     CONSTRAINT loyalty_inbox_read_state_last_outcome_check
+                       CHECK (last_outcome IS NULL OR last_outcome IN ('ok', 'error')),
+  last_error_code  TEXT
+                     CONSTRAINT loyalty_inbox_read_state_last_error_code_check
+                       CHECK (last_error_code IS NULL
+                              OR last_error_code IN ('rate_limited', 'timeout', 'api_error', 'store_failed')),
+  CONSTRAINT loyalty_inbox_read_state_outcome_dated
+    CHECK ((last_read_on IS NULL) = (last_outcome IS NULL)),
+  CONSTRAINT loyalty_inbox_read_state_code_iff_error
+    CHECK ((last_error_code IS NOT NULL) = (last_outcome IS NOT DISTINCT FROM 'error'))
+);

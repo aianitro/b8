@@ -39,6 +39,7 @@ const STATUS: Record<LoyaltyErrorCode, number> = {
   CARD_ALREADY_LINKED: 409,
   DOMAIN_TAKEN: 409,
   ADDRESS_TAKEN: 409,
+  ITEM_RESOLVED: 409,
 };
 
 const MESSAGE: Record<LoyaltyErrorCode, string> = {
@@ -54,6 +55,9 @@ const MESSAGE: Record<LoyaltyErrorCode, string> = {
   // P8-42c1. Neither names the domain or address: an error body never echoes what was submitted.
   DOMAIN_TAKEN: 'Another program already uses one of those sender domains.',
   ADDRESS_TAKEN: 'Another household member already forwards from one of those addresses.',
+  // P8-42c2. A queue action on an item that is no longer waiting: already applied, discarded or
+  // ignored (a second tap, or a second device), or never a queue item at all.
+  ITEM_RESOLVED: 'That item has already been resolved.',
 };
 
 /** A refusal as a response. One body shape for every code and every route. */

@@ -1,0 +1,14 @@
+Message-ID: <zq42c2-r03@zq42c2-brand.test>
+MIME-Version: 1.0
+Subject: ZQ42C2-SUBJECT-CANARY R03
+Date: Fri, 20 Nov 2026 09:30:00 +0000
+From: ZQ42C2 Brand <statements@zq42c2-brand.test>
+To: zq42c2-anna@example.com
+Content-Type: multipart/mixed; boundary="zq42c2b3"
+
+--zq42c2b3
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="zq42c2.bin"
+
+ZQ42C2-ATTACH-CANARY
+--zq42c2b3--

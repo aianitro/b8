@@ -21,12 +21,13 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { LoyaltyCardAccount, LoyaltyMembership, LoyaltyObservationSource, LoyaltyUnit } from '@b8/contracts/loyalty';
+import type { LoyaltyCardAccount, LoyaltyMembership, LoyaltyObservationSource, LoyaltyReadFromMail, LoyaltyUnit } from '@b8/contracts/loyalty';
 import { formatBalance } from '@/lib/domain/loyalty';
 import LoyaltyInlineText from './LoyaltyInlineText';
 import LoyaltyBalanceEditor from './LoyaltyBalanceEditor';
 import LoyaltyCopyNumber from './LoyaltyCopyNumber';
 import LoyaltyCardLink from './LoyaltyCardLink';
+import LoyaltyFromMailLine from './LoyaltyFromMailLine';
 import { send } from './LoyaltyRequest';
 
 const SOURCE_BADGE: Record<LoyaltyObservationSource, { label: string; cls: string }> = {
@@ -37,8 +38,12 @@ const SOURCE_BADGE: Record<LoyaltyObservationSource, { label: string; cls: strin
 };
 
 export default function LoyaltyMembershipLine({
-  m, defaultUnit, cardChoices,
-}: { m: LoyaltyMembership; defaultUnit: LoyaltyUnit; cardChoices: LoyaltyCardAccount[] }) {
+  m, defaultUnit, cardChoices, fromMail,
+}: {
+  m: LoyaltyMembership; defaultUnit: LoyaltyUnit; cardChoices: LoyaltyCardAccount[];
+  /** What the newest settled mail said about this membership's expiries and instruments (P8-42c2); absent when nothing. */
+  fromMail?: LoyaltyReadFromMail;
+}) {
   const router = useRouter();
   const [entering, setEntering] = useState(false);
   // The "Remove number" control's two steps: a first tap only asks; Confirm sends.
@@ -149,6 +154,7 @@ export default function LoyaltyMembershipLine({
         ))}
       </div>
       <LoyaltyCardLink m={m} cardChoices={cardChoices} />
+      {fromMail && <LoyaltyFromMailLine fromMail={fromMail} />}
       {entering && (
         <LoyaltyBalanceEditor membershipId={m.id} unit={m.unit ?? defaultUnit} onClose={() => setEntering(false)} />
       )}

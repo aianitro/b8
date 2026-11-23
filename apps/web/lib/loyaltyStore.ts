@@ -58,6 +58,13 @@
 // replaced whole inside the PATCH's one transaction, and the UNIQUE constraints decide a taken
 // domain or address (409), so a lost race is the same 409 and never a 500. An entry that stays in a
 // list keeps its row, and with it `last_seen_on`, `added_on` and `last_received_on`.
+//
+// ─── READING THE INBOX (P8-42c2) ──────────────────────────────────────────────────────────────
+//
+// The overview's `inboxRead` panel is `loyaltyInboxRead.ts`'s (`loadReadOverview`), like the inbox
+// panel is `loyaltyInbox.ts`'s: it counts stored mail by its bytes, which only those two files name.
+// An observation a reading appends has source `email` and is written there, beside its reads row in
+// one transaction; `addObservation` below still writes `typed` only.
 
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import db from './db';
@@ -65,6 +72,7 @@ import { createLogger } from './logger';
 import { visibleTransactions } from './giftReadPath';
 import { earnDescriptionsOf, earnFiguresOf, replaceEarn } from './loyaltyEarn';
 import { loadInboxOverview, reattributeInbox } from './loyaltyInbox';
+import { loadReadOverview } from './loyaltyInboxRead';
 import { storedForwardingAddress, storedSenderDomain } from './domain/loyaltyInbox';
 import {
   currentObservationByMembership,
@@ -443,7 +451,7 @@ const INSTRUMENT_SELECT = `
  * loyalty accounts.
  */
 export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> {
-  const [members, programs, aliases, memberships, observations, instruments, watches, cardAccounts, inbox] = await Promise.all([
+  const [members, programs, aliases, memberships, observations, instruments, watches, cardAccounts, inbox, inboxRead] = await Promise.all([
     q.query<{ id: number; display_name: string; user_id: number | null }>(
       'SELECT id, display_name, user_id FROM household_members ORDER BY display_name, id'
     ),
@@ -463,6 +471,9 @@ export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> 
     ),
     // The inbox panel (P8-42c1): configuration, health and counts only, never a byte of mail.
     loadInboxOverview(q),
+    // The reading panel (P8-42c2): counts, the queue with masked suffixes, coverage and what mail
+    // said about expiries and instruments. Never a byte of mail, a member number or the key.
+    loadReadOverview(q),
   ]);
 
   const aliasesOf = new Map<number, string[]>();
@@ -491,6 +502,7 @@ export async function loadOverview(q: Queryable = db): Promise<LoyaltyOverview> 
     instruments: sortInstruments(instruments.rows),
     cardAccounts: cardAccounts.rows,
     inbox,
+    inboxRead,
   };
 }
 

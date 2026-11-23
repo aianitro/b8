@@ -122,7 +122,7 @@ describe('the loyalty contract', () => {
 
     // Exactly one response schema carries a field for the full number.
     const responses = Object.entries(loyalty).filter(([name]) => /ResponseSchema$/.test(name)) as [string, z.ZodType][];
-    expect(responses.length).toBe(7);
+    expect(responses.length).toBe(9);
     const carrying = responses.filter(([, s]) => keysOf(s).includes('memberNumber')).map(([n]) => n);
     expect(carrying).toEqual(['LoyaltyMemberNumberResponseSchema']);
     // Every response is the envelope: success with data, or the error branch.
@@ -132,7 +132,7 @@ describe('the loyalty contract', () => {
     }
     expect(LoyaltyMembershipResponseSchema.safeParse({ success: true, data: membership() }).success).toBe(true);
     expect(LoyaltyMemberNumberResponseSchema.safeParse({ success: true, data: { membershipId: 1, memberNumber: 'ZQ42A0000001' } }).success).toBe(true);
-    expect(LoyaltyOverviewResponseSchema.safeParse({ success: true, data: { members: [], programs: [], cards: [], instruments: [], cardAccounts: [], inbox: EMPTY_INBOX } }).success).toBe(true);
+    expect(LoyaltyOverviewResponseSchema.safeParse({ success: true, data: { members: [], programs: [], cards: [], instruments: [], cardAccounts: [], inbox: EMPTY_INBOX, inboxRead: EMPTY_READ } }).success).toBe(true);
 
     // The vocabularies, by set equality with SPEC.md Conventions.
     const set = (xs: readonly string[]) => [...xs].sort();
@@ -219,7 +219,7 @@ describe('the loyalty contract', () => {
     expect(LoyaltyFeeWatchSchema.safeParse({ feeDate: null, expectedBy: '2026-02-19', state: null }).success).toBe(false);
     expect(LoyaltyFeeWatchSchema.safeParse({ feeDate: '2026-01-05', expectedBy: '2026-02-19', state: 'overdue', amount: '12.34' }).success).toBe(false);
     // The overview requires the link picker's list.
-    const overview = { members: [], programs: [], cards: [], instruments: [], inbox: EMPTY_INBOX };
+    const overview = { members: [], programs: [], cards: [], instruments: [], inbox: EMPTY_INBOX, inboxRead: EMPTY_READ };
     expect(LoyaltyOverviewSchema.safeParse(overview).success).toBe(false);
     expect(LoyaltyOverviewSchema.safeParse({ ...overview, cardAccounts: [] }).success).toBe(true);
     expect(LoyaltyOverviewSchema.safeParse({ ...overview, cardAccounts: [{ id: 'zq42b_card', name: 'ZQ42B Card' }] }).success).toBe(true);
@@ -392,7 +392,7 @@ describe('the loyalty contract', () => {
 
     // The overview still parses with memberships carrying the keys.
     expect(LoyaltyOverviewSchema.safeParse({
-      members: [], programs: [], instruments: [], cardAccounts: [], inbox: EMPTY_INBOX,
+      members: [], programs: [], instruments: [], cardAccounts: [], inbox: EMPTY_INBOX, inboxRead: EMPTY_READ,
       cards: [{ programId: 3, programName: 'ZQ42B2 Program', programKind: 'hotel', memberships: [membership(), linked()] }],
     }).success).toBe(true);
 
@@ -406,7 +406,7 @@ describe('the loyalty contract', () => {
     expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2, earn: null }).success).toBe(false);
     expect(LoyaltyMembershipCreateRequestSchema.safeParse({ memberId: 1, programId: 2 }).success).toBe(true);
     const codes = ['INVALID_INPUT', 'NOT_FOUND', 'INSUFFICIENT_SCOPE', 'BROWSER_SESSION_REQUIRED', 'MEMBERSHIP_EXISTS',
-      'ALIAS_TAKEN', 'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED', 'DOMAIN_TAKEN', 'ADDRESS_TAKEN'];
+      'ALIAS_TAKEN', 'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED', 'DOMAIN_TAKEN', 'ADDRESS_TAKEN', 'ITEM_RESOLVED'];
     for (const code of codes) expect(LoyaltyErrorCodeSchema.safeParse(code).success, code).toBe(true);
     expect([...LoyaltyErrorCodeSchema.options].sort()).toEqual([...codes].sort());
     const night = { kind: 'free_night', description: 'ZQ42B night' };
@@ -434,6 +434,11 @@ const INBOX_CASES = JSON.parse(
 const EMPTY_INBOX = {
   configured: false, problem: 'unset', missing: [...loyalty.LOYALTY_INBOX_REQUIRED_ENV], retentionDays: 30, silenceDays: 45,
   lastCheck: null, senderDomains: [], coverage: [], forwarding: [], unknownSenders: [], unknownSenderTotal: 0, unattributed: 0,
+};
+
+/** A never-read panel with nothing in it (P8-42c2): the smallest valid `inboxRead`. */
+const EMPTY_READ = {
+  readable: false, lastRead: null, waiting: 0, failed: 0, needsAttentionTotal: 0, needsAttention: [], coverage: [], fromMail: [],
 };
 
 describe('the loyalty inbox contract (P8-42c1)', () => {
@@ -482,7 +487,7 @@ describe('the loyalty inbox contract (P8-42c1)', () => {
       unknownSenders: [{ domain: 'attacker.test', count: 2 }, { domain: '(unreadable)', count: 1 }],
       unknownSenderTotal: 3, unattributed: 1, ...over,
     });
-    const overview = (i: unknown) => ({ members: [], programs: [], cards: [], instruments: [], cardAccounts: [], inbox: i });
+    const overview = (i: unknown) => ({ members: [], programs: [], cards: [], instruments: [], cardAccounts: [], inbox: i, inboxRead: EMPTY_READ });
     const O = LoyaltyOverviewSchema;
     accepts(O, overview(EMPTY_INBOX), 'the empty inbox');
     accepts(O, overview(inbox()), 'every forwarding state');
@@ -522,7 +527,7 @@ describe('the loyalty inbox contract (P8-42c1)', () => {
 
     // The error codes: the nine of P8-42a to P8-42b2 and the two new ones, exactly.
     const codes = ['INVALID_INPUT', 'NOT_FOUND', 'INSUFFICIENT_SCOPE', 'BROWSER_SESSION_REQUIRED', 'MEMBERSHIP_EXISTS', 'ALIAS_TAKEN',
-      'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED', 'DOMAIN_TAKEN', 'ADDRESS_TAKEN'];
+      'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED', 'DOMAIN_TAKEN', 'ADDRESS_TAKEN', 'ITEM_RESOLVED'];
     for (const code of codes) accepts(LoyaltyErrorCodeSchema, code, `code ${code}`);
     expect([...LoyaltyErrorCodeSchema.options].sort()).toEqual([...codes].sort());
 
@@ -536,5 +541,109 @@ describe('the loyalty inbox contract (P8-42c1)', () => {
     expect(walked('-', 'domain')).toEqual(INBOX_CASES.domainRefuse);
     expect(walked('+', 'address')).toEqual(INBOX_CASES.addressAccept.map((a) => a.input));
     expect(walked('-', 'address')).toEqual(INBOX_CASES.addressRefuse);
+  });
+});
+
+describe('the loyalty inbox reading contract (P8-42c2)', () => {
+  it('T42c2-U1: the reading panel, the read answer and the queue action accept and refuse exactly the described shapes', () => {
+    const accepts = (schema: z.ZodType, body: unknown, label: string) => expect(schema.safeParse(body).success, label).toBe(true);
+    const refuses = (schema: z.ZodType, body: unknown, label: string) => expect(schema.safeParse(body).success, label).toBe(false);
+    const B = loyalty.LOYALTY_MASK_BULLETS;
+
+    // ── The overview's reading panel, in every state ──
+    const item = (over: Record<string, unknown> = {}) => ({
+      id: 9, programId: 3, maskedSuffix: `${B}AB12`, balance: '25000', unit: 'miles', asOf: '2026-01-05', receivedOn: '2026-01-06',
+      reason: 'implausible_jump', candidateMembershipIds: [4], ...over,
+    });
+    const panel = (over: Record<string, unknown> = {}) => ({
+      readable: true, lastRead: { on: '2026-01-06', outcome: 'ok', errorCode: null }, waiting: 2, failed: 1, needsAttentionTotal: 3,
+      needsAttention: [
+        item(),
+        item({ id: 8, receivedOn: '2026-01-05', reason: 'ambiguous_suffix', candidateMembershipIds: [4, 5] }),
+        item({ id: 7, receivedOn: '2026-01-04', maskedSuffix: null, reason: 'no_suffix', candidateMembershipIds: [], balance: '0', unit: 'points' }),
+      ],
+      coverage: [{ programId: 3, balanceInLastStatement: 'yes' }, { programId: 4, balanceInLastStatement: 'no' }, { programId: 5, balanceInLastStatement: 'not_read' }],
+      fromMail: [{ membershipId: 4, receivedOn: '2026-01-06', expiryWarnings: [{ what: 'miles', expiresOn: '2026-03-01', amount: '500' }, { what: 'status', expiresOn: '2026-04-01', amount: null }], instruments: [{ kind: 'free_night', expiresOn: null }] }],
+      ...over,
+    });
+    const overview = (r: unknown) => ({ members: [], programs: [], cards: [], instruments: [], cardAccounts: [], inbox: EMPTY_INBOX, inboxRead: r });
+    const O = LoyaltyOverviewSchema;
+    accepts(O, overview(EMPTY_READ), 'the empty panel');
+    accepts(O, overview(panel()), 'a full panel');
+    accepts(O, overview(panel({ lastRead: { on: '2026-01-06', outcome: 'error', errorCode: 'rate_limited' } })), 'last read error');
+    accepts(O, overview(panel({ needsAttention: [item({ reason: 'no_as_of', asOf: null })], needsAttentionTotal: 60 })), 'no date, a total above the list');
+    accepts(O, overview(panel({ needsAttention: [item({ maskedSuffix: `${B}A12` })], needsAttentionTotal: 1 })), 'a three-character suffix');
+    for (const reason of loyalty.LOYALTY_READ_REASONS) {
+      const r = reason === 'no_suffix' ? item({ reason, maskedSuffix: null, candidateMembershipIds: [] }) : reason === 'no_as_of' ? item({ reason, asOf: null }) : item({ reason });
+      accepts(O, overview(panel({ needsAttention: [r], needsAttentionTotal: 1 })), `reason ${reason}`);
+    }
+    refuses(O, { members: [], programs: [], cards: [], instruments: [], cardAccounts: [], inbox: EMPTY_INBOX }, 'no inboxRead');
+    refuses(O, overview({ ...panel(), subject: 'ZQ42C2-SUBJECT-CANARY' }), 'a stray panel key');
+    refuses(O, overview(panel({ needsAttention: [{ ...item(), text: 'ZQ42C2-BODY-CANARY' }], needsAttentionTotal: 1 })), 'a stray item key');
+    refuses(O, overview(panel({ fromMail: [{ ...panel().fromMail[0], note: 'ZQ42C2' }] })), 'a stray fromMail key');
+    refuses(O, overview(panel({ lastRead: { on: '2026-01-06', outcome: 'ok', errorCode: null, raw: 'x' } })), 'a stray lastRead key');
+    for (const masked of ['AB12', `${B}`, `${B}AB`, `${B}ABCDE`, `${B}ab12`, 'ZQ42C2FULLNUMBER4417', `${B}<b>`]) {
+      refuses(O, overview(panel({ needsAttention: [item({ maskedSuffix: masked })], needsAttentionTotal: 1 })), `masked ${masked}`);
+    }
+    refuses(O, overview(panel({ waiting: -1 })), 'a negative count');
+    refuses(O, overview(panel({ failed: 1.5 })), 'a fractional count');
+    const many = Array.from({ length: loyalty.LOYALTY_READ_QUEUE_LIMIT + 1 }, (_, k) => item({ id: 500 - k }));
+    refuses(O, overview(panel({ needsAttention: many, needsAttentionTotal: many.length })), 'more items than the queue limit');
+    refuses(O, overview(panel({ needsAttention: [item({ reason: 'weird' })], needsAttentionTotal: 1 })), 'an unknown reason');
+    refuses(O, overview(panel({ coverage: [{ programId: 3, balanceInLastStatement: 'maybe' }] })), 'an unknown coverage');
+    refuses(O, overview(panel({ fromMail: [{ membershipId: 4, receivedOn: '2026-01-06', expiryWarnings: [{ what: 'status', expiresOn: '2026-04-01', amount: '5' }], instruments: [] }] })), 'an amount for status');
+    refuses(O, overview(panel({ needsAttentionTotal: 2 })), 'listed items above the total');
+    refuses(O, overview(panel({ needsAttention: [item({ id: 1 }), item({ id: 2 })], needsAttentionTotal: 2 })), 'items out of order');
+    refuses(O, overview(panel({ needsAttention: [item({ balance: '25000.5' })], needsAttentionTotal: 1 })), 'a fraction on a whole unit');
+    refuses(O, overview(panel({ lastRead: { on: '2026-01-06', outcome: 'ok', errorCode: 'timeout' } })), 'a code on an ok read');
+
+    // ── The read answer ──
+    const run = (over: Record<string, unknown> = {}) => ({
+      outcome: 'ok', read: 5, applied: 1, queued: 1, stale: 1, noBalance: 1, discarded: 1, failed: 1, remaining: 0, errorCode: null, ...over,
+    });
+    const zero = { read: 0, applied: 0, queued: 0, stale: 0, noBalance: 0, discarded: 0, failed: 0, remaining: 0 };
+    const R = loyalty.LoyaltyInboxReadResponseSchema;
+    accepts(R, { success: true, data: run() }, 'read ok');
+    accepts(R, { success: true, data: run({ ...zero, outcome: 'disabled' }) }, 'read disabled');
+    accepts(R, { success: true, data: run({ ...zero, outcome: 'already_running' }) }, 'read already running');
+    accepts(R, { success: true, data: run({ outcome: 'error', errorCode: 'rate_limited' }) }, 'read error');
+    refuses(R, { success: true, data: run({ read: 4 }) }, 'read not the sum of its parts');
+    refuses(R, { success: true, data: run({ errorCode: 'timeout' }) }, 'a code on an ok read');
+    refuses(R, { success: true, data: run({ outcome: 'error' }) }, 'an error with no code');
+    refuses(R, { success: true, data: run({ outcome: 'disabled' }) }, 'counts on a disabled read');
+    const noRemaining: Record<string, unknown> = run();
+    delete noRemaining.remaining;
+    refuses(R, { success: true, data: noRemaining }, 'a missing count');
+    for (const key of ['subject', 'body', 'text', 'raw']) refuses(R, { success: true, data: { ...run(), [key]: 'ZQ42C2-BODY-CANARY' } }, `a stray ${key}`);
+    refuses(R, { success: true, data: run({ failed: -1 }) }, 'a negative count');
+    refuses(R, { success: true, data: run({ failed: 1.5 }) }, 'a fractional count');
+    accepts(loyalty.LoyaltyInboxReadRequestSchema, {}, 'an empty read body');
+    accepts(loyalty.LoyaltyInboxReadRequestSchema, { retryFailed: true }, 'retryFailed');
+    refuses(loyalty.LoyaltyInboxReadRequestSchema, { retryFailed: 'yes' }, 'a non-boolean retryFailed');
+    refuses(loyalty.LoyaltyInboxReadRequestSchema, { force: true }, 'a stray read key');
+
+    // ── The queue action ──
+    const A = loyalty.LoyaltyInboxResolveRequestSchema;
+    accepts(A, { action: 'apply' }, 'apply');
+    accepts(A, { action: 'apply', membershipId: 4 }, 'apply to a membership');
+    accepts(A, { action: 'not_mine' }, 'not mine');
+    accepts(A, { action: 'ignore' }, 'ignore');
+    refuses(A, { action: 'not_mine', membershipId: 4 }, 'a membership with not_mine');
+    refuses(A, { action: 'ignore', membershipId: 4 }, 'a membership with ignore');
+    refuses(A, { action: 'delete' }, 'an unknown action');
+    refuses(A, { action: 'apply', balance: '1' }, 'a stray action key');
+    accepts(loyalty.LoyaltyInboxResolveResponseSchema, { success: true, data: { id: 9, state: 'applied_by_hand' } }, 'a resolve answer');
+    refuses(loyalty.LoyaltyInboxResolveResponseSchema, { success: true, data: { id: 9, state: 'applied' } }, 'a machine state from a tap');
+
+    // ── The error codes: the old ones and ITEM_RESOLVED ──
+    const codes = ['INVALID_INPUT', 'NOT_FOUND', 'INSUFFICIENT_SCOPE', 'BROWSER_SESSION_REQUIRED', 'MEMBERSHIP_EXISTS', 'ALIAS_TAKEN',
+      'MEMBER_NAME_TAKEN', 'MEMBER_USER_TAKEN', 'CARD_ALREADY_LINKED', 'DOMAIN_TAKEN', 'ADDRESS_TAKEN', 'ITEM_RESOLVED'];
+    expect([...LoyaltyErrorCodeSchema.options].sort()).toEqual([...codes].sort());
+
+    // ── The constants, in the order SPEC.md "Contracts touched" lists them ──
+    expect([loyalty.LOYALTY_READ_MAX_ATTEMPTS, loyalty.LOYALTY_READ_MAX_PER_RUN, loyalty.LOYALTY_READ_RETENTION_DAYS, loyalty.LOYALTY_READ_JUMP_PERCENT,
+      loyalty.LOYALTY_READ_SUFFIX_MIN, loyalty.LOYALTY_READ_SUFFIX_MAX, loyalty.LOYALTY_READ_QUEUE_LIMIT, loyalty.LOYALTY_READ_MAX_CHARS,
+      loyalty.LOYALTY_READ_TIMEOUT_SECONDS, loyalty.LOYALTY_READ_RUN_BUDGET_SECONDS, loyalty.LOYALTY_READ_STOP_AFTER, loyalty.LOYALTY_READ_EXPIRY_MAX,
+      loyalty.LOYALTY_READ_INSTRUMENT_MAX]).toEqual([3, 25, 400, 50, 3, 4, 50, 20000, 60, 300, 3, 5, 10]);
   });
 });

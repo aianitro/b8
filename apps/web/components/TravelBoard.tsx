@@ -19,6 +19,8 @@ export default function TravelBoard({ overview }: { overview: LoyaltyOverview })
   const programOf = new Map(overview.programs.map((p) => [p.id, p]));
   const taken = new Set(overview.cards.flatMap((c) => c.memberships.map((m) => m.cardAccountId)));
   const cardChoices = overview.cardAccounts.filter((a) => !taken.has(a.id));
+  // What mail said about expiries and instruments, by membership (P8-42c2).
+  const fromMail = new Map(overview.inboxRead.fromMail.map((f) => [f.membershipId, f]));
   const holderOf = new Map(
     overview.cards.flatMap((c) => c.memberships.map((m) => [m.id, `${c.programName} · ${m.memberDisplayName}`] as const))
   );
@@ -39,7 +41,7 @@ export default function TravelBoard({ overview }: { overview: LoyaltyOverview })
         <div className="mb-8 grid gap-4">
           {overview.cards.map((card) => {
             const program = programOf.get(card.programId);
-            return program ? <LoyaltyProgramCard key={card.programId} card={card} program={program} cardChoices={cardChoices} /> : null;
+            return program ? <LoyaltyProgramCard key={card.programId} card={card} program={program} cardChoices={cardChoices} fromMail={fromMail} /> : null;
           })}
         </div>
       )}

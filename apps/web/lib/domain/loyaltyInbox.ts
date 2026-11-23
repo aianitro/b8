@@ -321,3 +321,47 @@ export function attributeMessage(tiers: readonly string[][], memberOf: ReadonlyM
   }
   return { attribution: anyCandidate ? 'unmatched' : 'none_found', memberId: null, addresses: [] };
 }
+
+// ─── What the reader is sent (P8-42c2) ─────────────────────────────────────────────────────────
+
+/**
+ * Every URL in text: a scheme and everything up to the next space, quote, angle bracket or closing
+ * bracket, and the bare `www.` form. Tracking links carry tokens and, often, the recipient's address.
+ */
+const URL_IN_TEXT = /\b(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>"'\])]+/gi;
+/** What a removed link becomes, so the sentence around it still reads. */
+const LINK_PLACEHOLDER = '[link]';
+/** The longest subject sent. A subject is a line, not a body. */
+const SUBJECT_MAX_CHARS = 300;
+
+/** At most `max` characters (code points, never half of a surrogate pair). */
+const firstChars = (text: string, max: number) => {
+  const chars = Array.from(text);
+  return chars.length <= max ? text : chars.slice(0, max).join('');
+};
+const withoutLinks = (text: string) => text.replace(URL_IN_TEXT, LINK_PLACEHOLDER);
+
+/**
+ * WHAT THE MODEL SEES OF ONE STORED MESSAGE (P8-42c2, SPEC.md Open question 3): its subject and its
+ * text, and nothing else. No header is sent — not From, To, Cc, Delivered-To, Received or the
+ * Message-ID — so no address or routing detail leaves the machine with it, and no attachment is read.
+ *
+ *   text    — the text/plain part when there is one; otherwise the HTML converted to text by the
+ *             parser, which drops `script` and `style` and never keeps markup. Every URL becomes
+ *             `[link]`, then the result is cut at `maxChars` characters, so the prompt is bounded
+ *             whatever the mail's size. Empty means there is nothing to read: the caller records
+ *             `empty_message` and never calls the model.
+ *   subject — at most 300 characters, URLs removed the same way; null when there is none.
+ *
+ * Pure: it parses the bytes it is handed. The body may still hold a name or a postal address the
+ * statement prints; the request asks for program fields only and nothing else is kept from it.
+ */
+export async function textForReader(raw: Buffer, maxChars: number): Promise<{ subject: string | null; text: string }> {
+  const parsed = await simpleParser(raw, {
+    skipTextToHtml: true, skipTextLinks: true, skipImageLinks: true, keepCidLinks: true,
+  });
+  const body = typeof parsed.text === 'string' ? parsed.text : '';
+  const text = firstChars(withoutLinks(body).trim(), maxChars);
+  const subjectText = typeof parsed.subject === 'string' ? withoutLinks(parsed.subject).trim() : '';
+  return { subject: subjectText === '' ? null : firstChars(subjectText, SUBJECT_MAX_CHARS), text };
+}

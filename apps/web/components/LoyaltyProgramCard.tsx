@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { LoyaltyCardAccount, LoyaltyProgram, LoyaltyProgramCard as Card, LoyaltyProgramKind, LoyaltyUnit } from '@b8/contracts/loyalty';
+import type { LoyaltyCardAccount, LoyaltyProgram, LoyaltyProgramCard as Card, LoyaltyProgramKind, LoyaltyReadFromMail, LoyaltyUnit } from '@b8/contracts/loyalty';
 import LoyaltyMembershipLine from './LoyaltyMembershipLine';
 import LoyaltyInlineText from './LoyaltyInlineText';
 import { send } from './LoyaltyRequest';
@@ -21,8 +21,12 @@ const KIND_LABEL: Record<LoyaltyProgramKind, string> = {
 };
 
 export default function LoyaltyProgramCard({
-  card, program, cardChoices,
-}: { card: Card; program: LoyaltyProgram; cardChoices: LoyaltyCardAccount[] }) {
+  card, program, cardChoices, fromMail,
+}: {
+  card: Card; program: LoyaltyProgram; cardChoices: LoyaltyCardAccount[];
+  /** P8-42c2: what mail said, by membership id. Optional so every other caller is unchanged. */
+  fromMail?: ReadonlyMap<number, LoyaltyReadFromMail>;
+}) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +77,7 @@ export default function LoyaltyProgramCard({
         </div>
       )}
       <ul className="mt-2">
-        {card.memberships.map((m) => <LoyaltyMembershipLine key={m.id} m={m} defaultUnit={program.defaultUnit} cardChoices={cardChoices} />)}
+        {card.memberships.map((m) => <LoyaltyMembershipLine key={m.id} m={m} defaultUnit={program.defaultUnit} cardChoices={cardChoices} fromMail={fromMail?.get(m.id)} />)}
       </ul>
     </section>
   );

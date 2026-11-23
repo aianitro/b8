@@ -1,0 +1,17 @@
+Message-ID: <zq42c2-r06@zq42c2-brand.test>
+MIME-Version: 1.0
+Subject: ZQ42C2-SUBJECT-CANARY R06
+Date: Fri, 20 Nov 2026 09:30:00 +0000
+From: ZQ42C2 Brand <statements@zq42c2-brand.test>
+To: zq42c2-anna@example.com
+Content-Type: multipart/alternative; boundary="zq42c2b6"
+
+--zq42c2b6
+Content-Type: text/plain; charset=utf-8
+
+ZQ42C2-TEXT-PART-CANARY
+--zq42c2b6
+Content-Type: text/html; charset=utf-8
+
+<p>ZQ42C2-HTML-PART-CANARY</p>
+--zq42c2b6--

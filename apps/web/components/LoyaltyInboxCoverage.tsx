@@ -12,14 +12,22 @@
 // stored list stays as it was.
 
 import { useRouter } from 'next/navigation';
-import type { LoyaltyInbox, LoyaltyProgram } from '@b8/contracts/loyalty';
+import type { LoyaltyInbox, LoyaltyInboxReadPanel, LoyaltyProgram, LoyaltyReadCoverage } from '@b8/contracts/loyalty';
 import LoyaltyListEditor from './LoyaltyListEditor';
 import { send } from './LoyaltyRequest';
 
-export default function LoyaltyInboxCoverage({ inbox, programs }: { inbox: LoyaltyInbox; programs: LoyaltyProgram[] }) {
+/** Whether the newest read mail of a program stated a balance (P8-42c2). Never read is not "no". */
+const IN_LAST_STATEMENT: Record<LoyaltyReadCoverage, string> = {
+  yes: 'Balance in last statement: yes', no: 'Balance in last statement: no', not_read: 'Balance in last statement: not read yet',
+};
+
+export default function LoyaltyInboxCoverage({
+  inbox, programs, inboxRead,
+}: { inbox: LoyaltyInbox; programs: LoyaltyProgram[]; inboxRead?: LoyaltyInboxReadPanel }) {
   const router = useRouter();
   const domainsOf = new Map(inbox.senderDomains.map((s) => [s.programId, s.domains]));
   const coverageOf = new Map(inbox.coverage.map((c) => [c.programId, c]));
+  const readOf = new Map((inboxRead?.coverage ?? []).map((c) => [c.programId, c.balanceInLastStatement]));
 
   async function saveDomains(programId: number, entries: string[]): Promise<string | null> {
     const result = await send('PATCH', `/api/v1/loyalty/programs/${programId}`, { senderDomains: entries });
@@ -47,6 +55,7 @@ export default function LoyaltyInboxCoverage({ inbox, programs }: { inbox: Loyal
                     {c.lastSeenOn === null ? 'No mail seen yet' : `Last mail seen: ${c.lastSeenOn}`}
                     {` · ${c.storedInWindow} in the last 30 days`}
                   </p>
+                  {readOf.has(p.id) && <p className="text-xs text-gray-400">{IN_LAST_STATEMENT[readOf.get(p.id) ?? 'not_read']}</p>}
                 </>
               )}
               <LoyaltyListEditor label="Edit sender domains" values={domains} onSave={(entries) => saveDomains(p.id, entries)} />

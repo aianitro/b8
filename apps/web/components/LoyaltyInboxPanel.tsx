@@ -22,6 +22,7 @@ import { useRouter } from 'next/navigation';
 import type { LoyaltyInboxConfigProblem, LoyaltyOverview } from '@b8/contracts/loyalty';
 import LoyaltyInboxForwarding from './LoyaltyInboxForwarding';
 import LoyaltyInboxCoverage from './LoyaltyInboxCoverage';
+import LoyaltyInboxReadPanel, { READ_PATH } from './LoyaltyInboxReadPanel';
 import { send } from './LoyaltyRequest';
 
 /** What to fix, by problem. Names of variables only; a value is never shown. */
@@ -40,8 +41,12 @@ export default function LoyaltyInboxPanel({ overview }: { overview: LoyaltyOverv
   async function checkNow() {
     setChecking(true);
     const result = await send('POST', '/api/v1/loyalty/inbox/poll', {});
+    // P8-42c2: then read what is stored, whatever the poll's outcome — a failed poll still leaves
+    // earlier mail to read. The read answers `disabled` without a key and writes nothing.
+    const reading = await send('POST', READ_PATH, {});
     setChecking(false);
     if (!result.ok) { setError(result.message); return; }
+    if (!reading.ok) { setError(reading.message); return; }
     setError(null);
     router.refresh();
   }
@@ -90,7 +95,8 @@ export default function LoyaltyInboxPanel({ overview }: { overview: LoyaltyOverv
         {inbox.unattributed > 0 && <p className="mt-1 text-amber-600">{`Not matched to a person: ${inbox.unattributed}`}</p>}
       </div>
       <LoyaltyInboxForwarding inbox={inbox} members={overview.members} />
-      <LoyaltyInboxCoverage inbox={inbox} programs={overview.programs} />
+      <LoyaltyInboxReadPanel overview={overview} />
+      <LoyaltyInboxCoverage inbox={inbox} programs={overview.programs} inboxRead={overview.inboxRead} />
     </section>
   );
 }

@@ -1,0 +1,17 @@
+Message-ID: <zq42c2-r01@zq42c2-brand.test>
+MIME-Version: 1.0
+Subject: ZQ42C2-SUBJECT-CANARY R01
+Date: Fri, 20 Nov 2026 09:30:00 +0000
+From: ZQ42C2 Brand <statements@zq42c2-brand.test>
+To: zq42c2-anna@example.com
+Cc: zq42c2-cc@example.org
+Delivered-To: zq42c2-inbox@example.net
+Received: from mx.zq42c2-brand.test by mail.example.net with ESMTPS for <zq42c2-anna@example.com>; Fri, 20 Nov 2026 09:30:05 +0000
+X-ZQ42C2-Header: ZQ42C2-HEADER-CANARY
+Content-Type: text/plain; charset=utf-8
+
+Dear ZQ42C2 Person
+
+ZQ42C2-BODY-CANARY R01
+Your statement is ready.
+See https://track.zq42c2-brand.test/u?t=ZQ42C2-URL-TOKEN for details.

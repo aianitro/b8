@@ -8,6 +8,7 @@ import { writeYearEndSnapshot } from './yearEndSnapshots';
 import { writeNetWorthSnapshot } from './netWorth';
 import { runGiftSweep } from './giftStore';
 import { runLoyaltyInboxDaily } from './loyaltyInbox';
+import { runLoyaltyReadDaily } from './loyaltyInboxRead';
 import { createLogger } from './logger';
 
 const log = createLogger('scheduler');
@@ -81,6 +82,12 @@ export async function runDailyJob() {
   // runs even with the poller unconfigured, so retention never waits on a mailbox. Resolves rather
   // than rejects: a mailbox outage must never cost the digest below it.
   await runLoyaltyInboxDaily();
+
+  // Reading the collected mail (P8-42c2): each stored message read once by Claude as a proposal,
+  // auto-applied only where every rule holds, the rest queued on /travel — right after the poll, so
+  // what it just stored is read today, and before the digest. With no API key it reads nothing and
+  // only purges. Resolves rather than rejects: a model outage must never cost the digest below it.
+  await runLoyaltyReadDaily();
 
   // Last, and after the syncs, so the outlook it reads is computed over the transactions this run
   // just pulled rather than yesterday's — an alert about a month the job has not finished loading

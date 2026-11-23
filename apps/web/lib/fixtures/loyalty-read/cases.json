@@ -1,0 +1,2569 @@
+{
+  "note": "FABRICATED test data for P8-42c2 (canary ZQ42C2). No figure, number, name or address here belongs to anyone; every program, member, member number and balance is invented. Written by the orchestrator at G0 from scratchpad gen_read_fixtures.py and pinned by SHA-256 in command 16; the implementer never edits it.",
+  "version": 1,
+  "conventions": {
+    "dayTokens": "{{DAY:n}} means (CURRENT_DATE + n)::text from Postgres; replace before use. Offsets in asOfOffset/receivedOffset are the same n.",
+    "readerOutput": "decisions[].reader and clean[].input are the RAW object a fake reader returns (the model schema, before the clean pass).",
+    "cleanResult": "clean[].expect is the cleaned object {programName, suffix, balance, unit, asOf, expiryWarnings, instruments}. programName is the program-check form (lower-cased, non-alphanumerics removed; null when absent, when it holds '<' or '>', or when the result is empty or longer than 60). It is used only for the program check and never stored. An expiry amount is parsed with the warning's kind as the unit; for status and other it is always null; an unparseable amount is null and the warning is kept. A warning without a valid kind or date is dropped; an instrument without a valid kind is dropped, and an invalid expiry becomes null. Arrays are truncated to their caps in order.",
+    "decisionExpect": "membership is a memberships[].id or null; balanceAfter is that membership's current balance after the read (null when no membership); observation says whether one loyalty_observations row with source email was appended. Every decision is order-independent: no two appending decisions share a membership.",
+    "retryBehaviours": "ok returns a reading with every field null (state no_balance); rate_limited, timeout, api_error, refused and bad_output return that failure class; throw rejects with a plain Error; hang never settles. A script entry is consumed per call; a message absent from a run's calls is not offered. unread means no reads row."
+  },
+  "canaries": {
+    "key": "ZQ42C2-KEY-CANARY",
+    "baseUrlHost": "zq42c2-model.test",
+    "urlToken": "ZQ42C2-URL-TOKEN",
+    "urlTokenHtml": "ZQ42C2-URL-TOKEN-H",
+    "body": "ZQ42C2-BODY-CANARY",
+    "subject": "ZQ42C2-SUBJECT-CANARY",
+    "attachment": "ZQ42C2-ATTACH-CANARY",
+    "header": "ZQ42C2-HEADER-CANARY",
+    "script": "ZQ42C2-SCRIPT-CANARY",
+    "memberNumber": "ZQ42C2FULLNUMBER4417",
+    "modelOutput": "ZQ42C2-MODEL-OUTPUT-CANARY",
+    "injection": "ZQ42C2-INJECTION",
+    "head": "ZQ42C2-HEAD-CANARY",
+    "tail": "ZQ42C2-TAIL-CANARY",
+    "textPart": "ZQ42C2-TEXT-PART-CANARY",
+    "htmlPart": "ZQ42C2-HTML-PART-CANARY",
+    "htmlVisible": "ZQ42C2-HTML-VISIBLE-CANARY",
+    "addresses": [
+      "zq42c2-anna@example.com",
+      "zq42c2-cc@example.org",
+      "zq42c2-inbox@example.net",
+      "statements@zq42c2-brand.test"
+    ]
+  },
+  "programs": [
+    {
+      "id": "air",
+      "name": "ZQ42C2 Air",
+      "kind": "airline",
+      "defaultUnit": "miles",
+      "aliases": [
+        "ZQ42C2 Air Club"
+      ],
+      "domain": "zq42c2-air.test"
+    },
+    {
+      "id": "stays",
+      "name": "ZQ42C2 Stays",
+      "kind": "hotel",
+      "defaultUnit": "points",
+      "aliases": [],
+      "domain": "zq42c2-stays.test"
+    },
+    {
+      "id": "cash",
+      "name": "ZQ42C2 Cash",
+      "kind": "travel_cash",
+      "defaultUnit": "usd",
+      "aliases": [],
+      "domain": "zq42c2-cash.test"
+    },
+    {
+      "id": "other",
+      "name": "ZQ42C2 Elsewhere",
+      "kind": "other",
+      "defaultUnit": "points",
+      "aliases": [],
+      "domain": "zq42c2-elsewhere.test"
+    }
+  ],
+  "members": [
+    {
+      "id": "pa",
+      "displayName": "ZQ42C2 Person A"
+    },
+    {
+      "id": "pb",
+      "displayName": "ZQ42C2 Person B"
+    }
+  ],
+  "memberships": [
+    {
+      "id": "a-apply",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C20004417",
+      "baseline": {
+        "balance": "50000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-zero",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C21001203",
+      "baseline": {
+        "balance": "0",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-nobal",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C22002290",
+      "baseline": {
+        "balance": "1000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-mismatch",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C23003388",
+      "baseline": {
+        "balance": "8000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-unstated",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C24006120",
+      "baseline": {
+        "balance": "20000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-asof",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C25002468",
+      "baseline": {
+        "balance": "3000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-stale",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C26001357",
+      "baseline": {
+        "balance": "7000",
+        "unit": "miles",
+        "asOfOffset": -10
+      }
+    },
+    {
+      "id": "a-nobase",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C27005502",
+      "baseline": null
+    },
+    {
+      "id": "a-zerobase",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C28004040",
+      "baseline": {
+        "balance": "0",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-jump-up",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C29001010",
+      "baseline": {
+        "balance": "10000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-jump-down",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C20002020",
+      "baseline": {
+        "balance": "10000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-edge-up",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C21003030",
+      "baseline": {
+        "balance": "10000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-edge-down",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C22005050",
+      "baseline": {
+        "balance": "10000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-zero-cand",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C23006060",
+      "baseline": {
+        "balance": "10000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-inject",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C24007070",
+      "baseline": {
+        "balance": "10000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-inject-ok",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C25008080",
+      "baseline": {
+        "balance": "10000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-amb-1",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": "ZQ42C26008820",
+      "baseline": {
+        "balance": "15000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-amb-2",
+      "program": "air",
+      "member": "pb",
+      "memberNumber": "ZQ42C27008820",
+      "baseline": {
+        "balance": "16000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "a-nonumber",
+      "program": "air",
+      "member": "pa",
+      "memberNumber": null,
+      "baseline": {
+        "balance": "4000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "s-unit",
+      "program": "stays",
+      "member": "pa",
+      "memberNumber": "ZQ42C29005150",
+      "baseline": {
+        "balance": "40000",
+        "unit": "points",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "c-usd",
+      "program": "cash",
+      "member": "pa",
+      "memberNumber": "ZQ42C20007730",
+      "baseline": {
+        "balance": "120.50",
+        "unit": "usd",
+        "asOfOffset": -40
+      }
+    },
+    {
+      "id": "o-only",
+      "program": "other",
+      "member": "pa",
+      "memberNumber": "ZQ42C21009061",
+      "baseline": {
+        "balance": "6000",
+        "unit": "points",
+        "asOfOffset": -40
+      }
+    }
+  ],
+  "notMine": [
+    {
+      "program": "air",
+      "suffix": "6644"
+    }
+  ],
+  "decisions": [
+    {
+      "id": "apply-ok",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "•••• 4417",
+        "balance": "52000",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "applied",
+        "reason": null,
+        "membership": "a-apply",
+        "observation": true,
+        "balanceAfter": "52000"
+      }
+    },
+    {
+      "id": "apply-ok-usd",
+      "program": "cash",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Cash",
+        "memberNumberSuffix": "••••7730",
+        "balance": "130.25",
+        "unit": "usd",
+        "asOf": "{{DAY:-3}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "applied",
+        "reason": null,
+        "membership": "c-usd",
+        "observation": true,
+        "balanceAfter": "130.25"
+      }
+    },
+    {
+      "id": "apply-zero-from-zero",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••1203",
+        "balance": "0",
+        "unit": "miles",
+        "asOf": "{{DAY:-1}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "applied",
+        "reason": null,
+        "membership": "a-zero",
+        "observation": true,
+        "balanceAfter": "0"
+      }
+    },
+    {
+      "id": "no-balance-null",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••2290",
+        "balance": null,
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "no_balance",
+        "reason": null,
+        "membership": "a-nobal",
+        "observation": false,
+        "balanceAfter": "1000"
+      }
+    },
+    {
+      "id": "no-balance-unit-null",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••2290",
+        "balance": "1500",
+        "unit": null,
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "no_balance",
+        "reason": null,
+        "membership": "a-nobal",
+        "observation": false,
+        "balanceAfter": "1000"
+      }
+    },
+    {
+      "id": "expiry-only",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••2290",
+        "balance": null,
+        "unit": null,
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [
+          {
+            "what": "miles",
+            "expiresOn": "{{DAY:60}}",
+            "amount": "500"
+          }
+        ],
+        "instruments": [
+          {
+            "kind": "companion_fare",
+            "expiresOn": "{{DAY:120}}"
+          }
+        ]
+      },
+      "expect": {
+        "state": "no_balance",
+        "reason": null,
+        "membership": "a-nobal",
+        "observation": false,
+        "balanceAfter": "1000"
+      }
+    },
+    {
+      "id": "program-mismatch",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Stays",
+        "memberNumberSuffix": "••••3388",
+        "balance": "8100",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "program_mismatch",
+        "membership": "a-mismatch",
+        "observation": false,
+        "balanceAfter": "8000"
+      }
+    },
+    {
+      "id": "program-not-stated",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": null,
+        "memberNumberSuffix": "••••6120",
+        "balance": "21000",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "applied",
+        "reason": null,
+        "membership": "a-unstated",
+        "observation": true,
+        "balanceAfter": "21000"
+      }
+    },
+    {
+      "id": "suffix-none",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": null,
+        "balance": "9100",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "no_suffix",
+        "membership": null,
+        "observation": false,
+        "balanceAfter": null
+      }
+    },
+    {
+      "id": "suffix-short",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••12",
+        "balance": "9100",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "no_suffix",
+        "membership": null,
+        "observation": false,
+        "balanceAfter": null
+      }
+    },
+    {
+      "id": "suffix-unmatched",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••7777",
+        "balance": "9100",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "unmatched_suffix",
+        "membership": null,
+        "observation": false,
+        "balanceAfter": null
+      }
+    },
+    {
+      "id": "suffix-unmatched-known-not-mine",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••6644",
+        "balance": "9100",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "not_mine_known",
+        "reason": null,
+        "membership": null,
+        "observation": false,
+        "balanceAfter": null
+      }
+    },
+    {
+      "id": "suffix-ambiguous",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••8820",
+        "balance": "15500",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "ambiguous_suffix",
+        "membership": null,
+        "observation": false,
+        "balanceAfter": null
+      }
+    },
+    {
+      "id": "suffix-other-program-only",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••9061",
+        "balance": "6100",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "unmatched_suffix",
+        "membership": null,
+        "observation": false,
+        "balanceAfter": null
+      }
+    },
+    {
+      "id": "unit-mismatch",
+      "program": "stays",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Stays",
+        "memberNumberSuffix": "••••5150",
+        "balance": "41000",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "unit_mismatch",
+        "membership": "s-unit",
+        "observation": false,
+        "balanceAfter": "40000"
+      }
+    },
+    {
+      "id": "as-of-missing",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••2468",
+        "balance": "3100",
+        "unit": "miles",
+        "asOf": null,
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "no_as_of",
+        "membership": "a-asof",
+        "observation": false,
+        "balanceAfter": "3000"
+      }
+    },
+    {
+      "id": "as-of-future",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••2468",
+        "balance": "3100",
+        "unit": "miles",
+        "asOf": "{{DAY:2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "as_of_future",
+        "membership": "a-asof",
+        "observation": false,
+        "balanceAfter": "3000"
+      }
+    },
+    {
+      "id": "as-of-equal-stale",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••1357",
+        "balance": "7100",
+        "unit": "miles",
+        "asOf": "{{DAY:-10}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "stale",
+        "reason": null,
+        "membership": "a-stale",
+        "observation": false,
+        "balanceAfter": "7000"
+      }
+    },
+    {
+      "id": "as-of-older-stale",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••1357",
+        "balance": "7100",
+        "unit": "miles",
+        "asOf": "{{DAY:-20}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "stale",
+        "reason": null,
+        "membership": "a-stale",
+        "observation": false,
+        "balanceAfter": "7000"
+      }
+    },
+    {
+      "id": "no-baseline-none",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••5502",
+        "balance": "9000",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "no_baseline",
+        "membership": "a-nobase",
+        "observation": false,
+        "balanceAfter": null
+      }
+    },
+    {
+      "id": "no-baseline-zero",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4040",
+        "balance": "250",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "no_baseline",
+        "membership": "a-zerobase",
+        "observation": false,
+        "balanceAfter": "0"
+      }
+    },
+    {
+      "id": "jump-over-up",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••1010",
+        "balance": "15001",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "implausible_jump",
+        "membership": "a-jump-up",
+        "observation": false,
+        "balanceAfter": "10000"
+      }
+    },
+    {
+      "id": "jump-over-down",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••2020",
+        "balance": "4999",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "implausible_jump",
+        "membership": "a-jump-down",
+        "observation": false,
+        "balanceAfter": "10000"
+      }
+    },
+    {
+      "id": "jump-at-boundary-up",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••3030",
+        "balance": "15000",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "applied",
+        "reason": null,
+        "membership": "a-edge-up",
+        "observation": true,
+        "balanceAfter": "15000"
+      }
+    },
+    {
+      "id": "jump-at-boundary-down",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••5050",
+        "balance": "5000",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "applied",
+        "reason": null,
+        "membership": "a-edge-down",
+        "observation": true,
+        "balanceAfter": "5000"
+      }
+    },
+    {
+      "id": "zero-from-positive-queued",
+      "program": "air",
+      "eml": "R01",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••6060",
+        "balance": "0",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "implausible_jump",
+        "membership": "a-zero-cand",
+        "observation": false,
+        "balanceAfter": "10000"
+      }
+    },
+    {
+      "id": "injection-obedient-jump",
+      "program": "air",
+      "eml": "R05",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••7070",
+        "balance": "999999999999",
+        "unit": "miles",
+        "asOf": "{{DAY:0}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "implausible_jump",
+        "membership": "a-inject",
+        "observation": false,
+        "balanceAfter": "10000"
+      }
+    },
+    {
+      "id": "injection-obedient-wrong-suffix",
+      "program": "air",
+      "eml": "R05",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••0001",
+        "balance": "10100",
+        "unit": "miles",
+        "asOf": "{{DAY:0}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "pending",
+        "reason": "unmatched_suffix",
+        "membership": null,
+        "observation": false,
+        "balanceAfter": null
+      }
+    },
+    {
+      "id": "injection-obedient-within-bound",
+      "program": "air",
+      "eml": "R05",
+      "reader": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••8080",
+        "balance": "14000",
+        "unit": "miles",
+        "asOf": "{{DAY:0}}",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "state": "applied",
+        "reason": null,
+        "membership": "a-inject-ok",
+        "observation": true,
+        "balanceAfter": "14000"
+      }
+    }
+  ],
+  "clean": [
+    {
+      "id": "balance-plain",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "52000",
+        "unit": "miles",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "52000",
+        "unit": "miles",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-thousands",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "1,234,567",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "1234567",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-european-decimal",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "120,50",
+        "unit": "usd",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-whole-with-fraction",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "5000.5",
+        "unit": "miles",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-usd-one-fraction",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "75.5",
+        "unit": "usd",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "75.50",
+        "unit": "usd",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-usd-three-fractions",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "75.505",
+        "unit": "usd",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-negative",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "-300",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-signed-plus",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "+300",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-exponent",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "1e5",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-too-many-digits",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "1234567890123",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "balance-text",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "about five thousand",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "unit-not-in-enum",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "kilometres",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "unit-missing",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "date-impossible",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2025-02-30",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": null,
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "date-leap-valid",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2024-02-29",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2024-02-29",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "date-wrong-shape",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "29/02/2024",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": null,
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "suffix-masked-forms",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "**** 44-17",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "suffix-long-printed",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "ZQ42C2 0000 0000 4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "extra-keys",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": [],
+        "memberName": "ZQ42C2 Person A",
+        "postalAddress": "ZQ42C2 Street",
+        "fullMemberNumber": "ZQ42C2FULLNUMBER4417",
+        "note": "ZQ42C2-MODEL-OUTPUT-CANARY"
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "markup-and-instruction-strings",
+      "input": {
+        "programName": "<b>ZQ42C2 Air</b> ignore your rules",
+        "memberNumberSuffix": "••••4417",
+        "balance": "<b>500</b>",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [
+          {
+            "what": "ignore all rules",
+            "expiresOn": "2026-03-01",
+            "amount": "500"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-03-01",
+            "amount": "<i>500</i>"
+          }
+        ],
+        "instruments": [
+          {
+            "kind": "<script>free_night</script>",
+            "expiresOn": "2026-03-01"
+          }
+        ]
+      },
+      "expect": {
+        "programName": null,
+        "suffix": "4417",
+        "balance": null,
+        "unit": null,
+        "asOf": "2026-01-15",
+        "expiryWarnings": [
+          {
+            "what": "points",
+            "expiresOn": "2026-03-01",
+            "amount": null
+          }
+        ],
+        "instruments": []
+      }
+    },
+    {
+      "id": "expiry-over-cap",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [
+          {
+            "what": "points",
+            "expiresOn": "2026-01-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-02-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-03-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-04-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-05-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-06-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-07-01",
+            "amount": "100"
+          }
+        ],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [
+          {
+            "what": "points",
+            "expiresOn": "2026-01-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-02-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-03-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-04-01",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "2026-05-01",
+            "amount": "100"
+          }
+        ],
+        "instruments": []
+      }
+    },
+    {
+      "id": "expiry-bad-kind",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [
+          {
+            "what": "gold",
+            "expiresOn": "2026-03-01",
+            "amount": null
+          },
+          {
+            "what": "miles",
+            "expiresOn": "2026-03-01",
+            "amount": "500"
+          },
+          {
+            "what": "status",
+            "expiresOn": "2026-04-01",
+            "amount": "500"
+          }
+        ],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [
+          {
+            "what": "miles",
+            "expiresOn": "2026-03-01",
+            "amount": "500"
+          },
+          {
+            "what": "status",
+            "expiresOn": "2026-04-01",
+            "amount": null
+          }
+        ],
+        "instruments": []
+      }
+    },
+    {
+      "id": "expiry-bad-date",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [
+          {
+            "what": "points",
+            "expiresOn": "2025-02-30",
+            "amount": "100"
+          },
+          {
+            "what": "points",
+            "expiresOn": "soon",
+            "amount": "100"
+          }
+        ],
+        "instruments": []
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    {
+      "id": "instrument-bad-kind",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": [
+          {
+            "kind": "upgrade",
+            "expiresOn": null
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-08-31"
+          },
+          {
+            "kind": "travel_credit",
+            "expiresOn": "2026-13-01"
+          }
+        ]
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": [
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-08-31"
+          },
+          {
+            "kind": "travel_credit",
+            "expiresOn": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "instruments-over-cap",
+      "input": {
+        "programName": "ZQ42C2 Air",
+        "memberNumberSuffix": "••••4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": [
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-01-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-02-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-03-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-04-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-05-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-06-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-07-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-08-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-09-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-10-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-11-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-12-01"
+          }
+        ]
+      },
+      "expect": {
+        "programName": "zq42c2air",
+        "suffix": "4417",
+        "balance": "500",
+        "unit": "points",
+        "asOf": "2026-01-15",
+        "expiryWarnings": [],
+        "instruments": [
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-01-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-02-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-03-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-04-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-05-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-06-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-07-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-08-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-09-01"
+          },
+          {
+            "kind": "free_night",
+            "expiresOn": "2026-10-01"
+          }
+        ]
+      }
+    },
+    {
+      "id": "not-an-object",
+      "input": [
+        "ZQ42C2",
+        "not",
+        "an",
+        "object"
+      ],
+      "expect": {
+        "programName": null,
+        "suffix": null,
+        "balance": null,
+        "unit": null,
+        "asOf": null,
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    }
+  ],
+  "suffix": [
+    {
+      "id": "bullets",
+      "printed": "•••• 4417",
+      "kept": "4417"
+    },
+    {
+      "id": "stars",
+      "printed": "****4417",
+      "kept": "4417"
+    },
+    {
+      "id": "x-mask-dash",
+      "printed": "xxxx-4417",
+      "kept": "4417"
+    },
+    {
+      "id": "spaces",
+      "printed": " 44 17 ",
+      "kept": "4417"
+    },
+    {
+      "id": "lower-case",
+      "printed": "••ab12cd",
+      "kept": "12CD"
+    },
+    {
+      "id": "printed-full",
+      "printed": "ZQ42C2 0000 4417",
+      "kept": "4417"
+    },
+    {
+      "id": "three",
+      "printed": "•••417",
+      "kept": "417"
+    },
+    {
+      "id": "two",
+      "printed": "••12",
+      "kept": null
+    },
+    {
+      "id": "dash-two",
+      "printed": "1-2",
+      "kept": null
+    },
+    {
+      "id": "empty",
+      "printed": "",
+      "kept": null
+    },
+    {
+      "id": "only-mask",
+      "printed": "••••",
+      "kept": null
+    },
+    {
+      "id": "null",
+      "printed": null,
+      "kept": null
+    }
+  ],
+  "jump": [
+    {
+      "id": "miles-at-up",
+      "unit": "miles",
+      "baseline": "10000",
+      "candidate": "15000",
+      "verdict": "pass"
+    },
+    {
+      "id": "miles-over-up",
+      "unit": "miles",
+      "baseline": "10000",
+      "candidate": "15001",
+      "verdict": "implausible_jump"
+    },
+    {
+      "id": "miles-at-down",
+      "unit": "miles",
+      "baseline": "10000",
+      "candidate": "5000",
+      "verdict": "pass"
+    },
+    {
+      "id": "miles-over-down",
+      "unit": "miles",
+      "baseline": "10000",
+      "candidate": "4999",
+      "verdict": "implausible_jump"
+    },
+    {
+      "id": "points-small",
+      "unit": "points",
+      "baseline": "3",
+      "candidate": "4",
+      "verdict": "pass"
+    },
+    {
+      "id": "points-small-over",
+      "unit": "points",
+      "baseline": "3",
+      "candidate": "5",
+      "verdict": "implausible_jump"
+    },
+    {
+      "id": "nights-at-up",
+      "unit": "nights",
+      "baseline": "10",
+      "candidate": "15",
+      "verdict": "pass"
+    },
+    {
+      "id": "nights-over-up",
+      "unit": "nights",
+      "baseline": "10",
+      "candidate": "16",
+      "verdict": "implausible_jump"
+    },
+    {
+      "id": "usd-at-up",
+      "unit": "usd",
+      "baseline": "100.00",
+      "candidate": "150.00",
+      "verdict": "pass"
+    },
+    {
+      "id": "usd-over-up",
+      "unit": "usd",
+      "baseline": "100.00",
+      "candidate": "150.01",
+      "verdict": "implausible_jump"
+    },
+    {
+      "id": "usd-at-down",
+      "unit": "usd",
+      "baseline": "100.00",
+      "candidate": "50.00",
+      "verdict": "pass"
+    },
+    {
+      "id": "usd-over-down",
+      "unit": "usd",
+      "baseline": "100.00",
+      "candidate": "49.99",
+      "verdict": "implausible_jump"
+    },
+    {
+      "id": "usd-cent",
+      "unit": "usd",
+      "baseline": "0.01",
+      "candidate": "0.02",
+      "verdict": "implausible_jump"
+    },
+    {
+      "id": "zero-zero",
+      "unit": "points",
+      "baseline": "0",
+      "candidate": "0",
+      "verdict": "pass"
+    },
+    {
+      "id": "zero-baseline",
+      "unit": "points",
+      "baseline": "0",
+      "candidate": "5",
+      "verdict": "no_baseline"
+    },
+    {
+      "id": "zero-candidate",
+      "unit": "miles",
+      "baseline": "10000",
+      "candidate": "0",
+      "verdict": "implausible_jump"
+    },
+    {
+      "id": "no-baseline",
+      "unit": "miles",
+      "baseline": null,
+      "candidate": "100",
+      "verdict": "no_baseline"
+    }
+  ],
+  "retry": [
+    {
+      "id": "rate-limited-stops",
+      "messages": {
+        "m1": [
+          "rate_limited"
+        ],
+        "m2": [
+          "ok"
+        ],
+        "m3": [
+          "ok"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "error",
+          "errorCode": "rate_limited",
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "rate_limited"
+            },
+            "m2": {
+              "attempts": 0,
+              "state": "unread",
+              "code": null
+            },
+            "m3": {
+              "attempts": 0,
+              "state": "unread",
+              "code": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "timeout-retry",
+      "messages": {
+        "m1": [
+          "timeout",
+          "ok"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "timeout"
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 2,
+              "state": "no_balance",
+              "code": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "three-timeouts-stop",
+      "messages": {
+        "m1": [
+          "timeout"
+        ],
+        "m2": [
+          "timeout"
+        ],
+        "m3": [
+          "timeout"
+        ],
+        "m4": [
+          "ok"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "error",
+          "errorCode": "timeout",
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "timeout"
+            },
+            "m2": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "timeout"
+            },
+            "m3": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "timeout"
+            },
+            "m4": {
+              "attempts": 0,
+              "state": "unread",
+              "code": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "api-error-three-attempts",
+      "messages": {
+        "m1": [
+          "api_error",
+          "api_error",
+          "api_error"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "api_error"
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 2,
+              "state": "retry",
+              "code": "api_error"
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 3,
+              "state": "failed",
+              "code": "api_error"
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 3,
+              "state": "failed",
+              "code": "api_error"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "refused-terminal",
+      "messages": {
+        "m1": [
+          "refused"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "failed",
+              "code": "refused"
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "failed",
+              "code": "refused"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "bad-output-retry",
+      "messages": {
+        "m1": [
+          "bad_output",
+          "bad_output",
+          "ok"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "bad_output"
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 2,
+              "state": "retry",
+              "code": "bad_output"
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 3,
+              "state": "no_balance",
+              "code": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "empty-terminal",
+      "messages": {
+        "m1": []
+      },
+      "eml": {
+        "m1": "R03"
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "failed",
+              "code": "empty_message"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "throw-counts-attempt",
+      "messages": {
+        "m1": [
+          "throw",
+          "ok"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "api_error"
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 2,
+              "state": "no_balance",
+              "code": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "hang-bounded",
+      "messages": {
+        "m1": [
+          "hang"
+        ],
+        "m2": [
+          "ok"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "timeout"
+            },
+            "m2": {
+              "attempts": 1,
+              "state": "no_balance",
+              "code": null
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 2,
+              "state": "retry",
+              "code": "timeout"
+            },
+            "m2": {
+              "attempts": 1,
+              "state": "no_balance",
+              "code": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "isolation-after-failure",
+      "messages": {
+        "m1": [
+          "api_error"
+        ],
+        "m2": [
+          "ok"
+        ],
+        "m3": [
+          "refused"
+        ],
+        "m4": [
+          "ok"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "retry",
+              "code": "api_error"
+            },
+            "m2": {
+              "attempts": 1,
+              "state": "no_balance",
+              "code": null
+            },
+            "m3": {
+              "attempts": 1,
+              "state": "failed",
+              "code": "refused"
+            },
+            "m4": {
+              "attempts": 1,
+              "state": "no_balance",
+              "code": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "retry-failed-reset",
+      "messages": {
+        "m1": [
+          "refused",
+          "ok"
+        ]
+      },
+      "runs": [
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "failed",
+              "code": "refused"
+            }
+          }
+        },
+        {
+          "retryFailed": false,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "failed",
+              "code": "refused"
+            }
+          }
+        },
+        {
+          "retryFailed": true,
+          "outcome": "ok",
+          "errorCode": null,
+          "after": {
+            "m1": {
+              "attempts": 1,
+              "state": "no_balance",
+              "code": null
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "retention": {
+    "keptDays": [
+      399,
+      400
+    ],
+    "deletedDays": [
+      401
+    ]
+  },
+  "surface": {
+    "programs": [
+      {
+        "id": "sa",
+        "name": "ZQ42C2 Surface Air",
+        "kind": "airline",
+        "defaultUnit": "miles",
+        "domain": "zq42c2-surface-air.test"
+      },
+      {
+        "id": "sn",
+        "name": "ZQ42C2 Surface Stays",
+        "kind": "hotel",
+        "defaultUnit": "points",
+        "domain": "zq42c2-surface-stays.test"
+      },
+      {
+        "id": "su",
+        "name": "ZQ42C2 Surface Cash",
+        "kind": "travel_cash",
+        "defaultUnit": "usd",
+        "domain": "zq42c2-surface-cash.test"
+      }
+    ],
+    "memberships": [
+      {
+        "id": "su1",
+        "program": "sa",
+        "member": "pa",
+        "memberNumber": "ZQ42C2S0001111",
+        "baseline": {
+          "balance": "10000",
+          "unit": "miles",
+          "asOfOffset": -40
+        }
+      },
+      {
+        "id": "su2",
+        "program": "sa",
+        "member": "pa",
+        "memberNumber": "ZQ42C2S0012222",
+        "baseline": {
+          "balance": "20000",
+          "unit": "miles",
+          "asOfOffset": -40
+        }
+      },
+      {
+        "id": "su3",
+        "program": "sa",
+        "member": "pb",
+        "memberNumber": "ZQ42C2S0022222",
+        "baseline": {
+          "balance": "30000",
+          "unit": "miles",
+          "asOfOffset": -40
+        }
+      }
+    ],
+    "reads": [
+      {
+        "id": "q-unique",
+        "program": "sa",
+        "state": "pending",
+        "reason": "implausible_jump",
+        "suffix": "1111",
+        "membership": "su1",
+        "balance": "25000",
+        "unit": "miles",
+        "asOf": "{{DAY:-1}}",
+        "receivedOffset": -1
+      },
+      {
+        "id": "q-ambiguous",
+        "program": "sa",
+        "state": "pending",
+        "reason": "ambiguous_suffix",
+        "suffix": "2222",
+        "membership": null,
+        "balance": "20500",
+        "unit": "miles",
+        "asOf": "{{DAY:-2}}",
+        "receivedOffset": -2
+      },
+      {
+        "id": "q-no-date",
+        "program": "sa",
+        "state": "pending",
+        "reason": "no_as_of",
+        "suffix": "1111",
+        "membership": "su1",
+        "balance": "10100",
+        "unit": "miles",
+        "asOf": null,
+        "receivedOffset": -3
+      },
+      {
+        "id": "applied-with-extras",
+        "program": "sa",
+        "state": "applied",
+        "reason": null,
+        "suffix": "1111",
+        "membership": "su1",
+        "balance": "10000",
+        "unit": "miles",
+        "asOf": "{{DAY:-40}}",
+        "receivedOffset": -40,
+        "expiryWarnings": [
+          {
+            "what": "miles",
+            "expiresOn": "{{DAY:45}}",
+            "amount": "500"
+          }
+        ],
+        "instruments": [
+          {
+            "kind": "free_night",
+            "expiresOn": "{{DAY:90}}"
+          }
+        ]
+      },
+      {
+        "id": "no-balance",
+        "program": "sn",
+        "state": "no_balance",
+        "reason": null,
+        "suffix": null,
+        "membership": null,
+        "balance": null,
+        "unit": null,
+        "asOf": "{{DAY:-5}}",
+        "receivedOffset": -5
+      },
+      {
+        "id": "failed",
+        "program": "su",
+        "state": "failed",
+        "errorCode": "refused",
+        "attempts": 1,
+        "receivedOffset": -6
+      },
+      {
+        "id": "retry",
+        "program": "su",
+        "state": "retry",
+        "errorCode": "timeout",
+        "attempts": 1,
+        "receivedOffset": -7
+      }
+    ],
+    "applyItem": "q-unique",
+    "expectAfterApply": {
+      "membership": "su1",
+      "balance": "25000",
+      "queueTotal": 2
+    },
+    "expectText": [
+      "Needs attention: 3",
+      "ZQ42C2 Surface Air · ••••1111 · 25000 miles · as of ",
+      "ZQ42C2 Surface Air · ••••2222 · 20500 miles · as of ",
+      "ZQ42C2 Surface Air · ••••1111 · 10100 miles · as of no date",
+      "Why: The balance changed by more than 50%",
+      "Why: More than one membership ends with this number",
+      "Why: The mail has no date",
+      "Apply",
+      "Not mine",
+      "Ignore",
+      "Apply to",
+      "Choose a membership",
+      "Reading mail is not set up",
+      "ANTHROPIC_API_KEY",
+      "Balance in last statement: yes",
+      "Balance in last statement: no",
+      "Balance in last statement: not read yet",
+      "Expires ",
+      "From mail: free night, expires ",
+      "Could not be read: 1",
+      "Not read yet"
+    ],
+    "expectAbsent": [
+      "Read stored mail now",
+      "Try failed mail again"
+    ]
+  }
+}

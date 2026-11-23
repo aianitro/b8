@@ -1,6 +1,6 @@
 // Loyalty (P8-42a) — household members, the program catalog with its aliases, memberships with a
 // derived current balance, append-only balance observations, instruments, and (P8-42c1) the loyalty
-// inbox. The twelve endpoints, stated once:
+// inbox, and (P8-42c2) reading it. The fourteen endpoints, stated once:
 //
 //   GET   /api/v1/loyalty                                 —                                → LoyaltyOverviewResponseSchema
 //   POST  /api/v1/loyalty/members                         LoyaltyMemberCreateRequestSchema → LoyaltyMemberResponseSchema (201)
@@ -14,6 +14,8 @@
 //   POST  /api/v1/loyalty/instruments                     LoyaltyInstrumentCreateRequestSchema → LoyaltyInstrumentResponseSchema (201)
 //   PATCH /api/v1/loyalty/instruments/[id]                LoyaltyInstrumentPatchRequestSchema → LoyaltyInstrumentResponseSchema
 //   POST  /api/v1/loyalty/inbox/poll                      — (no body)                      → LoyaltyInboxPollResponseSchema (200 for every outcome)
+//   POST  /api/v1/loyalty/inbox/read                      LoyaltyInboxReadRequestSchema (body optional) → LoyaltyInboxReadResponseSchema (200 for every outcome)
+//   POST  /api/v1/loyalty/inbox/readings/[id]             LoyaltyInboxResolveRequestSchema → LoyaltyInboxResolveResponseSchema
 //
 // There is no route that updates or deletes an observation, and none that deletes a member, a
 // program, a membership or an instrument. An edited balance is a POST of a new observation.
@@ -272,6 +274,117 @@ export const LOYALTY_INBOX_SHARED_SUFFIXES = [
   'co.za',
 ] as const;
 
+/**
+ * READING THE INBOX (P8-42c2). Each stored message is read once by Claude as a PROPOSAL; a
+ * deterministic clean pass and a fixed rule order decide whether it becomes a balance (an appended
+ * `email` observation), is queued for one tap on /travel, or is settled without one. Tables in
+ * migrations/1793100000000_loyalty_inbox_read.sql. Nothing here carries a subject, a body, the text
+ * sent to the model, the model's output, a key, a full member number or an address.
+ *
+ * The constants, in the order SPEC.md lists them (T42c2-U1 asserts that order):
+ *   MAX_ATTEMPTS       — attempts per message, each counted before the model call.
+ *   MAX_PER_RUN        — messages read per run; the rest stay unread for the next run.
+ *   RETENTION_DAYS     — reads rows received strictly before CURRENT_DATE minus this are purged
+ *                        (exactly this many days old is kept). Longer than the raw mail's on purpose.
+ *   JUMP_PERCENT       — a reading whose absolute change times 100 is STRICTLY greater than this
+ *                        times the stored balance is queued; exactly this percentage applies.
+ *   SUFFIX_MIN/MAX     — a kept suffix is 3 to 4 letters or digits; fewer means "no suffix".
+ *   QUEUE_LIMIT        — items listed in `needsAttention`; the total is reported separately.
+ *   MAX_CHARS          — characters of message text sent to the model.
+ *   TIMEOUT_SECONDS    — per-call timeout (the optional env var of the same name overrides it with
+ *                        a whole number from 1 to 600; anything else means this default).
+ *   RUN_BUDGET_SECONDS — a run that has used this long starts no new message.
+ *   STOP_AFTER         — consecutive timeout or api_error results that stop a run.
+ *   EXPIRY_MAX         — expiry warnings kept per message.
+ *   INSTRUMENT_MAX     — instruments kept per message.
+ */
+export const LOYALTY_READ_MAX_ATTEMPTS = 3;
+export const LOYALTY_READ_MAX_PER_RUN = 25;
+export const LOYALTY_READ_RETENTION_DAYS = 400;
+export const LOYALTY_READ_JUMP_PERCENT = 50;
+export const LOYALTY_READ_SUFFIX_MIN = 3;
+export const LOYALTY_READ_SUFFIX_MAX = 4;
+export const LOYALTY_READ_QUEUE_LIMIT = 50;
+export const LOYALTY_READ_MAX_CHARS = 20000;
+export const LOYALTY_READ_TIMEOUT_SECONDS = 60;
+export const LOYALTY_READ_RUN_BUDGET_SECONDS = 300;
+export const LOYALTY_READ_STOP_AFTER = 3;
+export const LOYALTY_READ_EXPIRY_MAX = 5;
+export const LOYALTY_READ_INSTRUMENT_MAX = 10;
+
+/**
+ * The state of one attempted message. Equals `loyalty_inbox_reads_state_check`.
+ *   retry, failed   — not read yet (a classified failure; `failed` is terminal until retryFailed).
+ *   pending         — queued for a person, with a reason.
+ *   applied         — every rule held; one `email` observation appended.
+ *   applied_by_hand — a person applied the queued item; one `email` observation appended.
+ *   stale           — the as-of was not strictly newer than the current reading's; nothing appended.
+ *   no_balance      — the reading had no usable balance; nothing appended, never queued.
+ *   not_mine_known  — an unmatched suffix already on the not-mine list; discarded, never queued.
+ *   not_mine, ignored — a person resolved the queued item without applying it.
+ */
+export const LOYALTY_READ_STATES = [
+  'retry',
+  'failed',
+  'pending',
+  'applied',
+  'applied_by_hand',
+  'stale',
+  'no_balance',
+  'not_mine_known',
+  'not_mine',
+  'ignored',
+] as const;
+/** Why a reading was queued: the first rule of the decision order that fired. Equals `loyalty_inbox_reads_reason_check`. */
+export const LOYALTY_READ_REASONS = [
+  'no_suffix',
+  'unmatched_suffix',
+  'ambiguous_suffix',
+  'program_mismatch',
+  'unit_mismatch',
+  'no_as_of',
+  'as_of_future',
+  'no_baseline',
+  'implausible_jump',
+] as const;
+/**
+ * Per-message failure codes. Equals `loyalty_inbox_reads_last_error_code_check`. `refused` and
+ * `empty_message` are terminal at once; the other four retry until the third attempt. A thrown
+ * reader is `api_error`; a call cut off by its bound is `timeout`.
+ */
+export const LOYALTY_READ_ERROR_CODES = [
+  'rate_limited',
+  'timeout',
+  'api_error',
+  'refused',
+  'bad_output',
+  'empty_message',
+] as const;
+/**
+ * Per-run failure codes. Equals `loyalty_inbox_read_state_last_error_code_check`. NOT
+ * `LoyaltyErrorCode`: a failed run is HTTP 200 with outcome `error`, never an error envelope.
+ */
+export const LOYALTY_READ_RUN_ERROR_CODES = ['rate_limited', 'timeout', 'api_error', 'store_failed'] as const;
+/**
+ * What a read run did. `disabled` (no key) and `already_running` (another run holds the read lock)
+ * read nothing, counted nothing and wrote nothing, the state row included.
+ */
+export const LOYALTY_READ_OUTCOMES = ['ok', 'disabled', 'already_running', 'error'] as const;
+/** The three one-tap actions on a queued item. */
+export const LOYALTY_READ_ACTIONS = ['apply', 'not_mine', 'ignore'] as const;
+/** What an expiry warning is about: a unit (its amount is in that unit's scale), status, or something else (never an amount). */
+export const LOYALTY_READ_EXPIRY_KINDS = ['points', 'miles', 'nights', 'usd', 'status', 'other'] as const;
+/**
+ * The model's stated program name compared with the message's program (from its allowlisted sender
+ * domain) and that program's aliases. The name itself is never stored or emitted.
+ */
+export const LOYALTY_READ_PROGRAM_CHECKS = ['match', 'mismatch', 'not_stated'] as const;
+/**
+ * Whether a program's newest successfully read statement carried a balance. NEVER STORED. `not_read`
+ * is "nothing read yet" and is never rendered as `no`.
+ */
+export const LOYALTY_READ_COVERAGE = ['yes', 'no', 'not_read'] as const;
+
 export const LoyaltyUnitSchema = z.enum(LOYALTY_UNITS);
 export const LoyaltyProgramKindSchema = z.enum(LOYALTY_PROGRAM_KINDS);
 export const LoyaltyInstrumentKindSchema = z.enum(LOYALTY_INSTRUMENT_KINDS);
@@ -288,6 +401,15 @@ export const LoyaltyInboxPollOutcomeSchema = z.enum(LOYALTY_INBOX_POLL_OUTCOMES)
 export const LoyaltyInboxConfigProblemSchema = z.enum(LOYALTY_INBOX_CONFIG_PROBLEMS);
 export const LoyaltyInboxRequiredEnvSchema = z.enum(LOYALTY_INBOX_REQUIRED_ENV);
 export const LoyaltyInboxForwardingStateSchema = z.enum(LOYALTY_INBOX_FORWARDING_STATES);
+export const LoyaltyReadStateSchema = z.enum(LOYALTY_READ_STATES);
+export const LoyaltyReadReasonSchema = z.enum(LOYALTY_READ_REASONS);
+export const LoyaltyReadErrorCodeSchema = z.enum(LOYALTY_READ_ERROR_CODES);
+export const LoyaltyReadRunErrorCodeSchema = z.enum(LOYALTY_READ_RUN_ERROR_CODES);
+export const LoyaltyReadOutcomeSchema = z.enum(LOYALTY_READ_OUTCOMES);
+export const LoyaltyReadActionSchema = z.enum(LOYALTY_READ_ACTIONS);
+export const LoyaltyReadExpiryKindSchema = z.enum(LOYALTY_READ_EXPIRY_KINDS);
+export const LoyaltyReadProgramCheckSchema = z.enum(LOYALTY_READ_PROGRAM_CHECKS);
+export const LoyaltyReadCoverageSchema = z.enum(LOYALTY_READ_COVERAGE);
 
 /**
  * The codes these endpoints define. A SUBSET, NOT A CLOSURE: the boundary's `UNAUTHENTICATED` (401)
@@ -324,6 +446,9 @@ export const LoyaltyInboxForwardingStateSchema = z.enum(LOYALTY_INBOX_FORWARDING
  *   `ADDRESS_TAKEN`            409 — a member PATCH whose `forwardingAddresses` list contains an
  *                                    address another member already holds. Nothing changed. The
  *                                    message never echoes the address.
+ *   `ITEM_RESOLVED`            409 — a queue action on a reads row that is not `pending` (already
+ *                                    resolved, or never a queue item). Two simultaneous applies on
+ *                                    one item: one 200, one of these, exactly one observation.
  *
  * Linking an account that does not exist, or whose type is not `credit`, is `INVALID_INPUT` (400)
  * with nothing changed. The message never echoes a submitted benefit description.
@@ -340,6 +465,7 @@ export const LoyaltyErrorCodeSchema = z.enum([
   'CARD_ALREADY_LINKED',
   'DOMAIN_TAKEN',
   'ADDRESS_TAKEN',
+  'ITEM_RESOLVED',
 ]);
 
 // ─── Primitives ─────────────────────────────────────────────────────────────────────────────────
@@ -787,6 +913,38 @@ export const LoyaltyInstrumentPatchRequestSchema = z
     message: 'an instrument cannot expire or be used before it is issued',
     path: ['expiresOn'],
   });
+
+/**
+ * `POST /api/v1/loyalty/inbox/read` (P8-42c2). The body is optional; an absent body reads as `{}`.
+ * `retryFailed: true` first deletes every `failed` reads row whose message still has its bytes
+ * (returning it to unread with zero attempts); rows whose bytes are gone are left alone. Strict.
+ */
+export const LoyaltyInboxReadRequestSchema = z.strictObject({
+  retryFailed: z.boolean().optional(),
+});
+
+/**
+ * `POST /api/v1/loyalty/inbox/readings/[id]` (P8-42c2): one action on one queued item, only while it
+ * is `pending` (else 409 `ITEM_RESOLVED`).
+ *
+ *   apply    — `membershipId` is required when the item has no unique match and must be a
+ *              membership of the item's program (else 400 `INVALID_INPUT`); with a unique match it
+ *              may be omitted. Appends one `email` observation with the item's balance and unit,
+ *              dated by the item's as-of, or by its received date when it has none. An as-of more
+ *              than one day after CURRENT_DATE is 400. The item becomes `applied_by_hand` in the same
+ *              transaction.
+ *   not_mine — the item becomes `not_mine`; with a suffix, (program, suffix) is recorded and every
+ *              other pending `unmatched_suffix` item of that pair follows. No observation.
+ *   ignore   — the item becomes `ignored`. No observation, no record.
+ *
+ * Discriminated on `action` and strict per branch, so `membershipId` with `not_mine` or `ignore` is
+ * refused rather than silently dropped. Error messages never echo input.
+ */
+export const LoyaltyInboxResolveRequestSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('apply'), membershipId: LoyaltyIdSchema.optional() }),
+  z.strictObject({ action: z.literal('not_mine') }),
+  z.strictObject({ action: z.literal('ignore') }),
+]);
 
 // ─── Responses ──────────────────────────────────────────────────────────────────────────────────
 
@@ -1295,6 +1453,248 @@ export const LoyaltyInboxPollSchema = z
     { message: 'a poll that did not run has zero counts', path: ['outcome'] }
   );
 
+// ─── Reading the inbox (P8-42c2) ────────────────────────────────────────────────────────────────
+
+/**
+ * Canonical decimal text for a unit, as Postgres emits a reads or observations balance: whole units
+ * are digits with no leading zero and no decimal point, `usd` has exactly two decimals. Any other
+ * `what` (status, other) has no scale, so no text is canonical for it.
+ */
+const isCanonicalForUnit = (unit: string, text: string) =>
+  unit === 'usd'
+    ? LoyaltyUsdBalanceSchema.safeParse(text).success
+    : (LOYALTY_WHOLE_UNITS as readonly string[]).includes(unit) && LoyaltyWholeBalanceSchema.safeParse(text).success;
+
+const MASKED_SUFFIX = new RegExp(
+  `^${LOYALTY_MASK_BULLETS}[A-Z0-9]{${LOYALTY_READ_SUFFIX_MIN},${LOYALTY_READ_SUFFIX_MAX}}$`
+);
+
+/**
+ * A kept suffix as emitted: the existing masked form, four bullets then the 3 or 4 upper-case
+ * letters or digits stored in `loyalty_inbox_reads.suffix`. The only member-number fragment any
+ * payload of this step carries; bare bullets and anything longer are refused.
+ */
+export const LoyaltyReadMaskedSuffixSchema = LoyaltyMaskedMemberNumberSchema.refine(
+  (s) => MASKED_SUFFIX.test(s),
+  'expected four bullets and a 3 or 4 character suffix'
+);
+
+/**
+ * One expiry warning from mail, as stored and emitted. `amount` is null (none stated, or not a
+ * figure) or canonical decimal text in the scale of `what`; `status` and `other` never carry one.
+ */
+export const LoyaltyReadExpiryWarningSchema = z
+  .strictObject({
+    what: LoyaltyReadExpiryKindSchema,
+    expiresOn: calendarDate,
+    amount: z.string().nullable(),
+  })
+  .refine((w) => w.amount === null || isCanonicalForUnit(w.what, w.amount), {
+    message: 'an amount is canonical for its unit, and status or other carry none',
+    path: ['amount'],
+  });
+
+/** One instrument from mail, as stored and emitted. `expiresOn` null = the mail stated no expiry. */
+export const LoyaltyReadInstrumentSchema = z.strictObject({
+  kind: LoyaltyInstrumentKindSchema,
+  expiresOn: calendarDate.nullable(),
+});
+
+/** Reasons decided after the suffix rule: an item with one of these always has a suffix. */
+const SUFFIX_REQUIRED_REASONS: readonly string[] = [
+  'unmatched_suffix',
+  'ambiguous_suffix',
+  'unit_mismatch',
+  'no_as_of',
+  'as_of_future',
+  'no_baseline',
+  'implausible_jump',
+];
+
+/**
+ * One queued item (`pending` reads row).
+ *
+ *   maskedSuffix           — null exactly for `no_suffix` (and possibly `program_mismatch`).
+ *   balance, unit          — the proposal, canonical for the unit. Always present: a reading with no
+ *                            balance is `no_balance` and is never queued.
+ *   asOf                   — null = the mail gave no date (`no_as_of`; rendered `no date`).
+ *   receivedOn             — the message's received date; also the date an apply uses when asOf is null.
+ *   candidateMembershipIds — memberships of the item's program whose stored number ends with the
+ *                            suffix, computed in SQL at read time, ascending, no repeat; empty with
+ *                            no suffix. Ids only: the full number never enters the payload. May differ
+ *                            from what the reason recorded if memberships changed since the read.
+ */
+export const LoyaltyReadItemSchema = z
+  .strictObject({
+    id: LoyaltyIdSchema,
+    programId: LoyaltyIdSchema,
+    maskedSuffix: LoyaltyReadMaskedSuffixSchema.nullable(),
+    balance: z.string(),
+    unit: LoyaltyUnitSchema,
+    asOf: calendarDate.nullable(),
+    receivedOn: calendarDate,
+    reason: LoyaltyReadReasonSchema,
+    candidateMembershipIds: z.array(LoyaltyIdSchema),
+  })
+  .refine((i) => isCanonicalForUnit(i.unit, i.balance), {
+    message: 'the balance is not in the canonical form for its unit',
+    path: ['balance'],
+  })
+  .refine((i) => i.reason !== 'no_suffix' || i.maskedSuffix === null, {
+    message: 'no_suffix carries no suffix',
+    path: ['maskedSuffix'],
+  })
+  .refine((i) => !SUFFIX_REQUIRED_REASONS.includes(i.reason) || i.maskedSuffix !== null, {
+    message: 'this reason was decided on a suffix',
+    path: ['maskedSuffix'],
+  })
+  .refine((i) => i.reason !== 'no_as_of' || i.asOf === null, {
+    message: 'no_as_of carries no date',
+    path: ['asOf'],
+  })
+  .refine((i) => i.maskedSuffix !== null || i.candidateMembershipIds.length === 0, {
+    message: 'with no suffix there are no candidates',
+    path: ['candidateMembershipIds'],
+  })
+  .refine(
+    (i) => i.candidateMembershipIds.every((id, k, a) => k === 0 || a[k - 1] < id),
+    { message: 'candidates are ascending with no repeat', path: ['candidateMembershipIds'] }
+  );
+
+/** Coverage of one program that has a sender domain (see `LOYALTY_READ_COVERAGE`). */
+export const LoyaltyReadCoverageEntrySchema = z.strictObject({
+  programId: LoyaltyIdSchema,
+  balanceInLastStatement: LoyaltyReadCoverageSchema,
+});
+
+/**
+ * The extracted fields shown on one membership line: the newest reads row (received date, then id)
+ * in state `applied`, `applied_by_hand`, `stale` or `no_balance` for that membership whose arrays are
+ * not both empty. Never a `pending` row.
+ */
+export const LoyaltyReadFromMailSchema = z
+  .strictObject({
+    membershipId: LoyaltyIdSchema,
+    receivedOn: calendarDate,
+    expiryWarnings: z.array(LoyaltyReadExpiryWarningSchema).max(LOYALTY_READ_EXPIRY_MAX),
+    instruments: z.array(LoyaltyReadInstrumentSchema).max(LOYALTY_READ_INSTRUMENT_MAX),
+  })
+  .refine((f) => f.expiryWarnings.length > 0 || f.instruments.length > 0, {
+    message: 'a row with nothing extracted is not listed',
+    path: ['expiryWarnings'],
+  });
+
+/** The last read run, from `loyalty_inbox_read_state`. `errorCode` set exactly when `outcome` is `error`. */
+export const LoyaltyReadLastReadSchema = z
+  .strictObject({
+    on: calendarDate,
+    outcome: z.enum(['ok', 'error']),
+    errorCode: LoyaltyReadRunErrorCodeSchema.nullable(),
+  })
+  .refine((r) => (r.errorCode !== null) === (r.outcome === 'error'), {
+    message: 'errorCode is set exactly when the outcome is error',
+    path: ['errorCode'],
+  });
+
+/**
+ * THE OVERVIEW'S READING PANEL (`inboxRead`, P8-42c2). Every count is computed in Postgres.
+ *
+ *   readable            — whether `ANTHROPIC_API_KEY` is set (trimmed, non-blank). Never the key.
+ *   lastRead            — null = never read ("Not read yet").
+ *   waiting             — retained stored messages with bytes that are unread or in `retry`.
+ *   failed              — retained reads rows in state `failed`.
+ *   needsAttentionTotal — every `pending` row.
+ *   needsAttention      — at most `LOYALTY_READ_QUEUE_LIMIT` of them, newest received date first,
+ *                         then id descending (ordered here, so an unordered list is refused).
+ *   coverage            — one entry per program that has a sender domain (the producer's duty: the
+ *                         same programs as `inbox.senderDomains`; not cross-checked here).
+ *   fromMail            — at most one entry per membership.
+ *
+ * Strict at every depth: no key can hold a subject, a body, the text sent to the model, a URL, an
+ * address, a full member number, a key or the model's output. Identical for every viewer.
+ */
+export const LoyaltyInboxReadPanelSchema = z
+  .strictObject({
+    readable: z.boolean(),
+    lastRead: LoyaltyReadLastReadSchema.nullable(),
+    waiting: InboxCountSchema,
+    failed: InboxCountSchema,
+    needsAttentionTotal: InboxCountSchema,
+    needsAttention: z.array(LoyaltyReadItemSchema).max(LOYALTY_READ_QUEUE_LIMIT),
+    coverage: z.array(LoyaltyReadCoverageEntrySchema),
+    fromMail: z.array(LoyaltyReadFromMailSchema),
+  })
+  .refine((p) => p.needsAttention.length <= p.needsAttentionTotal, {
+    message: 'the listed items exceed the total',
+    path: ['needsAttentionTotal'],
+  })
+  .refine(
+    (p) =>
+      p.needsAttention.every((it, k, a) => {
+        if (k === 0) return true;
+        const prev = a[k - 1];
+        return prev.receivedOn > it.receivedOn || (prev.receivedOn === it.receivedOn && prev.id > it.id);
+      }),
+    { message: 'items are newest received first, then id descending', path: ['needsAttention'] }
+  )
+  .refine((p) => new Set(p.coverage.map((c) => c.programId)).size === p.coverage.length, {
+    message: 'a program appears twice in coverage',
+    path: ['coverage'],
+  })
+  .refine((p) => new Set(p.fromMail.map((f) => f.membershipId)).size === p.fromMail.length, {
+    message: 'a membership appears twice in fromMail',
+    path: ['fromMail'],
+  });
+
+/**
+ * `POST /api/v1/loyalty/inbox/read` (P8-42c2). HTTP 200 for all four outcomes.
+ *
+ *   read      — messages read in this run: `applied + queued + stale + noBalance + discarded`
+ *               (refined below).
+ *   applied   — auto-applied (`applied`).        queued    — newly `pending`.
+ *   stale     — `stale`.                          noBalance — `no_balance`.
+ *   discarded — `not_mine_known`.
+ *   failed    — messages whose attempt failed in this run (left `retry` or `failed`).
+ *   remaining — messages still unread after the run (unread or `retry`, with bytes).
+ *   errorCode — set exactly when `outcome` is `error`.
+ *
+ * `disabled` and `already_running` ran nothing, so every count is zero. Strict: no subject, body,
+ * text, raw byte, balance, suffix or library text.
+ */
+export const LoyaltyInboxReadRunSchema = z
+  .strictObject({
+    outcome: LoyaltyReadOutcomeSchema,
+    read: InboxCountSchema,
+    applied: InboxCountSchema,
+    queued: InboxCountSchema,
+    stale: InboxCountSchema,
+    noBalance: InboxCountSchema,
+    discarded: InboxCountSchema,
+    failed: InboxCountSchema,
+    remaining: InboxCountSchema,
+    errorCode: LoyaltyReadRunErrorCodeSchema.nullable(),
+  })
+  .refine((r) => r.read === r.applied + r.queued + r.stale + r.noBalance + r.discarded, {
+    message: 'read is the sum of applied, queued, stale, noBalance and discarded',
+    path: ['read'],
+  })
+  .refine((r) => (r.errorCode !== null) === (r.outcome === 'error'), {
+    message: 'errorCode is set exactly when the outcome is error',
+    path: ['errorCode'],
+  })
+  .refine(
+    (r) =>
+      (r.outcome !== 'disabled' && r.outcome !== 'already_running') ||
+      [r.read, r.applied, r.queued, r.stale, r.noBalance, r.discarded, r.failed, r.remaining].every((n) => n === 0),
+    { message: 'a run that did not run has zero counts', path: ['outcome'] }
+  );
+
+/** `POST /api/v1/loyalty/inbox/readings/[id]` (P8-42c2): the item and the state the action set. */
+export const LoyaltyInboxResolveSchema = z.strictObject({
+  id: LoyaltyIdSchema,
+  state: LoyaltyReadStateSchema.extract(['applied_by_hand', 'not_mine', 'ignored']),
+});
+
 /**
  * `GET /api/v1/loyalty` — the whole picture, masked numbers only.
  *
@@ -1307,6 +1707,8 @@ export const LoyaltyInboxPollSchema = z
  *                 choices for "Link a card". Never an account of another type.
  *   inbox       — the loyalty inbox panel (P8-42c1, `LoyaltyInboxSchema`). Required. Identical for
  *                 every viewer; it reads no ledger row.
+ *   inboxRead   — the reading panel (P8-42c2, `LoyaltyInboxReadPanelSchema`). Required. Identical
+ *                 for every viewer; it reads no ledger row.
  */
 export const LoyaltyOverviewSchema = z.strictObject({
   members: z.array(LoyaltyMemberSchema),
@@ -1315,6 +1717,7 @@ export const LoyaltyOverviewSchema = z.strictObject({
   instruments: z.array(LoyaltyInstrumentSchema),
   cardAccounts: z.array(LoyaltyCardAccountSchema),
   inbox: LoyaltyInboxSchema,
+  inboxRead: LoyaltyInboxReadPanelSchema,
 });
 
 /**
@@ -1340,6 +1743,10 @@ export const LoyaltyMemberNumberResponseSchema = apiResponseSchema(LoyaltyMember
 export const LoyaltyInstrumentResponseSchema = apiResponseSchema(LoyaltyInstrumentSchema);
 /** `POST …/inbox/poll`. */
 export const LoyaltyInboxPollResponseSchema = apiResponseSchema(LoyaltyInboxPollSchema);
+/** `POST …/inbox/read`. */
+export const LoyaltyInboxReadResponseSchema = apiResponseSchema(LoyaltyInboxReadRunSchema);
+/** `POST …/inbox/readings/[id]`. */
+export const LoyaltyInboxResolveResponseSchema = apiResponseSchema(LoyaltyInboxResolveSchema);
 
 export type LoyaltyUnit = z.infer<typeof LoyaltyUnitSchema>;
 export type LoyaltyProgramKind = z.infer<typeof LoyaltyProgramKindSchema>;
@@ -1391,3 +1798,23 @@ export type LoyaltyInboxForwarding = z.infer<typeof LoyaltyInboxForwardingSchema
 export type LoyaltyInboxUnknownSender = z.infer<typeof LoyaltyInboxUnknownSenderSchema>;
 export type LoyaltyInbox = z.infer<typeof LoyaltyInboxSchema>;
 export type LoyaltyInboxPoll = z.infer<typeof LoyaltyInboxPollSchema>;
+export type LoyaltyReadState = z.infer<typeof LoyaltyReadStateSchema>;
+export type LoyaltyReadReason = z.infer<typeof LoyaltyReadReasonSchema>;
+export type LoyaltyReadErrorCode = z.infer<typeof LoyaltyReadErrorCodeSchema>;
+export type LoyaltyReadRunErrorCode = z.infer<typeof LoyaltyReadRunErrorCodeSchema>;
+export type LoyaltyReadOutcome = z.infer<typeof LoyaltyReadOutcomeSchema>;
+export type LoyaltyReadAction = z.infer<typeof LoyaltyReadActionSchema>;
+export type LoyaltyReadExpiryKind = z.infer<typeof LoyaltyReadExpiryKindSchema>;
+export type LoyaltyReadProgramCheck = z.infer<typeof LoyaltyReadProgramCheckSchema>;
+export type LoyaltyReadCoverage = z.infer<typeof LoyaltyReadCoverageSchema>;
+export type LoyaltyReadExpiryWarning = z.infer<typeof LoyaltyReadExpiryWarningSchema>;
+export type LoyaltyReadInstrument = z.infer<typeof LoyaltyReadInstrumentSchema>;
+export type LoyaltyReadItem = z.infer<typeof LoyaltyReadItemSchema>;
+export type LoyaltyReadCoverageEntry = z.infer<typeof LoyaltyReadCoverageEntrySchema>;
+export type LoyaltyReadFromMail = z.infer<typeof LoyaltyReadFromMailSchema>;
+export type LoyaltyReadLastRead = z.infer<typeof LoyaltyReadLastReadSchema>;
+export type LoyaltyInboxReadPanel = z.infer<typeof LoyaltyInboxReadPanelSchema>;
+export type LoyaltyInboxReadRequest = z.infer<typeof LoyaltyInboxReadRequestSchema>;
+export type LoyaltyInboxReadRun = z.infer<typeof LoyaltyInboxReadRunSchema>;
+export type LoyaltyInboxResolveRequest = z.infer<typeof LoyaltyInboxResolveRequestSchema>;
+export type LoyaltyInboxResolve = z.infer<typeof LoyaltyInboxResolveSchema>;

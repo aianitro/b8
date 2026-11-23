@@ -1,0 +1,9 @@
+Message-ID: <zq42c2-r02@zq42c2-brand.test>
+MIME-Version: 1.0
+Subject: ZQ42C2-SUBJECT-CANARY R02
+Date: Fri, 20 Nov 2026 09:30:00 +0000
+From: ZQ42C2 Brand <statements@zq42c2-brand.test>
+To: zq42c2-anna@example.com
+Content-Type: text/html; charset=utf-8
+
+<html><head><style>.x{color:red} /* ZQ42C2-SCRIPT-CANARY */</style><script>var t='ZQ42C2-SCRIPT-CANARY';</script></head><body><p>ZQ42C2-HTML-VISIBLE-CANARY R02</p><p><a href="https://track.zq42c2-brand.test/h?t=ZQ42C2-URL-TOKEN-H">View your account</a></p></body></html>
