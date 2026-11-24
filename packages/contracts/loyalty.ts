@@ -1602,7 +1602,8 @@ export const LoyaltyReadLastReadSchema = z
  *   readable            — whether `ANTHROPIC_API_KEY` is set (trimmed, non-blank). Never the key.
  *   lastRead            — null = never read ("Not read yet").
  *   waiting             — retained stored messages with bytes that are unread or in `retry`.
- *   failed              — retained reads rows in state `failed`.
+ *   failed              — retained reads rows in state `failed`, plus `retry` rows whose stored
+ *                         message bytes are gone (message row deleted or `raw_mail` null).
  *   needsAttentionTotal — every `pending` row.
  *   needsAttention      — at most `LOYALTY_READ_QUEUE_LIMIT` of them, newest received date first,
  *                         then id descending (ordered here, so an unordered list is refused).

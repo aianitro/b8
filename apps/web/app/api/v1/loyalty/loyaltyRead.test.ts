@@ -919,7 +919,7 @@ describe('reading the loyalty inbox (P8-42c2)', () => {
     panel = await panelOf();
     const cov = new Map(panel.coverage.map((c) => [c.programId, c.balanceInLastStatement]));
     expect([cov.get(air), cov.get(stays), cov.get(cash), cov.get(w.program.get('other') as number)]).toEqual(['yes', 'no', 'not_read', 'not_read']);
-    expect(panel.failed).toBe(1);
+    expect(panel.failed).toBe(2);
     // A zero balance is present in an item, never dropped.
     expect(panel.needsAttention.map((i) => i.balance)).toEqual(['0']);
     // waiting: stored with bytes and unread or in retry; a message without bytes is not counted.

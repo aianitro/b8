@@ -25,7 +25,8 @@
 //   5. Failure handling. `refused` and `empty_message` are terminal at once; the other codes retry
 //      until the third attempt. A rate limit stops the run at once; three consecutive timeouts or API
 //      errors stop it; a run past its time budget starts no new message.
-//   6. The state row (`ok`, or `error` with a code), then the retention purge.
+//   6. The remaining count, the retention purge, and LAST the state row (`ok`, or `error` with the
+//      first failure's code), so nothing after it can contradict what was stored (P8-42c4, D3).
 //
 // ─── LOGS CARRY COUNTS AND CODES ONLY ─────────────────────────────────────────────────────────
 //
@@ -110,6 +111,23 @@ async function releaseLock(client: PoolClient): Promise<void> {
   } catch {
     // Destroyed rather than returned to the pool still holding the lock; closing its session frees it.
     client.release(true);
+  }
+}
+
+/**
+ * Rolls back a failed transaction on `client`, and never lets a failed ROLLBACK decide anything
+ * (P8-42c4, D2). The statement or refusal that caused the rollback is what the caller answers with;
+ * a ROLLBACK that itself fails (usually a dead connection) is logged once, in a fixed shape, and
+ * swallowed. It used to be an empty arrow, which is the same swallow made silent. The line carries
+ * a code only: the error object, its text and the SQL are never logged, because a driver's error
+ * text can quote the statement and its values. The caller still releases the client exactly as
+ * before.
+ */
+async function rollback(client: PoolClient): Promise<void> {
+  try {
+    await client.query('ROLLBACK');
+  } catch {
+    log.warn('loyalty read rollback failed', { code: 'store_failed' });
   }
 }
 
@@ -267,7 +285,9 @@ async function decideAndStore(key: string, programId: number, reading: CleanRead
     await client.query('COMMIT');
     return decision;
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    // The original error is re-thrown whatever the rollback did: the run records it as this
+    // message's `store_failed`, and a failed rollback must not replace it.
+    await rollback(client);
     throw err;
   } finally {
     client.release();
@@ -329,7 +349,16 @@ async function readAll(reader: MailReader, env: Env, retryFailed: boolean, count
       let code: LoyaltyReadErrorCode | null = null;
       try {
         const raw = await bytesOf(c.messageId);
-        const input = raw === null ? null : await textForReader(raw, LOYALTY_READ_MAX_CHARS, c.origin).catch(() => null);
+        // Bytes that vanished between selection and now (42c1's retention deleted the row or nulled
+        // its `raw_mail`) are NOT an empty message (P8-42c4, D5): the fate of a message nobody can
+        // read any more is not a decision about its content. The reads row stays exactly as
+        // `countAttempt` just wrote it (`retry`/`api_error`, or `failed` on the last attempt), which
+        // the panel counts as failed because its bytes are gone (D4), and no undo write is made that
+        // could itself fail. The run counts it as neither read nor failed, sets no code and leaves
+        // the consecutive-failure streak alone. A `bytesOf` that THROWS is the database failing, not
+        // the bytes missing, and still lands in the catch below as a store failure.
+        if (raw === null) continue;
+        const input = await textForReader(raw, LOYALTY_READ_MAX_CHARS, c.origin).catch(() => null);
         if (input === null || input.text === '') {
           code = 'empty_message';
         } else {
@@ -403,6 +432,15 @@ export async function readStoredMail(request: LoyaltyInboxReadRequest = {}, env:
   const counts: Counts = { read: 0, applied: 0, queued: 0, stale: 0, noBalance: 0, discarded: 0, failed: 0, remaining: 0 };
   let errorCode: LoyaltyReadRunErrorCode | null = null;
   try {
+    // THE STORED LAST READ IS WRITTEN LAST (P8-42c4, D3). Each step below is attempted whatever the
+    // earlier ones did, in this order: the read, the remaining count, the purge, then the state
+    // write. The final code is the FIRST failure in that order (a read run code wins; else
+    // `store_failed` from the count or the purge), and the state row is written from that same
+    // code, so whenever it can be written it equals the answer. It used to be written before the
+    // purge, so a purge that threw answered `error` beside a stored `ok`; and a failed count used
+    // to skip both the state write and the purge. When the state write itself fails, the row is
+    // left exactly as it was (one atomic UPDATE under CHECKs, never half written) and the answer
+    // is `error` with the final code, or `store_failed` when there was none.
     try {
       errorCode = await readAll(createMailReader(env), env, request.retryFailed === true, counts);
     } catch {
@@ -410,8 +448,16 @@ export async function readStoredMail(request: LoyaltyInboxReadRequest = {}, env:
     }
     try {
       counts.remaining = await remainingCount();
-      await recordState(errorCode);
+    } catch {
+      errorCode = errorCode ?? 'store_failed';
+    }
+    try {
       await purgeExpiredReads();
+    } catch {
+      errorCode = errorCode ?? 'store_failed';
+    }
+    try {
+      await recordState(errorCode);
     } catch {
       errorCode = errorCode ?? 'store_failed';
     }
@@ -546,7 +592,9 @@ export async function resolveReading(id: number, body: LoyaltyInboxResolveReques
     log.info('loyalty read item resolved', { state });
     return { ok: true, value: { id, state } };
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    // A refusal is still answered as that refusal, and any other error still rejects as itself,
+    // even when the rollback after it fails.
+    await rollback(client);
     if (err instanceof Refusal) return err.failure;
     throw err;
   } finally {
@@ -561,55 +609,99 @@ export async function resolveReading(id: number, body: LoyaltyInboxResolveReques
  * dates are `::text`; the suffix leaves the database already masked. `candidateMembershipIds` applies
  * the suffix rule's normalisation and ending test to the stored numbers INSIDE the query, which
  * selects only ids, so no member number ever reaches this process from here.
+ *
+ * ONE SNAPSHOT (P8-42c4, D6). Called with the pool, whether defaulted or passed explicitly as
+ * `loadOverview` does, the five statements run on ONE checked-out connection inside ONE
+ * `READ ONLY` transaction at `REPEATABLE READ`, which is then committed (or rolled back) and the
+ * client released on every path. They used to run in parallel on the pool as separate statements,
+ * so a read run finishing between them could make the list longer than its own total. Under
+ * `REPEATABLE READ` the snapshot is taken at the first statement and every later one sees exactly
+ * it, so `needsAttention.length <= needsAttentionTotal` holds whatever commits meanwhile. The
+ * isolation and the read-only mode are set on the `BEGIN` itself, because Postgres refuses a
+ * `SET TRANSACTION` once a statement has run.
+ *
+ * Any other handle is a client a caller already checked out, so its transaction is the caller's:
+ * the five run on it, in the same order, and no second `BEGIN` is sent on top of whatever the caller
+ * opened (a nested `BEGIN` is only a warning, and the `COMMIT` after it would end the caller's work
+ * early). No caller passes one today.
  */
 export async function loadReadOverview(q: Queryable = db, env: Env = process.env): Promise<LoyaltyInboxReadPanel> {
-  const [state, counts, items, coverage, fromMail] = await Promise.all([
-    q.query<{ on: string | null; outcome: 'ok' | 'error' | null; errorCode: LoyaltyReadRunErrorCode | null }>(
-      `SELECT last_read_on::text AS "on", last_outcome AS outcome, last_error_code AS "errorCode" FROM loyalty_inbox_read_state WHERE id = 1`
-    ),
-    q.query<{ waiting: number; failed: number; pending: number }>(
-      `SELECT (SELECT count(*) FROM loyalty_inbox_messages m
-                WHERE m.raw_mail IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM loyalty_inbox_reads r WHERE r.dedupe_key = m.dedupe_key AND r.state <> 'retry'))::int AS waiting,
-              (SELECT count(*) FROM loyalty_inbox_reads WHERE state = 'failed')::int AS failed,
-              (SELECT count(*) FROM loyalty_inbox_reads WHERE state = 'pending')::int AS pending`
-    ),
-    q.query<LoyaltyReadItem>(
-      `SELECT r.id, r.program_id AS "programId",
-              CASE WHEN r.suffix IS NULL THEN NULL ELSE $2 || r.suffix END AS "maskedSuffix",
-              r.balance::text AS balance, r.unit, r.as_of::text AS "asOf", r.received_on::text AS "receivedOn", r.reason,
-              CASE WHEN r.suffix IS NULL THEN '{}'::int[] ELSE ARRAY(
-                SELECT ms.id FROM loyalty_memberships ms
-                 WHERE ms.program_id = r.program_id AND ms.member_number IS NOT NULL
-                   AND right(${NUMBER_KEY_SQL('ms.member_number')}, length(r.suffix)) = r.suffix
-                 ORDER BY ms.id) END AS "candidateMembershipIds"
-         FROM loyalty_inbox_reads r
-        WHERE r.state = 'pending'
-        ORDER BY r.received_on DESC, r.id DESC
-        LIMIT $1`,
-      [LOYALTY_READ_QUEUE_LIMIT, LOYALTY_MASK_BULLETS]
-    ),
-    q.query<{ programId: number; balanceInLastStatement: LoyaltyReadCoverage }>(
-      `SELECT p.program_id AS "programId",
-              CASE WHEN x.id IS NULL THEN 'not_read' WHEN x.balance IS NULL THEN 'no' ELSE 'yes' END AS "balanceInLastStatement"
-         FROM (SELECT DISTINCT program_id FROM loyalty_sender_domains) p
-         LEFT JOIN LATERAL (
-           SELECT r.id, r.balance FROM loyalty_inbox_reads r
-            WHERE r.program_id = p.program_id AND r.state NOT IN ('retry', 'failed')
-            ORDER BY r.received_on DESC, r.id DESC LIMIT 1) x ON true
-        ORDER BY p.program_id`
-    ),
-    q.query<LoyaltyReadFromMail>(
-      `SELECT DISTINCT ON (r.membership_id)
-              r.membership_id AS "membershipId", r.received_on::text AS "receivedOn",
-              r.expiry_warnings AS "expiryWarnings", r.instruments
-         FROM loyalty_inbox_reads r
-        WHERE r.membership_id IS NOT NULL
-          AND r.state IN ('applied', 'applied_by_hand', 'stale', 'no_balance')
-          AND (r.expiry_warnings <> '[]'::jsonb OR r.instruments <> '[]'::jsonb)
-        ORDER BY r.membership_id, r.received_on DESC, r.id DESC`
-    ),
-  ]);
+  if (q !== db) return readPanel(q, env);
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const panel = await readPanel(client, env);
+    await client.query('COMMIT');
+    return panel;
+  } catch (err) {
+    await rollback(client);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The panel's five statements on one handle, one after another. Sequential rather than
+ * `Promise.all`: on a single client they would queue anyway, and awaiting each keeps a failing
+ * statement from leaving others in flight behind the rollback.
+ */
+async function readPanel(q: Queryable, env: Env): Promise<LoyaltyInboxReadPanel> {
+  const state = await q.query<{ on: string | null; outcome: 'ok' | 'error' | null; errorCode: LoyaltyReadRunErrorCode | null }>(
+    `SELECT last_read_on::text AS "on", last_outcome AS outcome, last_error_code AS "errorCode" FROM loyalty_inbox_read_state WHERE id = 1`
+  );
+  // `failed` counts the `failed` rows PLUS the `retry` rows whose bytes are gone (P8-42c4, D4): no
+  // stored message with that key still has `raw_mail`, because 42c1's retention deleted the row or
+  // nulled the column. Such a row can never be read again and used to be counted nowhere. `NOT
+  // EXISTS`, not a JOIN (two messages sharing a key would count one row twice) and not `NOT IN` (a
+  // null would empty the set). A `retry` row whose bytes are present stays in `waiting` only, so no
+  // message counts in both. Read-only on purpose: nothing is closed, so it holds with no API key
+  // and for bytes that go after the last run.
+  const counts = await q.query<{ waiting: number; failed: number; pending: number }>(
+    `SELECT (SELECT count(*) FROM loyalty_inbox_messages m
+              WHERE m.raw_mail IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM loyalty_inbox_reads r WHERE r.dedupe_key = m.dedupe_key AND r.state <> 'retry'))::int AS waiting,
+            (SELECT count(*) FROM loyalty_inbox_reads r
+              WHERE r.state = 'failed'
+                 OR (r.state = 'retry'
+                     AND NOT EXISTS (SELECT 1 FROM loyalty_inbox_messages m WHERE m.dedupe_key = r.dedupe_key AND m.raw_mail IS NOT NULL)))::int AS failed,
+            (SELECT count(*) FROM loyalty_inbox_reads WHERE state = 'pending')::int AS pending`
+  );
+  const items = await q.query<LoyaltyReadItem>(
+    `SELECT r.id, r.program_id AS "programId",
+            CASE WHEN r.suffix IS NULL THEN NULL ELSE $2 || r.suffix END AS "maskedSuffix",
+            r.balance::text AS balance, r.unit, r.as_of::text AS "asOf", r.received_on::text AS "receivedOn", r.reason,
+            CASE WHEN r.suffix IS NULL THEN '{}'::int[] ELSE ARRAY(
+              SELECT ms.id FROM loyalty_memberships ms
+               WHERE ms.program_id = r.program_id AND ms.member_number IS NOT NULL
+                 AND right(${NUMBER_KEY_SQL('ms.member_number')}, length(r.suffix)) = r.suffix
+               ORDER BY ms.id) END AS "candidateMembershipIds"
+       FROM loyalty_inbox_reads r
+      WHERE r.state = 'pending'
+      ORDER BY r.received_on DESC, r.id DESC
+      LIMIT $1`,
+    [LOYALTY_READ_QUEUE_LIMIT, LOYALTY_MASK_BULLETS]
+  );
+  const coverage = await q.query<{ programId: number; balanceInLastStatement: LoyaltyReadCoverage }>(
+    `SELECT p.program_id AS "programId",
+            CASE WHEN x.id IS NULL THEN 'not_read' WHEN x.balance IS NULL THEN 'no' ELSE 'yes' END AS "balanceInLastStatement"
+       FROM (SELECT DISTINCT program_id FROM loyalty_sender_domains) p
+       LEFT JOIN LATERAL (
+         SELECT r.id, r.balance FROM loyalty_inbox_reads r
+          WHERE r.program_id = p.program_id AND r.state NOT IN ('retry', 'failed')
+          ORDER BY r.received_on DESC, r.id DESC LIMIT 1) x ON true
+      ORDER BY p.program_id`
+  );
+  const fromMail = await q.query<LoyaltyReadFromMail>(
+    `SELECT DISTINCT ON (r.membership_id)
+            r.membership_id AS "membershipId", r.received_on::text AS "receivedOn",
+            r.expiry_warnings AS "expiryWarnings", r.instruments
+       FROM loyalty_inbox_reads r
+      WHERE r.membership_id IS NOT NULL
+        AND r.state IN ('applied', 'applied_by_hand', 'stale', 'no_balance')
+        AND (r.expiry_warnings <> '[]'::jsonb OR r.instruments <> '[]'::jsonb)
+      ORDER BY r.membership_id, r.received_on DESC, r.id DESC`
+  );
   const s = state.rows[0];
   // A state row whose outcome is null has never been read; the CHECKs keep the date null with it.
   const lastRead = s && s.on !== null && s.outcome !== null ? { on: s.on, outcome: s.outcome, errorCode: s.errorCode } : null;
