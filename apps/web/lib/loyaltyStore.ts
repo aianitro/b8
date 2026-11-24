@@ -65,6 +65,15 @@
 // panel is `loyaltyInbox.ts`'s: it counts stored mail by its bytes, which only those two files name.
 // An observation a reading appends has source `email` and is written there, beside its reads row in
 // one transaction; `addObservation` below still writes `typed` only.
+//
+// ─── A BALANCE FROM A SCREENSHOT (P8-42d) ──────────────────────────────────────────────────────
+//
+// `addScreenshotObservation` appends a row with source `screenshot`, the HANDLER's choice: the confirm
+// request has no `source` key at all, so no client picks provenance. It shares one INSERT with the
+// typed path (`appendObservation`), so the two can differ only in the source they pass. Nothing about
+// the screenshot itself reaches this file; it never sees the image, only the three confirmed values.
+// `screenshotTargetOf` is the second read that touches the full member number: it hands the stored
+// number to the read route's comparison (`compareScreenshot`) and nothing emits it.
 
 import type { PoolClient, QueryResult, QueryResultRow } from 'pg';
 import db from './db';
@@ -109,6 +118,7 @@ import type {
   LoyaltyProgramCreateRequest,
   LoyaltyProgramKind,
   LoyaltyProgramPatchRequest,
+  LoyaltyScreenshotConfirmRequest,
   LoyaltyUnit,
 } from '@b8/contracts/loyalty';
 
@@ -772,6 +782,31 @@ export async function addObservation(
   membershipId: number,
   body: LoyaltyObservationCreateRequest
 ): Promise<LoyaltyResult<LoyaltyMembership>> {
+  return appendObservation(membershipId, body, 'typed');
+}
+
+/**
+ * A confirmed screenshot reading (P8-42d): the typed path's rules exactly (the unit's balance rule,
+ * the membership must exist, at most one day after CURRENT_DATE), with source `screenshot`. Whether it
+ * becomes current is the shared reducer's ordinary answer: an as-of equal to or after the current
+ * one's wins, a strictly older one is recorded behind it. Nothing here compares dates to decide that.
+ */
+export async function addScreenshotObservation(
+  membershipId: number,
+  body: LoyaltyScreenshotConfirmRequest
+): Promise<LoyaltyResult<LoyaltyMembership>> {
+  return appendObservation(membershipId, body, 'screenshot');
+}
+
+/**
+ * The one INSERT of a person's reading. `source` comes from the exported function that was called,
+ * never from a request body: `typed` from the observations route, `screenshot` from the confirm route.
+ */
+async function appendObservation(
+  membershipId: number,
+  body: { asOf: string; balance: string; unit: LoyaltyUnit },
+  source: 'typed' | 'screenshot'
+): Promise<LoyaltyResult<LoyaltyMembership>> {
   const parsed = parseBalance(body.unit, body.balance);
   if (!parsed.ok) return fail('INVALID_INPUT', 'The balance is not valid for its unit.');
   try {
@@ -781,14 +816,44 @@ export async function addObservation(
     if (future.rows[0].future) return fail('INVALID_INPUT', 'A balance cannot be dated more than a day ahead.');
     await db.query(
       `INSERT INTO loyalty_observations (membership_id, as_of, balance, unit, source)
-       VALUES ($1, $2, $3::numeric, $4, 'typed')`,
-      [membershipId, body.asOf, parsed.balance, parsed.unit]
+       VALUES ($1, $2, $3::numeric, $4, $5)`,
+      [membershipId, body.asOf, parsed.balance, parsed.unit, source]
     );
     log.info('loyalty observation recorded', { count: 1 });
     return { ok: true, value: (await membershipView(membershipId)) as LoyaltyMembership };
   } catch (err) {
     return fromPgError(err);
   }
+}
+
+/** What the screenshot comparison needs about one membership. `memberNumber` is never emitted. */
+export interface ScreenshotTarget {
+  memberNumber: string | null;
+  /** The program's name, then its aliases. */
+  programNames: string[];
+  /** The unit of the current reading (the shared reducer's), or null when there is none. */
+  currentUnit: LoyaltyUnit | null;
+  defaultUnit: LoyaltyUnit;
+}
+
+/**
+ * The membership a screenshot read was started from, as the comparison sees it, or null when there
+ * is no such membership (the route answers 404 before reading the body). The program is joined for its
+ * name and default unit: one program per membership by the foreign key, so it cannot repeat a row.
+ */
+export async function screenshotTargetOf(id: number): Promise<ScreenshotTarget | null> {
+  const r = await db.query<{ member_number: string | null; default_unit: LoyaltyUnit; names: string[] }>(
+    `SELECT m.member_number, p.default_unit,
+            array_prepend(p.name, coalesce((SELECT array_agg(a.alias ORDER BY a.id) FROM loyalty_program_aliases a WHERE a.program_id = p.id), '{}')) AS names
+       FROM loyalty_memberships m
+       JOIN loyalty_programs p ON p.id = m.program_id
+      WHERE m.id = $1`,
+    [id]
+  );
+  if (r.rows.length === 0) return null;
+  const current = currentObservationByMembership(await observationsOf(db, [id])).get(id);
+  const row = r.rows[0];
+  return { memberNumber: row.member_number, programNames: row.names, currentUnit: current?.unit ?? null, defaultUnit: row.default_unit };
 }
 
 // ─── Instruments ───────────────────────────────────────────────────────────────────────────────

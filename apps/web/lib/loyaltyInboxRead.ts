@@ -48,6 +48,7 @@ import { currentObservationByMembership } from './domain/loyalty';
 import { cleanReading, decideReading, type CleanReading, type Decision, type StoredReading } from './domain/loyaltyRead';
 import { createMailReader, readerAvailable, readTimeoutSeconds, type MailReader, type MailReaderResult } from './loyaltyReader';
 import {
+  LOYALTY_INBOX_SILENCE_DAYS,
   LOYALTY_MASK_BULLETS,
   LOYALTY_READ_MAX_ATTEMPTS,
   LOYALTY_READ_MAX_CHARS,
@@ -657,7 +658,21 @@ async function readPanel(q: Queryable, env: Env): Promise<LoyaltyInboxReadPanel>
   // null would empty the set). A `retry` row whose bytes are present stays in `waiting` only, so no
   // message counts in both. Read-only on purpose: nothing is closed, so it holds with no API key
   // and for bytes that go after the last run.
-  const counts = await q.query<{ waiting: number; failed: number; pending: number }>(
+  // P8-42d (D3): `screenshotDue` rides in this statement as one more column, so the panel stays five
+  // statements in one snapshot (P8-42c4, D6) and the due list can never disagree with the coverage
+  // computed beside it. With T the silence constant, a program's inbox is BRINGING BALANCES when it
+  // has a sender domain, its newest settled read (the coverage statement's own choice: not `retry`
+  // or `failed`, newest received, then id) carried a balance, and its newest `last_seen_on` is at
+  // most T days before CURRENT_DATE. A membership of any other program is due when it has no
+  // observation, or CURRENT_DATE minus its current observation's as-of is STRICTLY above T.
+  //
+  // Every test is a scalar subquery or EXISTS, never a JOIN, so a program with three domains cannot
+  // list a membership three times; each piece is `IS TRUE`, so a null (no read, no last-seen date)
+  // means "not bringing" rather than turning the whole NOT into null and dropping the row. "Current"
+  // is the shared reducer's order (greatest as-of, then recorded time, then id), stated here because
+  // it must be answered inside this one statement; a future-dated current reading gives a negative
+  // age and is not due. Ascending by id, the contract's order. All day counts are Postgres's.
+  const counts = await q.query<{ waiting: number; failed: number; pending: number; screenshotDue: number[] }>(
     `SELECT (SELECT count(*) FROM loyalty_inbox_messages m
               WHERE m.raw_mail IS NOT NULL
                 AND NOT EXISTS (SELECT 1 FROM loyalty_inbox_reads r WHERE r.dedupe_key = m.dedupe_key AND r.state <> 'retry'))::int AS waiting,
@@ -665,6 +680,19 @@ async function readPanel(q: Queryable, env: Env): Promise<LoyaltyInboxReadPanel>
               WHERE r.state = 'failed'
                  OR (r.state = 'retry'
                      AND NOT EXISTS (SELECT 1 FROM loyalty_inbox_messages m WHERE m.dedupe_key = r.dedupe_key AND m.raw_mail IS NOT NULL)))::int AS failed,
+            ARRAY(
+              SELECT ms.id FROM loyalty_memberships ms
+               WHERE NOT (
+                       EXISTS (SELECT 1 FROM loyalty_sender_domains d WHERE d.program_id = ms.program_id)
+                       AND (SELECT x.balance IS NOT NULL FROM loyalty_inbox_reads x
+                             WHERE x.program_id = ms.program_id AND x.state NOT IN ('retry', 'failed')
+                             ORDER BY x.received_on DESC, x.id DESC LIMIT 1) IS TRUE
+                       AND ((SELECT CURRENT_DATE - max(d.last_seen_on) FROM loyalty_sender_domains d
+                              WHERE d.program_id = ms.program_id) <= ${LOYALTY_INBOX_SILENCE_DAYS}) IS TRUE)
+                 AND coalesce((SELECT CURRENT_DATE - o.as_of > ${LOYALTY_INBOX_SILENCE_DAYS} FROM loyalty_observations o
+                                WHERE o.membership_id = ms.id
+                                ORDER BY o.as_of DESC, o.recorded_at DESC, o.id DESC LIMIT 1), true)
+               ORDER BY ms.id)::int[] AS "screenshotDue",
             (SELECT count(*) FROM loyalty_inbox_reads WHERE state = 'pending')::int AS pending`
   );
   const items = await q.query<LoyaltyReadItem>(
@@ -714,5 +742,6 @@ async function readPanel(q: Queryable, env: Env): Promise<LoyaltyInboxReadPanel>
     needsAttention: items.rows,
     coverage: coverage.rows,
     fromMail: fromMail.rows,
+    screenshotDue: counts.rows[0].screenshotDue,
   };
 }

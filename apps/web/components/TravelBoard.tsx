@@ -6,6 +6,10 @@
 // Everything here arrives as server props with member numbers MASKED (`loadOverview`). Nothing is
 // fetched on render; each edit is a write in an event handler followed by `router.refresh()`.
 //
+// "Needs a screenshot" (P8-42d) sits right under the heading, before anything to add or edit: it is
+// the one part of the page that asks the person to do something, and it renders nothing when nobody
+// is due.
+//
 // The "Link a card" choices (P8-42b) are the server's credit cards less the ones a membership already
 // holds: one card earns into one membership, so a taken card is not offered.
 
@@ -14,6 +18,7 @@ import LoyaltyAddPanel from './LoyaltyAddPanel';
 import LoyaltyProgramCard from './LoyaltyProgramCard';
 import LoyaltyInstrumentList from './LoyaltyInstrumentList';
 import LoyaltyInboxPanel from './LoyaltyInboxPanel';
+import LoyaltyScreenshotDue from './LoyaltyScreenshotDue';
 
 export default function TravelBoard({ overview }: { overview: LoyaltyOverview }) {
   const programOf = new Map(overview.programs.map((p) => [p.id, p]));
@@ -34,6 +39,7 @@ export default function TravelBoard({ overview }: { overview: LoyaltyOverview })
             : `${overview.cards.length} program${overview.cards.length === 1 ? '' : 's'} · ${holderOf.size} membership${holderOf.size === 1 ? '' : 's'}`}
         </p>
       </div>
+      <LoyaltyScreenshotDue overview={overview} />
       <LoyaltyAddPanel overview={overview} />
       {overview.cards.length === 0 ? (
         <p className="mb-8 text-sm text-gray-400">No memberships yet. Add a person, then a membership.</p>

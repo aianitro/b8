@@ -122,7 +122,7 @@ describe('the loyalty contract', () => {
 
     // Exactly one response schema carries a field for the full number.
     const responses = Object.entries(loyalty).filter(([name]) => /ResponseSchema$/.test(name)) as [string, z.ZodType][];
-    expect(responses.length).toBe(9);
+    expect(responses.length).toBe(10);
     const carrying = responses.filter(([, s]) => keysOf(s).includes('memberNumber')).map(([n]) => n);
     expect(carrying).toEqual(['LoyaltyMemberNumberResponseSchema']);
     // Every response is the envelope: success with data, or the error branch.
@@ -438,7 +438,7 @@ const EMPTY_INBOX = {
 
 /** A never-read panel with nothing in it (P8-42c2): the smallest valid `inboxRead`. */
 const EMPTY_READ = {
-  readable: false, lastRead: null, waiting: 0, failed: 0, needsAttentionTotal: 0, needsAttention: [], coverage: [], fromMail: [],
+  readable: false, lastRead: null, waiting: 0, failed: 0, needsAttentionTotal: 0, needsAttention: [], coverage: [], fromMail: [], screenshotDue: [],
 };
 
 describe('the loyalty inbox contract (P8-42c1)', () => {
@@ -564,6 +564,7 @@ describe('the loyalty inbox reading contract (P8-42c2)', () => {
       ],
       coverage: [{ programId: 3, balanceInLastStatement: 'yes' }, { programId: 4, balanceInLastStatement: 'no' }, { programId: 5, balanceInLastStatement: 'not_read' }],
       fromMail: [{ membershipId: 4, receivedOn: '2026-01-06', expiryWarnings: [{ what: 'miles', expiresOn: '2026-03-01', amount: '500' }, { what: 'status', expiresOn: '2026-04-01', amount: null }], instruments: [{ kind: 'free_night', expiresOn: null }] }],
+      screenshotDue: [],
       ...over,
     });
     const overview = (r: unknown) => ({ members: [], programs: [], cards: [], instruments: [], cardAccounts: [], inbox: EMPTY_INBOX, inboxRead: r });

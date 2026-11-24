@@ -90,6 +90,8 @@ export const ROUTES: Surface[] = [
   { file: 'app/api/v1/loyalty/memberships/[id]/member-number/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/memberships/[id]/observations/route.ts', classes: ['numeric-only'] },
   { file: 'app/api/v1/loyalty/memberships/[id]/route.ts', classes: ['numeric-only'] },
+  { file: 'app/api/v1/loyalty/memberships/[id]/screenshot/confirm/route.ts', classes: ['numeric-only'] },
+  { file: 'app/api/v1/loyalty/memberships/[id]/screenshot/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/memberships/route.ts', classes: ['numeric-only'] },
   { file: 'app/api/v1/loyalty/programs/[id]/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/programs/route.ts', classes: ['no-transaction-data'] },

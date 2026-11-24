@@ -884,7 +884,7 @@ describe('loyalty inbox (P8-42c1)', () => {
     expect(await ledger()).toBe(ledgerBefore);
     const dir = join(WEB, 'app/api/v1/loyalty');
     const files = (readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith('route.ts')).map((f) => relative(WEB, join(dir, f)).split('\\').join('/'));
-    expect(files).toHaveLength(14);
+    expect(files).toHaveLength(16);
     expect(ROUTES.find((x) => x.file === 'app/api/v1/loyalty/inbox/poll/route.ts')?.classes).toEqual(['no-transaction-data']);
   });
 

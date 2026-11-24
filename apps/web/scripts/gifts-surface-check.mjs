@@ -15,7 +15,9 @@
 // loyalty inbox panel on /travel and the on-demand poll route, against a mailbox that cannot be
 // reached). P8-42c2 added H15 (the reading queue, its wording and its three actions, and the read
 // route, with no API key and a model endpoint that cannot be reached), so the final success line is
-// now `OK H1-H15`.
+// now `OK H1-H16`: P8-42d added H16 (a balance from a screenshot: the "Update from screenshot" control on
+// every membership, the "Needs a screenshot" section, the read route answering `disabled` with no key,
+// and the confirm route clearing the prompt).
 //
 // THE MAILBOX VARIABLES. The dev server never inherits a `LOYALTY_IMAP_` variable from the shell that
 // runs this script: every one is removed from its environment, and five are then set to fabricated
@@ -848,7 +850,132 @@ try {
     pass('H15', `both users, /travel and /api/v1/loyalty: ${S.expectText.length} phrases present and ${S.expectAbsent.length} absent with reading not set up; the read route is 200 disabled for the owner, 401 with no cookie and 403 for a read-scope token; apply on the unique item is 200, reaches the membership's balance in the API and on /travel, and a second apply is 409; the ambiguous item refuses another program's membership with 400; not mine and ignore empty the queue; ${heard.length} responses hold no full member number, key or loopback host`);
   }
 
-  console.log('OK H1-H15');
+  // ── H16 ── (P8-42d) A balance from a screenshot, over real HTTP for both people, with no API key.
+  // One fabricated program with no sender domain and two memberships: one whose reading is 46 days old
+  // (due) carrying a full member-number canary, and one read today (not due). Earlier steps' memberships
+  // stay; whichever of them the panel lists as due are due too, so the step reads the list from the API
+  // rather than assuming it. The control is on every membership and on every due entry, so the page
+  // carries it exactly (memberships + due entries) times. The read route has no key, so it answers
+  // `disabled` and sends nothing; each due membership is then confirmed with today's date through the
+  // real confirm route until the list is empty, and the section must be gone. The canary must appear
+  // in no response.
+  current = 'H16';
+  {
+    const S = READ.surface;
+    const NUMBER = 'ZQ42DSURFACENUMBER7K9X';
+    psql(`
+      INSERT INTO loyalty_programs (name, kind, default_unit) VALUES ('ZQ42D Surface Air', 'airline', 'points');
+      INSERT INTO household_members (display_name) VALUES ('ZQ42D Surface Due'), ('ZQ42D Surface Fresh');
+      INSERT INTO loyalty_memberships (member_id, program_id, member_number) VALUES
+        ((SELECT id FROM household_members WHERE display_name = 'ZQ42D Surface Due'), (SELECT id FROM loyalty_programs WHERE name = 'ZQ42D Surface Air'), '${NUMBER}'),
+        ((SELECT id FROM household_members WHERE display_name = 'ZQ42D Surface Fresh'), (SELECT id FROM loyalty_programs WHERE name = 'ZQ42D Surface Air'), NULL);
+      INSERT INTO loyalty_observations (membership_id, as_of, balance, unit, source) VALUES
+        ((SELECT m.id FROM loyalty_memberships m JOIN household_members h ON h.id = m.member_id WHERE h.display_name = 'ZQ42D Surface Due'), CURRENT_DATE - 46, 12, 'points', 'typed'),
+        ((SELECT m.id FROM loyalty_memberships m JOIN household_members h ON h.id = m.member_id WHERE h.display_name = 'ZQ42D Surface Fresh'), CURRENT_DATE, 12, 'points', 'typed');`);
+    const idOf = (name) => Number(psql(`SELECT m.id FROM loyalty_memberships m JOIN household_members h ON h.id = m.member_id WHERE h.display_name = '${name}'`));
+    const dueId = idOf('ZQ42D Surface Due');
+    const freshId = idOf('ZQ42D Surface Fresh');
+    const today = psql('SELECT CURRENT_DATE::text');
+    const readToken = randomBytes(32).toString('base64url');
+    psql(`INSERT INTO auth_sessions (token_hash, credential_id, kind, scope, label, expires_at)
+      VALUES ('${sha256(readToken)}', 'gifts-check-owner-cred', 'personal', 'read', 'zq42d read token', NOW() + interval '2 hours')`);
+    const heard = [];
+    const people = [['owner', w.owner], ['second user', w.two]];
+    const travelOf = async (token) => {
+      const page = await get('/travel', token);
+      heard.push(page.text);
+      return { status: page.status, html: uncommented(page.text) };
+    };
+    const apiOf = async (token) => {
+      const api = await get('/api/v1/loyalty', token);
+      heard.push(api.text);
+      return { status: api.status, data: JSON.parse(api.text).data };
+    };
+    const send = async (path, headers, body, type) => {
+      const res = await fetch(`${ORIGIN}${path}`, { method: 'POST', headers: { 'content-type': type, ...headers }, body });
+      const text = await res.text();
+      heard.push(text);
+      let json = null;
+      try { json = JSON.parse(text); } catch { /* reported by the status checks */ }
+      return { status: res.status, json };
+    };
+    const image = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), randomBytes(60)]);
+    const readPath = (id) => `/api/v1/loyalty/memberships/${id}/screenshot`;
+    const confirmPath = (id) => `/api/v1/loyalty/memberships/${id}/screenshot/confirm`;
+    const confirm = (id, headers, body) => send(confirmPath(id), headers, JSON.stringify(body), 'application/json');
+    const occurrences = (html, t) => html.split(t).length - 1;
+    const views = (data) => data.cards.flatMap((c) => c.memberships);
+
+    // (a), (b), (f) and (g) before anything is confirmed.
+    const dueBefore = [];
+    for (const [who, token] of people) {
+      const page = await travelOf(token);
+      const api = await apiOf(token);
+      check('H16', page.status === 200 && api.status === 200, `/travel answered ${page.status} and the API ${api.status} for the ${who}`);
+      const due = api.data.inboxRead.screenshotDue;
+      const memberships = views(api.data).length;
+      check('H16', due.includes(dueId) && !due.includes(freshId) && memberships > due.length, `the ${who}'s due list does not hold the due membership alone of the two`);
+      const controls = occurrences(page.html, 'Update from screenshot');
+      check('H16', controls === memberships + due.length, `/travel shows the control ${controls} times for the ${who}, not ${memberships} + ${due.length}`);
+      check('H16', hasText(page.html, 'Needs a screenshot'), `/travel lacks the heading for the ${who}`);
+      for (const t of S.expectAbsent) check('H16', !hasText(page.html, t), `/travel shows "${t}" for the ${who}`);
+      const stillTrue = S.expectText.filter((t) => !/^(Needs attention: |ZQ42C2 Surface Air · |Why: |Apply|Not mine|Ignore|Choose a membership)/.test(t));
+      for (const t of stillTrue) check('H16', hasText(page.html, t), `/travel lacks H15's "${t}" for the ${who}`);
+      dueBefore.push(JSON.stringify(due));
+    }
+    check('H16', dueBefore[0] === dueBefore[1], 'the two users got different due lists');
+
+    // (c) The read route: 401, 403, then 200 disabled with every data field null, for both people.
+    const noCredential = await send(readPath(dueId), {}, image, 'image/jpeg');
+    check('H16', noCredential.status === 401, `the read with no credential answered ${noCredential.status}`);
+    const readScope = await send(readPath(dueId), { authorization: `Bearer ${readToken}` }, image, 'image/jpeg');
+    check('H16', readScope.status === 403, `the read with a read-scope token answered ${readScope.status}`);
+    for (const [who, token] of people) {
+      const r = await send(readPath(dueId), { cookie: `b8_session=${token}` }, image, 'image/jpeg');
+      const d = r.json?.data;
+      check('H16', r.status === 200 && d?.outcome === 'disabled', `the read answered ${r.status} ${d?.outcome} for the ${who}`);
+      check('H16', ['errorCode', 'balance', 'unit', 'asOf', 'maskedSuffix'].every((k) => d[k] === null) && d.expiryWarnings.length === 0 && d.instruments.length === 0,
+        `the disabled read carried data for the ${who}`);
+    }
+
+    // (d) The confirm route: 401, 403, then 201; the API then shows a screenshot reading and no prompt.
+    const body = { asOf: today, balance: '12', unit: 'points' };
+    const anon = await confirm(dueId, {}, body);
+    check('H16', anon.status === 401, `the confirm with no credential answered ${anon.status}`);
+    const scoped = await confirm(dueId, { authorization: `Bearer ${readToken}` }, body);
+    check('H16', scoped.status === 403, `the confirm with a read-scope token answered ${scoped.status}`);
+    const saved = await confirm(dueId, { cookie: `b8_session=${w.owner}` }, body);
+    check('H16', saved.status === 201 && saved.json?.data?.source === 'screenshot', `the confirm answered ${saved.status}`);
+    const after = await apiOf(w.two);
+    check('H16', views(after.data).find((m) => m.id === dueId)?.source === 'screenshot', 'the API does not show the confirmed reading as current');
+    check('H16', !after.data.inboxRead.screenshotDue.includes(dueId), 'the confirmed membership is still due');
+
+    // (b) Every other due membership, confirmed for today, until the list is empty; the heading goes.
+    const units = new Map(after.data.programs.map((p) => [p.id, p.defaultUnit]));
+    let confirmed = 1;
+    for (const id of after.data.inboxRead.screenshotDue) {
+      const m = views(after.data).find((v) => v.id === id);
+      const r = await confirm(id, { cookie: `b8_session=${w.two}` }, { asOf: today, balance: '12', unit: m.unit ?? units.get(m.programId) });
+      check('H16', r.status === 201, `confirming membership ${id} answered ${r.status}`);
+      confirmed++;
+    }
+    const dueAfter = [];
+    for (const [who, token] of people) {
+      const api = await apiOf(token);
+      check('H16', api.data.inboxRead.screenshotDue.length === 0, `the ${who}'s due list is not empty after the confirms`);
+      dueAfter.push(JSON.stringify(api.data.inboxRead.screenshotDue));
+      const page = await travelOf(token);
+      check('H16', !hasText(page.html, 'Needs a screenshot'), `/travel still shows the heading for the ${who}`);
+      check('H16', occurrences(page.html, 'Update from screenshot') === views(api.data).length, `/travel's control count is not one per membership for the ${who}`);
+    }
+    check('H16', dueAfter[0] === dueAfter[1], 'the two users got different due lists after the confirms');
+
+    // (e) The full member number reached no response of the step.
+    for (const text of heard) check('H16', !holds(text, NUMBER), 'a response of the step holds the full member number');
+    pass('H16', `both users: /travel carries the control once per membership and once per due entry, with the heading while ${JSON.parse(dueBefore[0]).length} memberships are due; the read route is 401 with no credential, 403 for a read-scope token and 200 disabled with every field null for both people; the confirm route is 401, 403, then 201 with source screenshot, and ${confirmed} confirms for today empty the due list and remove the heading; both people get the same list before and after; H15's ${S.expectAbsent.length} absent phrases stay absent; ${heard.length} responses hold no full member number`);
+  }
+
+  console.log('OK H1-H16');
 } catch (error) {
   exitCode = 1;
   if (error instanceof StepFailure) console.log(`${error.step} FAIL ${error.message}`);

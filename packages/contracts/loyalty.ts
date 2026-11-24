@@ -1,6 +1,6 @@
 // Loyalty (P8-42a) — household members, the program catalog with its aliases, memberships with a
 // derived current balance, append-only balance observations, instruments, and (P8-42c1) the loyalty
-// inbox, and (P8-42c2) reading it. The fourteen endpoints, stated once:
+// inbox, and (P8-42c2) reading it, and (P8-42d) reading a screenshot. The sixteen endpoints, stated once:
 //
 //   GET   /api/v1/loyalty                                 —                                → LoyaltyOverviewResponseSchema
 //   POST  /api/v1/loyalty/members                         LoyaltyMemberCreateRequestSchema → LoyaltyMemberResponseSchema (201)
@@ -16,6 +16,8 @@
 //   POST  /api/v1/loyalty/inbox/poll                      — (no body)                      → LoyaltyInboxPollResponseSchema (200 for every outcome)
 //   POST  /api/v1/loyalty/inbox/read                      LoyaltyInboxReadRequestSchema (body optional) → LoyaltyInboxReadResponseSchema (200 for every outcome)
 //   POST  /api/v1/loyalty/inbox/readings/[id]             LoyaltyInboxResolveRequestSchema → LoyaltyInboxResolveResponseSchema
+//   POST  /api/v1/loyalty/memberships/[id]/screenshot     image bytes (JPEG, PNG or WebP)  → LoyaltyScreenshotReadResponseSchema (200 for every outcome)
+//   POST  /api/v1/loyalty/memberships/[id]/screenshot/confirm LoyaltyScreenshotConfirmRequestSchema → LoyaltyMembershipResponseSchema (201)
 //
 // There is no route that updates or deletes an observation, and none that deletes a member, a
 // program, a membership or an instrument. An edited balance is a POST of a new observation.
@@ -1610,6 +1612,25 @@ export const LoyaltyReadLastReadSchema = z
  *   coverage            — one entry per program that has a sender domain (the producer's duty: the
  *                         same programs as `inbox.senderDomains`; not cross-checked here).
  *   fromMail            — at most one entry per membership.
+ *   screenshotDue       — (P8-42d) the ids of the memberships that need a balance from a screenshot,
+ *                         strictly ascending, so each membership appears once however many sender
+ *                         domains its program has. `[]` when nobody is due, never null or absent.
+ *                         DERIVED on every read, never stored, in the same snapshot as the rest of the
+ *                         panel, with every day count computed by Postgres from CURRENT_DATE (no JS
+ *                         clock). Let T be `LOYALTY_INBOX_SILENCE_DAYS` (no new constant). "The inbox is
+ *                         bringing balances for program P" exactly when all three hold: P has at least
+ *                         one sender domain; P's `balanceInLastStatement` in `coverage` is `yes`; and
+ *                         the greatest `last_seen_on` over P's domains is not null and at most T days
+ *                         before CURRENT_DATE. A membership of P is due exactly when the inbox is not
+ *                         bringing balances for P AND either it has no observation or CURRENT_DATE
+ *                         minus its current observation's as-of is STRICTLY greater than T. Exactly T
+ *                         days old is not due; a future-dated current observation is not due. "Current"
+ *                         is the shared reducer's choice (greatest as-of, then recorded time, then id),
+ *                         so an older screenshot recorded later does not clear a due membership. Why:
+ *                         a program the inbox serves is never nagged (forwarding health covers it),
+ *                         while one whose newest statement had no balance, or whose mail went quiet,
+ *                         is; a membership with no reading is due because "—" is what the person wants
+ *                         gone. Identical for every viewer.
  *
  * Strict at every depth: no key can hold a subject, a body, the text sent to the model, a URL, an
  * address, a full member number, a key or the model's output. Identical for every viewer.
@@ -1624,10 +1645,17 @@ export const LoyaltyInboxReadPanelSchema = z
     needsAttention: z.array(LoyaltyReadItemSchema).max(LOYALTY_READ_QUEUE_LIMIT),
     coverage: z.array(LoyaltyReadCoverageEntrySchema),
     fromMail: z.array(LoyaltyReadFromMailSchema),
+    screenshotDue: z.array(LoyaltyIdSchema),
   })
   .refine((p) => p.needsAttention.length <= p.needsAttentionTotal, {
     message: 'the listed items exceed the total',
     path: ['needsAttentionTotal'],
+  })
+  // Strictly ascending, so a membership can never appear twice (P8-42d, D3). Placed mid-chain so
+  // the existing chain's closing line is untouched.
+  .refine((p) => p.screenshotDue.every((id, k, a) => k === 0 || a[k - 1] < id), {
+    message: 'screenshotDue is strictly ascending with no repeat',
+    path: ['screenshotDue'],
   })
   .refine(
     (p) =>
@@ -1696,6 +1724,117 @@ export const LoyaltyInboxResolveSchema = z.strictObject({
   state: LoyaltyReadStateSchema.extract(['applied_by_hand', 'not_mine', 'ignored']),
 });
 
+// ─── Reading a screenshot (P8-42d) ──────────────────────────────────────────────────────────────
+//
+// One screenshot of a program's app is read by Claude as a PROPOSAL for one membership, shown in a
+// form, and saved only when the person taps confirm. The image is read and discarded within the
+// read request: no table, file, cache, log or payload holds it, and there is no stored proposal, so
+// the confirm route is stateless. Nothing here needs a migration: `loyalty_observations.source`
+// already allows `screenshot`.
+
+/**
+ * What a screenshot read did. All three are HTTP 200; the form is usable by hand after each.
+ *   read     — the model answered and the clean pass ran. The data fields may all be null (nothing
+ *              could be read), which is a reading, not an error.
+ *   disabled — no `ANTHROPIC_API_KEY`; nothing was sent.
+ *   error    — the call failed; `errorCode` says how. No library or model text accompanies it.
+ */
+export const LOYALTY_SCREENSHOT_OUTCOMES = ['read', 'disabled', 'error'] as const;
+export const LoyaltyScreenshotOutcomeSchema = z.enum(LOYALTY_SCREENSHOT_OUTCOMES);
+
+/**
+ * `POST /api/v1/loyalty/memberships/[id]/screenshot` — the read answer. Writes nothing.
+ *
+ *   balance, unit — the cleaned reading, canonical text for the unit, null together. Null means the
+ *                   screenshot showed no usable figure (never rounded, never defaulted to zero); a
+ *                   read zero is a canonical zero for the unit and is a reading.
+ *   asOf          — the date the screenshot states, or null (the form then offers the device's day).
+ *   maskedSuffix  — the suffix the SCREENSHOT printed, masked (four bullets plus 3 or 4 characters),
+ *                   never the membership's stored number and never the full printed number.
+ *   programCheck, suffixCheck, unitCheck — comparisons with the membership the read was started
+ *                   from. `not_stated` means "could not compare" (nothing printed, or nothing stored
+ *                   to compare with) and is neither a match nor a warning. A `mismatch` WARNS and
+ *                   never blocks: the person chose the membership and can see the screenshot, and
+ *                   the confirm route has no stored read to block against.
+ *   expiryWarnings, instruments — shown as information only; confirm stores neither.
+ *
+ * The refinements make a contradictory answer unparseable: a code exactly on `error`; balance and
+ * unit together; a non-canonical balance; any data, or any check other than `not_stated`, on
+ * `disabled` or `error`; a unit comparison with no unit; a suffix comparison with no suffix. Strict
+ * at every depth, so no key can carry a name, a full member number, the image or the model's text.
+ */
+export const LoyaltyScreenshotReadSchema = z
+  .strictObject({
+    outcome: LoyaltyScreenshotOutcomeSchema,
+    errorCode: LoyaltyReadErrorCodeSchema.nullable(),
+    balance: z.string().nullable(),
+    unit: LoyaltyUnitSchema.nullable(),
+    asOf: calendarDate.nullable(),
+    maskedSuffix: LoyaltyReadMaskedSuffixSchema.nullable(),
+    programCheck: LoyaltyReadProgramCheckSchema,
+    suffixCheck: LoyaltyReadProgramCheckSchema,
+    unitCheck: LoyaltyReadProgramCheckSchema,
+    expiryWarnings: z.array(LoyaltyReadExpiryWarningSchema).max(LOYALTY_READ_EXPIRY_MAX),
+    instruments: z.array(LoyaltyReadInstrumentSchema).max(LOYALTY_READ_INSTRUMENT_MAX),
+  })
+  .refine((r) => (r.errorCode !== null) === (r.outcome === 'error'), {
+    message: 'errorCode is set exactly when the outcome is error',
+    path: ['errorCode'],
+  })
+  .refine((r) => (r.balance === null) === (r.unit === null), {
+    message: 'balance and unit are null together or present together',
+    path: ['balance'],
+  })
+  .refine((r) => r.balance === null || r.unit === null || isCanonicalForUnit(r.unit, r.balance), {
+    message: 'the balance is not in the canonical form for its unit',
+    path: ['balance'],
+  })
+  .refine(
+    (r) =>
+      r.outcome === 'read' ||
+      (r.balance === null &&
+        r.unit === null &&
+        r.asOf === null &&
+        r.maskedSuffix === null &&
+        r.expiryWarnings.length === 0 &&
+        r.instruments.length === 0 &&
+        r.programCheck === 'not_stated' &&
+        r.suffixCheck === 'not_stated' &&
+        r.unitCheck === 'not_stated'),
+    { message: 'a disabled or failed read carries no data and no comparison', path: ['outcome'] }
+  )
+  .refine((r) => r.unitCheck === 'not_stated' || r.unit !== null, {
+    message: 'a unit comparison needs a unit',
+    path: ['unitCheck'],
+  })
+  .refine((r) => r.suffixCheck === 'not_stated' || r.maskedSuffix !== null, {
+    message: 'a suffix comparison needs a suffix',
+    path: ['suffixCheck'],
+  });
+
+/**
+ * `POST /api/v1/loyalty/memberships/[id]/screenshot/confirm` — appends one observation whose source
+ * the HANDLER sets to `screenshot`; answers `LoyaltyMembershipResponseSchema` (201).
+ *
+ * There is deliberately no `source` key, and the strict object refuses one of any value: a client
+ * never chooses provenance, and the typed route keeps refusing `screenshot`. The balance rule is the
+ * typed path's (`isBalanceForUnit`); the as-of limit (more than one day after Postgres's CURRENT_DATE
+ * is 400) is the handler's, as on the typed path. Whether the new row becomes current is the shared
+ * reducer's existing rule: an as-of greater than or equal to the current one's wins (a tie goes to
+ * the later recorded row), a strictly older one is recorded but not current. Error messages never
+ * echo the submitted value.
+ */
+export const LoyaltyScreenshotConfirmRequestSchema = z
+  .strictObject({
+    asOf: calendarDate,
+    balance: LoyaltyBalanceInputSchema,
+    unit: LoyaltyUnitSchema,
+  })
+  .refine((b) => isBalanceForUnit(b.unit, b.balance), {
+    message: 'the balance is not valid for its unit',
+    path: ['balance'],
+  });
+
 /**
  * `GET /api/v1/loyalty` — the whole picture, masked numbers only.
  *
@@ -1748,6 +1887,8 @@ export const LoyaltyInboxPollResponseSchema = apiResponseSchema(LoyaltyInboxPoll
 export const LoyaltyInboxReadResponseSchema = apiResponseSchema(LoyaltyInboxReadRunSchema);
 /** `POST …/inbox/readings/[id]`. */
 export const LoyaltyInboxResolveResponseSchema = apiResponseSchema(LoyaltyInboxResolveSchema);
+/** `POST …/memberships/[id]/screenshot`. The confirm route answers `LoyaltyMembershipResponseSchema`. */
+export const LoyaltyScreenshotReadResponseSchema = apiResponseSchema(LoyaltyScreenshotReadSchema);
 
 export type LoyaltyUnit = z.infer<typeof LoyaltyUnitSchema>;
 export type LoyaltyProgramKind = z.infer<typeof LoyaltyProgramKindSchema>;
@@ -1819,3 +1960,6 @@ export type LoyaltyInboxReadRequest = z.infer<typeof LoyaltyInboxReadRequestSche
 export type LoyaltyInboxReadRun = z.infer<typeof LoyaltyInboxReadRunSchema>;
 export type LoyaltyInboxResolveRequest = z.infer<typeof LoyaltyInboxResolveRequestSchema>;
 export type LoyaltyInboxResolve = z.infer<typeof LoyaltyInboxResolveSchema>;
+export type LoyaltyScreenshotOutcome = z.infer<typeof LoyaltyScreenshotOutcomeSchema>;
+export type LoyaltyScreenshotRead = z.infer<typeof LoyaltyScreenshotReadSchema>;
+export type LoyaltyScreenshotConfirmRequest = z.infer<typeof LoyaltyScreenshotConfirmRequestSchema>;

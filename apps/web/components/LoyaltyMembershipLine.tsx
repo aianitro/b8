@@ -18,6 +18,10 @@
 //
 // THE CARD (P8-42b) sits on its own row under the fields, in `LoyaltyCardLink`: the linked credit
 // card, its link and unlink controls, the benefit, and the fee watch.
+//
+// "UPDATE FROM SCREENSHOT" (P8-42d) is on every membership, under everything else, in
+// `LoyaltyScreenshotCapture`: typed entry stays the balance button above, and the screenshot path is
+// the no-typing alternative beside it, not a replacement.
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -28,6 +32,7 @@ import LoyaltyBalanceEditor from './LoyaltyBalanceEditor';
 import LoyaltyCopyNumber from './LoyaltyCopyNumber';
 import LoyaltyCardLink from './LoyaltyCardLink';
 import LoyaltyFromMailLine from './LoyaltyFromMailLine';
+import LoyaltyScreenshotCapture from './LoyaltyScreenshotCapture';
 import { send } from './LoyaltyRequest';
 
 const SOURCE_BADGE: Record<LoyaltyObservationSource, { label: string; cls: string }> = {
@@ -158,6 +163,7 @@ export default function LoyaltyMembershipLine({
       {entering && (
         <LoyaltyBalanceEditor membershipId={m.id} unit={m.unit ?? defaultUnit} onClose={() => setEntering(false)} />
       )}
+      <LoyaltyScreenshotCapture membershipId={m.id} currentAsOf={m.asOf} currentUnit={m.unit} defaultUnit={defaultUnit} />
     </li>
   );
 }

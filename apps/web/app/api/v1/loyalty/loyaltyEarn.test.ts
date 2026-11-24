@@ -588,7 +588,7 @@ describe('loyalty earn description, estimate and comparison (P8-42b2)', () => {
     expect(await ledgerSum()).toBe(sumBefore);
     expect(await ledger()).toBe(ledgerBefore);
     const routes = (readdirSync(LOYALTY_DIR, { recursive: true }) as string[]).filter((f) => f.endsWith('route.ts'));
-    expect(routes).toHaveLength(14);
+    expect(routes).toHaveLength(16);
   });
 
   it('T42b2-I10: a missing figure is null, never zero, in every gate, and every viewer gets the same body', async () => {

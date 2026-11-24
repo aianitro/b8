@@ -12,6 +12,10 @@
 // NULL IS A PHRASE, NEVER A ZERO OR A DATE: never read is "Not read yet", an item with no date says
 // "no date", one with no suffix "no number shown". A count of zero is the number zero.
 //
+// "Needs a screenshot" (P8-42d) is NOT part of this panel: it is its own section at the top of the
+// page, in its own component, so the queue below keeps 42c's wording and counts whatever that list
+// holds. This panel only says that the missing key stops screenshot reading too.
+//
 // The queue is NOT an alert: it lives on this page only, with no push, digest line or dashboard card.
 // The two read controls exist only when reading is set up; each has one handler.
 
@@ -60,6 +64,8 @@ export default function LoyaltyInboxReadPanel({ overview }: { overview: LoyaltyO
         <div className="mt-2 border border-amber-200 bg-amber-50 rounded-lg p-3 text-sm text-gray-700">
           <p className="font-medium">Reading mail is not set up</p>
           <p className="mt-1">Set ANTHROPIC_API_KEY on the server; stored mail waits, unread, until then.</p>
+          {/* P8-42d: the same key reads a screenshot, so its absence is stated once, here. */}
+          <p className="mt-1">Reading a screenshot needs the same key; until then, enter balances by hand.</p>
         </div>
       )}
       <p className="mt-2 text-sm text-gray-600">

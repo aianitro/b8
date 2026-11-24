@@ -815,7 +815,7 @@ describe('reading the loyalty inbox (P8-42c2)', () => {
     for (const t of [...said, ...bodies, ...lines]) for (const s of secrets) expect(t.includes(s), `${s} in ${t.slice(0, 80)}`).toBe(false);
     // The panel carries exactly the contract keys, at every depth.
     const panel = overview.inboxRead;
-    expect(Object.keys(panel).sort()).toEqual(['coverage', 'failed', 'fromMail', 'lastRead', 'needsAttention', 'needsAttentionTotal', 'readable', 'waiting']);
+    expect(Object.keys(panel).sort()).toEqual(['coverage', 'failed', 'fromMail', 'lastRead', 'needsAttention', 'needsAttentionTotal', 'readable', 'screenshotDue', 'waiting']);
     expect(panel.needsAttention.length).toBeGreaterThan(0);
     for (const i of panel.needsAttention) {
       expect(Object.keys(i).sort()).toEqual(['asOf', 'balance', 'candidateMembershipIds', 'id', 'maskedSuffix', 'programId', 'reason', 'receivedOn', 'unit']);
@@ -991,7 +991,7 @@ describe('reading the loyalty inbox (P8-42c2)', () => {
     // The loyalty routes number fourteen and the two new ones are classified no-transaction-data.
     const dir = join(WEB, 'app/api/v1/loyalty');
     const files = (readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith('route.ts')).map((f) => relative(WEB, join(dir, f)).split('\\').join('/'));
-    expect(files).toHaveLength(14);
+    expect(files).toHaveLength(16);
     for (const f of ['app/api/v1/loyalty/inbox/read/route.ts', 'app/api/v1/loyalty/inbox/readings/[id]/route.ts']) {
       expect(ROUTES.find((x) => x.file === f)?.classes, f).toEqual(['no-transaction-data']);
     }

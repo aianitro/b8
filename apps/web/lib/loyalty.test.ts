@@ -307,6 +307,8 @@ const LOYALTY_ROUTE_FILES = [
   'app/api/v1/loyalty/inbox/poll/route.ts',
   'app/api/v1/loyalty/inbox/read/route.ts',
   'app/api/v1/loyalty/inbox/readings/[id]/route.ts',
+  'app/api/v1/loyalty/memberships/[id]/screenshot/route.ts',
+  'app/api/v1/loyalty/memberships/[id]/screenshot/confirm/route.ts',
 ];
 
 /** The `href`s of the sidebar's NAV array, in order, and whether /travel carries its label. */
@@ -386,7 +388,7 @@ describe('wiring', () => {
 
     // Registry: exactly the eleven route files and no other loyalty file. The four that return a membership view are
     // numeric-only since P8-42b (they carry a fee date derived from a ledger row); the other seven no-transaction-data.
-    const membershipView = ['app/api/v1/loyalty/route.ts', 'app/api/v1/loyalty/memberships/route.ts', 'app/api/v1/loyalty/memberships/[id]/route.ts', 'app/api/v1/loyalty/memberships/[id]/observations/route.ts'];
+    const membershipView = ['app/api/v1/loyalty/route.ts', 'app/api/v1/loyalty/memberships/route.ts', 'app/api/v1/loyalty/memberships/[id]/route.ts', 'app/api/v1/loyalty/memberships/[id]/observations/route.ts', 'app/api/v1/loyalty/memberships/[id]/screenshot/confirm/route.ts'];
     const listed = ROUTES.filter((r) => r.file.startsWith('app/api/v1/loyalty/'));
     expect(listed.map((r) => r.file).sort()).toEqual([...LOYALTY_ROUTE_FILES].sort());
     for (const r of listed) expect(r.classes).toEqual(membershipView.includes(r.file) ? ['numeric-only'] : ['no-transaction-data']);
@@ -396,7 +398,7 @@ describe('wiring', () => {
     const surface = read('scripts/gifts-surface-check.mjs');
     expect(surface).toContain(`'app/travel/page.tsx': { cls: 'numeric-only', url: () => '/travel' }`);
     expect(surface).toMatch(/current = 'H11';/);
-    expect(surface).toContain(`console.log('OK H1-H15');`);
+    expect(surface).toContain(`console.log('OK H1-H16');`);
 
     // Every route resolves its caller first, through the helper that calls the boundary's authorize.
     const helper = read('app/api/v1/loyalty/loyaltyResponses.ts');

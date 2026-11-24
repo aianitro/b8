@@ -503,11 +503,11 @@ describe('loyalty routes (P8-42a)', () => {
   it('T42a-C10: every loyalty route is registered as no-transaction-data and no loyalty source reads the ledger', async () => {
     const dir = join(WEB, 'app/api/v1/loyalty');
     const files = (readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith('route.ts')).map((f) => relative(WEB, join(dir, f)).split('\\').join('/'));
-    expect(files).toHaveLength(14);
+    expect(files).toHaveLength(16);
     // P8-42b: the four routes answering with a membership view carry a linked card's fee date (a
     // date derived from a ledger row, the same for every viewer) and are numeric-only.
     const MEMBERSHIP_VIEW_ROUTES = ['app/api/v1/loyalty/route.ts', 'app/api/v1/loyalty/memberships/route.ts',
-      'app/api/v1/loyalty/memberships/[id]/route.ts', 'app/api/v1/loyalty/memberships/[id]/observations/route.ts'];
+      'app/api/v1/loyalty/memberships/[id]/route.ts', 'app/api/v1/loyalty/memberships/[id]/observations/route.ts', 'app/api/v1/loyalty/memberships/[id]/screenshot/confirm/route.ts'];
     for (const f of files) expect(ROUTES.find((r) => r.file === f)?.classes).toEqual(MEMBERSHIP_VIEW_ROUTES.includes(f) ? ['numeric-only'] : ['no-transaction-data']);
     const sources = [
       'lib/loyaltyStore.ts', 'lib/domain/loyalty.ts', 'lib/domain/loyaltyImport.ts', 'scripts/import-loyalty.ts',
