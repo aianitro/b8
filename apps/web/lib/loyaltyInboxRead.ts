@@ -60,6 +60,7 @@ import {
   type LoyaltyInboxReadRequest,
   type LoyaltyInboxReadRun,
   type LoyaltyInboxResolve,
+  type LoyaltyInboxOrigin,
   type LoyaltyInboxResolveRequest,
   type LoyaltyReadCoverage,
   type LoyaltyReadErrorCode,
@@ -121,6 +122,13 @@ interface Candidate {
   receivedOn: string;
   /** Attempts already made: 0 for a message with no reads row. */
   attempts: number;
+  /**
+   * Where 42c1's poll found the original sender (P8-42c3). `attachment` is its record that a registered
+   * member forwarded the statement as an attached message, and it alone makes the text path read that
+   * attached original. Taken from the stored row, never re-derived from the member addresses at read
+   * time: the poll's decision is the one the message was filed under.
+   */
+  origin: LoyaltyInboxOrigin;
 }
 
 /** Codes that end a message at their first occurrence: asking again would get the same answer. */
@@ -291,7 +299,7 @@ async function readAll(reader: MailReader, env: Env, retryFailed: boolean, count
   }
   const candidates = await db.query<Candidate>(
     `SELECT m.id AS "messageId", m.dedupe_key AS key, m.program_id AS "programId", m.received_on::text AS "receivedOn",
-            coalesce(r.attempts, 0)::int AS attempts
+            coalesce(r.attempts, 0)::int AS attempts, m.origin
        FROM loyalty_inbox_messages m LEFT JOIN loyalty_inbox_reads r ON r.dedupe_key = m.dedupe_key
       WHERE m.raw_mail IS NOT NULL AND (r.id IS NULL OR r.state = 'retry')
       ORDER BY m.received_on, m.id
@@ -321,7 +329,7 @@ async function readAll(reader: MailReader, env: Env, retryFailed: boolean, count
       let code: LoyaltyReadErrorCode | null = null;
       try {
         const raw = await bytesOf(c.messageId);
-        const input = raw === null ? null : await textForReader(raw, LOYALTY_READ_MAX_CHARS).catch(() => null);
+        const input = raw === null ? null : await textForReader(raw, LOYALTY_READ_MAX_CHARS, c.origin).catch(() => null);
         if (input === null || input.text === '') {
           code = 'empty_message';
         } else {

@@ -1,0 +1,5 @@
+# False positives approved by the owner 2026-11-24: P8-42c3 fixture dedupe keys ("key": "zq42c3-k-..."), fabricated, not secrets.
+apps/web/lib/fixtures/loyalty-read-forwards/cases.json:generic-api-key:924
+apps/web/lib/fixtures/loyalty-read-forwards/cases.json:generic-api-key:934
+apps/web/lib/fixtures/loyalty-read-forwards/cases.json:generic-api-key:1015
+apps/web/lib/fixtures/loyalty-read-forwards/cases.json:generic-api-key:1024

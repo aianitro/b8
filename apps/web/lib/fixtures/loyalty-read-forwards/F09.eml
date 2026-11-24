@@ -1,0 +1,43 @@
+From: ZQ42C3 Anna <zq42c3-anna@example.com>
+To: zq42c3-inbox@example.net
+Subject: Fwd: ZQ42C3-OUTER-SUBJECT inline
+Message-ID: <f09@zq42c3-mail.test>
+X-ZQ42C3: ZQ42C3-HEADER-CANARY
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="ZQ42C3-B"
+
+--ZQ42C3-B
+Content-Type: text/plain; charset=utf-8
+
+ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F09 see attached, from zq42c3-anna@example.com
+--ZQ42C3-B
+Content-Type: message/rfc822
+Content-Disposition: inline
+
+From: ZQ42C3 Air <statements@zq42c3-air.test>
+To: zq42c3-member@example.org
+Cc: zq42c3-cc@example.org
+Delivered-To: zq42c3-delivered@example.net
+Subject: ZQ42C3-INNER-SUBJECT inline statement
+Message-ID: <inner@zq42c3-air.test>
+Date: Thu, 20 Nov 2026 09:00:00 +0000
+X-ZQ42C3: ZQ42C3-HEADER-CANARY
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="ZQ42C3-N"
+
+--ZQ42C3-N
+Content-Type: text/plain; charset=utf-8
+
+ZQ42C3-INNER-BODY F09
+Earn 2.5x ZQ42C3 points
+--ZQ42C3-N
+Content-Type: message/rfc822
+Content-Disposition: inline
+
+From: ZQ42C3 Nested <zq42c3-nested@example.org>
+Subject: ZQ42C3-NESTED-SUBJECT
+Content-Type: text/plain; charset=utf-8
+
+ZQ42C3-NESTED-BODY
+--ZQ42C3-N--
+--ZQ42C3-B--

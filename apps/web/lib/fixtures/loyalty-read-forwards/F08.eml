@@ -1,0 +1,10 @@
+From: ZQ42C3 Anna <zq42c3-anna@example.com>
+To: zq42c3-inbox@example.net
+Subject: Fwd: ZQ42C3 no attachment
+Message-ID: <f08@zq42c3-mail.test>
+X-ZQ42C3: ZQ42C3-HEADER-CANARY
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F08 no attachment here, from zq42c3-anna@example.com

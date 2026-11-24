@@ -329,8 +329,33 @@ export function attributeMessage(tiers: readonly string[][], memberOf: ReadonlyM
  * bracket, and the bare `www.` form. Tracking links carry tokens and, often, the recipient's address.
  */
 const URL_IN_TEXT = /\b(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>"'\])]+/gi;
+/**
+ * A `mailto:` or `tel:` link (P8-42c3). Neither has `//`, so the URL rule above never saw them, and a
+ * `mailto:` carries an address. `\b` keeps `Hotel:` and `Intel:` out, and at least one character
+ * must follow the colon, so `Tel: ` before a printed phone number is left alone.
+ */
+const MAILTO_OR_TEL = /\b(?:mailto|tel):[^\s<>"'\])]+/gi;
+/**
+ * An e-mail address anywhere in the text (P8-42c3): a quoted one, one in a reply line, one the parser
+ * rendered from an HTML anchor. Every dot in the domain must be followed by a label, so a sentence's
+ * closing period stays outside it; a path, query or fragment glued directly to the address goes with
+ * it, so no half of a tracking address is left behind. A local part of mask characters (`a***@`) and
+ * a non-ASCII address do not match: stated residuals (SPEC.md Non-goals), not oversights.
+ */
+const ADDRESS_IN_TEXT = /[a-z0-9._%+'-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/?#][^\s<>"'\])]*)?/gi;
+/**
+ * A link written without a scheme, such as a tracking host followed by a path (P8-42c3). The shape is
+ * deliberately narrow, because the text it runs over is a statement full of figures: the last label
+ * is two to twenty-four LETTERS, so a decimal, a dotted date, a multiplier or a version number never
+ * qualifies, and the host must be followed at once by `/`, `?` or `#`, so a bare domain, a file name
+ * or a sentence end glued by a dot is left as written. The lookbehind keeps it from starting inside a
+ * word or right after an `@` (addresses are already gone by the time it runs).
+ */
+const BARE_LINK = /(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?::[0-9]{1,5})?(?=[/?#])[^\s<>"'\])]*/gi;
 /** What a removed link becomes, so the sentence around it still reads. */
 const LINK_PLACEHOLDER = '[link]';
+/** What a removed e-mail address becomes; distinct from a link so the sentence still says what it was. */
+const ADDRESS_PLACEHOLDER = '[address]';
 /** The longest subject sent. A subject is a line, not a body. */
 const SUBJECT_MAX_CHARS = 300;
 
@@ -339,29 +364,146 @@ const firstChars = (text: string, max: number) => {
   const chars = Array.from(text);
   return chars.length <= max ? text : chars.slice(0, max).join('');
 };
-const withoutLinks = (text: string) => text.replace(URL_IN_TEXT, LINK_PLACEHOLDER);
 
 /**
- * WHAT THE MODEL SEES OF ONE STORED MESSAGE (P8-42c2, SPEC.md Open question 3): its subject and its
- * text, and nothing else. No header is sent — not From, To, Cc, Delivered-To, Received or the
- * Message-ID — so no address or routing detail leaves the machine with it, and no attachment is read.
- *
- *   text    — the text/plain part when there is one; otherwise the HTML converted to text by the
- *             parser, which drops `script` and `style` and never keeps markup. Every URL becomes
- *             `[link]`, then the result is cut at `maxChars` characters, so the prompt is bounded
- *             whatever the mail's size. Empty means there is nothing to read: the caller records
- *             `empty_message` and never calls the model.
- *   subject — at most 300 characters, URLs removed the same way; null when there is none.
- *
- * Pure: it parses the bytes it is handed. The body may still hold a name or a postal address the
- * statement prints; the request asks for program fields only and nothing else is kept from it.
+ * Links and addresses replaced, in the one order the spec fixes (SPEC.md "Order of operations"):
+ * scheme links, then `mailto:`/`tel:`, then addresses, then scheme-less links. The order is the
+ * point. The address rule runs after `mailto:` so a `mailto:` link is one `[link]` and not
+ * `mailto:[address]`; it runs before the scheme-less rule so `name@host.example/u?t=…` is one
+ * `[address]` and never `name@[link]`, which would leave the local part behind.
  */
-export async function textForReader(raw: Buffer, maxChars: number): Promise<{ subject: string | null; text: string }> {
-  const parsed = await simpleParser(raw, {
-    skipTextToHtml: true, skipTextLinks: true, skipImageLinks: true, keepCidLinks: true,
-  });
-  const body = typeof parsed.text === 'string' ? parsed.text : '';
-  const text = firstChars(withoutLinks(body).trim(), maxChars);
-  const subjectText = typeof parsed.subject === 'string' ? withoutLinks(parsed.subject).trim() : '';
+const scrubbed = (text: string) =>
+  text
+    .replace(URL_IN_TEXT, LINK_PLACEHOLDER)
+    .replace(MAILTO_OR_TEL, LINK_PLACEHOLDER)
+    .replace(ADDRESS_IN_TEXT, ADDRESS_PLACEHOLDER)
+    .replace(BARE_LINK, LINK_PLACEHOLDER);
+
+/**
+ * The text without the header block of any inline forward (P8-42c3, SPEC.md "The inline-forward
+ * header block"). The marker and its twelve-line reach are 42c1's own (`MARKER`, `MARKER_REACH`,
+ * `unquote`), so the block removed here is the block the poll read the original sender from. For
+ * each marker, the nearest `From:` line within reach and every non-blank line directly after it
+ * (To, Cc, Date, Subject, folded continuations) go, whole and with any quote prefix; the marker, the
+ * lines before the From line, the blank separator and the statement after it stay verbatim. Every
+ * marker is handled, so a forward of a forward loses both blocks. It is shape-based and runs whatever
+ * the stored origin: a member's inline forward, a stranger's quoted reply and an attached original
+ * all lose the block alike, and the addresses in a block left in place are still scrubbed after.
+ */
+function withoutForwardHeaders(text: string): string {
+  const lines = text.split('\n');
+  const bare = lines.map((line) => unquote(line).trim());
+  const drop = new Set<number>();
+  for (let i = 0; i < lines.length; i++) {
+    if (!MARKER.test(bare[i])) continue;
+    for (let j = i + 1; j <= i + MARKER_REACH && j < lines.length; j++) {
+      if (!/^from:/i.test(bare[j])) continue;
+      for (let k = j; k < lines.length && bare[k] !== ''; k++) drop.add(k);
+      break;
+    }
+  }
+  return drop.size === 0 ? text : lines.filter((_, n) => !drop.has(n)).join('\n');
+}
+
+/**
+ * Parser options for reading a stored message's text: no HTML generated, links not rewritten, and
+ * every message/rfc822 part kept as an attachment (`ignoreEmbedded`), exactly as the poll's `PARSE`
+ * keeps it (P8-42c3 A2). Without that flag the parser merges an attached message marked
+ * `Content-Disposition: inline` into the surrounding text, its From, To, Date and Subject lines
+ * included: the poll would have stored the forward as `attachment`, but the reader would find no
+ * attachment and send the covering note with the original's headers. The same flag keeps a forward
+ * nested inside the chosen original, and a stranger's inline original, out of the text. `PARSE`
+ * itself is not reused because it also skips the HTML-to-text conversion an HTML-only statement needs.
+ */
+const READ_PARSE = { ignoreEmbedded: true, skipTextToHtml: true, skipTextLinks: true, skipImageLinks: true, keepCidLinks: true } as const;
+/**
+ * How far past the final length the text is kept BEFORE the scrub (P8-42c3 A2, A3). The four
+ * patterns cost time that grows with the square of an unbroken run (a long token with no space in
+ * it), and a stored mail may be megabytes: measured, a run of a million characters did not finish in
+ * ten minutes, all of it under the read lock. Bounding first makes the scrub's cost a function of
+ * `maxChars`, not of the mail. The margin is slack for the scrub to work in; it is NOT what keeps a
+ * token whole (that is `tokenSafePrefix` below, and A2's claim that the margin alone did was wrong).
+ */
+const SCRUB_MARGIN_CHARS = 1024;
+
+/** Whether one code point is whitespace, by the same `\s` the patterns stop at. */
+const isSpace = (c: string) => /^\s$/.test(c);
+
+/**
+ * The first `bound` code points of `text`, never ending inside a token (P8-42c3 A3).
+ *
+ * WHY A WHOLE TOKEN GOES. None of the four patterns ever matches across whitespace, so the scrub of a
+ * prefix that ends on a token boundary is exactly a prefix of the scrub of the whole text: every
+ * token it sees is complete, and an address is either replaced whole or not reached at all. A cut in
+ * the middle of a token breaks that. `zq42c3-anna@host` cut to `zq42c3-an` matches nothing and
+ * survives the scrub as text; and because the scrub then shortens what comes before it (forty long
+ * tracking links become `[link]`), the fragment moves inside the final `maxChars` and is sent.
+ * Measured against A2's plain cut: the text sent ended in exactly such a fragment.
+ *
+ * So when the text is longer than the bound and the bound falls inside a token (the last kept and
+ * the first dropped code point are both non-whitespace), the kept part also loses that trailing
+ * token, back to the last whitespace before it. A prefix with no whitespace at all is one token and
+ * becomes empty: the caller then records `empty_message` (text) or sends no subject. That only ever
+ * sends less, which is the stated residual.
+ *
+ * Linear by construction: one pass to split code points and one backward scan, no pattern over the
+ * kept string, because a backtracking pattern here would reintroduce the cost the bound exists for.
+ */
+function tokenSafePrefix(text: string, bound: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= bound) return text;
+  if (bound <= 0) return '';
+  let end = bound;
+  if (!isSpace(chars[bound - 1]) && !isSpace(chars[bound])) {
+    while (end > 0 && !isSpace(chars[end - 1])) end--;
+  }
+  return chars.slice(0, end).join('');
+}
+
+/**
+ * WHAT THE MODEL SEES OF ONE STORED MESSAGE (P8-42c2, SPEC.md Open question 3; P8-42c3): the subject
+ * and the text of ONE chosen message, and nothing else. No header of any message is sent — not From,
+ * To, Cc, Delivered-To, Received, Date or the Message-ID — so no routing detail leaves the machine.
+ *
+ *   chosen  — the outer message, unless the stored `origin` is `attachment` and the bytes hold a
+ *             message/rfc822 part: then the FIRST such part, parsed as a message, and nothing of the
+ *             forwarder's covering note or covering subject, even when the original has no subject
+ *             or no text (an empty original gives empty text and the caller records `empty_message`;
+ *             it never falls back to the note). The stored origin is 42c1's record of "a registered
+ *             member forwarded this as an attachment"; it is not re-derived here from the bytes, so a
+ *             stranger's mail with an attached message (stored `direct`) is read as its outer
+ *             message, exactly as before. Omitted means `direct`. Only that one part is read: not a
+ *             later one, not the original's own attachments, and a forward nested inside it is not
+ *             unwrapped.
+ *   text    — the chosen message's text/plain part when there is one; otherwise its HTML converted to
+ *             text by the parser, which drops `script` and `style` and never keeps markup. Line
+ *             breaks become LF, inline-forward header blocks go, the text is bounded to `maxChars`
+ *             plus `SCRUB_MARGIN_CHARS` without ending inside a token (`tokenSafePrefix`), so the
+ *             scrub's cost cannot grow with the mail and it never sees half a token, links and
+ *             addresses are scrubbed, the result is trimmed, and only THEN cut at `maxChars`
+ *             characters: a cut at `maxChars` before the scrub could leave half an address
+ *             (`anna@exa`) that no pattern recognises any more.
+ *             Empty means there is nothing to read: the caller records `empty_message` and never
+ *             calls the model.
+ *   subject — the chosen message's subject, bounded and scrubbed the same way (no block removal: it
+ *             is one line), at most 300 characters; null when there is none or nothing is left. A
+ *             subject that was only an address is `[address]`, which is text, not null.
+ *
+ * Pure: it parses the bytes it is handed. What is not scrubbed still reaches the model and is a
+ * stated residual: names, postal addresses, plain phone numbers with no `tel:`, member numbers,
+ * balances, dates, masked-local and non-ASCII addresses. The request asks for program fields only
+ * and nothing else is kept from it.
+ */
+export async function textForReader(
+  raw: Buffer,
+  maxChars: number,
+  origin: LoyaltyInboxOrigin = 'direct'
+): Promise<{ subject: string | null; text: string }> {
+  const outer = await simpleParser(raw, READ_PARSE);
+  const attached = origin === 'attachment' ? outer.attachments.find((a) => a.contentType === 'message/rfc822') : undefined;
+  const chosen = attached ? await simpleParser(attached.content, READ_PARSE) : outer;
+  const body = typeof chosen.text === 'string' ? chosen.text.replace(/\r\n?/g, '\n') : '';
+  const text = firstChars(scrubbed(tokenSafePrefix(withoutForwardHeaders(body), maxChars + SCRUB_MARGIN_CHARS)).trim(), maxChars);
+  const subjectText = typeof chosen.subject === 'string' ? scrubbed(tokenSafePrefix(chosen.subject, SUBJECT_MAX_CHARS + SCRUB_MARGIN_CHARS)).trim() : '';
   return { subject: subjectText === '' ? null : firstChars(subjectText, SUBJECT_MAX_CHARS), text };
 }

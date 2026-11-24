@@ -1,0 +1,1050 @@
+{
+  "note": "Fabricated fixtures for P8-42c3 (ZQ42C3). No real person, address, program, member number or balance. Written by the orchestrator at G0; every expectation was hand-written and cross-checked against the SPEC patterns run over mailparser.",
+  "canaries": {
+    "subject": "ZQ42C3-SUBJECT-CANARY",
+    "body": "ZQ42C3-BODY-CANARY",
+    "innerSubject": "ZQ42C3-INNER-SUBJECT",
+    "innerBody": "ZQ42C3-INNER-BODY",
+    "outerNote": "ZQ42C3-OUTER-NOTE",
+    "strangerInner": "ZQ42C3-STRANGER-INNER",
+    "header": "ZQ42C3-HEADER-CANARY",
+    "script": "ZQ42C3-SCRIPT-CANARY",
+    "memberNumber": "ZQ42C3A0007731",
+    "key": "sk-ant-ZQ42C3-KEY-CANARY",
+    "addresses": [
+      "zq42c3-anna@example.com",
+      "zq42c3-inbox@example.net",
+      "statements@zq42c3-air.test",
+      "zq42c3-ben@example.net",
+      "zq42c3-member@example.org",
+      "zq42c3-cc@example.org",
+      "zq42c3-delivered@example.net",
+      "zq42c3-help@zq42c3-links.test",
+      "zq42c3-stranger@example.invalid",
+      "zq42c3-anna+loyalty@example.com",
+      "zq42c3-a@example.com",
+      "zq42c3-b@example.net",
+      "zq42c3-c@example.org",
+      "qxzq42c3local@example.com",
+      "zq42c3-nested@example.org"
+    ],
+    "linkHosts": [
+      "zq42c3-links.test",
+      "track.zq42c3-links.test"
+    ]
+  },
+  "envelope": "From: ZQ42C3 Envelope <statements@zq42c3-air.test>\nTo: zq42c3-inbox@example.net\nSubject: ZQ42C3 envelope\nMessage-ID: <envelope@zq42c3-mail.test>\nMIME-Version: 1.0\nContent-Type: text/plain; charset=utf-8\nContent-Transfer-Encoding: 8bit\n\n{{BODY}}\n",
+  "shapes": [
+    {
+      "id": "direct-collisions",
+      "eml": "F01",
+      "origin": "omitted",
+      "expect": {
+        "subject": "ZQ42C3-SUBJECT-CANARY statement for [address]",
+        "text": "ZQ42C3-BODY-CANARY F01\nContact [address] today\nOn 20 Nov 2026, ZQ42C3 Anna <[address]> wrote:\nWrite to [address] now\nSent to [address]\n> [address] said\na: [address], b: [address]\nOpen [address] here\nReply [link]\nReply <[link]>\nCall [link]\nCall [link] now\nVisit [link] today\nVisit [link] today\nVisit [link] today\nVisit [link] today\nVisit [link] today\nSee [link] today\nSee [link] today\nsee [link] or write [address]\nBalance 1234.56 ZQ42C3 points\nBalance 52,000 ZQ42C3 miles\nCredit 1,234.50 ZQ42C3 travel cash\nEarn 1.5x ZQ42C3 points\nEarn 2.5x/dollar on ZQ42C3 stays\nAs of 20.11.2026 ZQ42C3\nAs of 2026.11.20 ZQ42C3\nAs of 20/11/2026 ZQ42C3\nAs of 11/20/2026 ZQ42C3\nAs of 2026-11-20 ZQ42C3\nOpen 09.30/17.45 ZQ42C3\nBonus 12.5% and 1/2 off ZQ42C3\nApp v2.10/beta ZQ42C3\nMember •••• 7731 ZQ42C3\nMember XXXXXX7731 ZQ42C3\nMember ******7731 ZQ42C3\nMember …7731 ZQ42C3\nMember #7731 ZQ42C3\nYour Z.Q. Rewards ZQ42C3 summary\nYour ZQ42C3.Air Club summary\nThanks for flying ZQ42C3 points.Thanks again\nSent by zq42c3-links.test for ZQ42C3\nAttached statement.pdf for ZQ42C3\nFees e.g./i.e. ZQ42C3 terms\nPromo zq42c3-club.x/promo ZQ42C3\nHotel: ZQ42C3 Stays\nIntel: ZQ42C3 note\nTel: +1 555 0100 ZQ42C3\nSent to a***@example.com ZQ42C3\nEarned @ ZQ42C3 partner\nSent to zq42c3-anna@example ZQ42C3"
+      }
+    },
+    {
+      "id": "inline-forward",
+      "eml": "F02",
+      "origin": "inline",
+      "expect": {
+        "subject": "Fwd: ZQ42C3 statement",
+        "text": "ZQ42C3 forwarding my statement ZQ42C3-BODY-CANARY F02\n\n---------- Forwarded message ---------\n\nZQ42C3-INNER-BODY F02\nDetails at [link]\nBalance 1234.56 ZQ42C3 points\nOn 20 Nov 2026, ZQ42C3 Anna <[address]> wrote:"
+      }
+    },
+    {
+      "id": "inline-forward-as-direct",
+      "eml": "F02",
+      "origin": "direct",
+      "expect": {
+        "subject": "Fwd: ZQ42C3 statement",
+        "text": "ZQ42C3 forwarding my statement ZQ42C3-BODY-CANARY F02\n\n---------- Forwarded message ---------\n\nZQ42C3-INNER-BODY F02\nDetails at [link]\nBalance 1234.56 ZQ42C3 points\nOn 20 Nov 2026, ZQ42C3 Anna <[address]> wrote:"
+      }
+    },
+    {
+      "id": "attach-member",
+      "eml": "F03",
+      "origin": "attachment",
+      "expect": {
+        "subject": "ZQ42C3-INNER-SUBJECT your statement for [address]",
+        "text": "ZQ42C3-INNER-BODY F03\nYour ZQ42C3 Air balance is shown in the app\nEarn 1.5x ZQ42C3 points\nManage at [link]\nHelp: [address]"
+      },
+      "absent": [
+        "ZQ42C3-OUTER-NOTE",
+        "ZQ42C3-OUTER-SUBJECT",
+        "ZQ42C3-HEADER-CANARY",
+        "ZQ42C3-STRANGER-INNER",
+        "@"
+      ]
+    },
+    {
+      "id": "attach-member-as-direct",
+      "eml": "F03",
+      "origin": "direct",
+      "expect": {
+        "subject": "Fwd: ZQ42C3-OUTER-SUBJECT",
+        "text": "ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F03 see attached, from [address]"
+      },
+      "absent": [
+        "ZQ42C3-INNER-BODY",
+        "ZQ42C3-INNER-SUBJECT"
+      ]
+    },
+    {
+      "id": "two-arg-call",
+      "eml": "F03",
+      "origin": "omitted",
+      "expect": {
+        "subject": "Fwd: ZQ42C3-OUTER-SUBJECT",
+        "text": "ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F03 see attached, from [address]"
+      },
+      "absent": [
+        "ZQ42C3-INNER-BODY",
+        "ZQ42C3-INNER-SUBJECT"
+      ]
+    },
+    {
+      "id": "attach-stranger",
+      "eml": "F04",
+      "origin": "direct",
+      "expect": {
+        "subject": "Fwd: ZQ42C3 stranger",
+        "text": "ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F04 from a stranger"
+      },
+      "absent": [
+        "ZQ42C3-STRANGER-INNER"
+      ]
+    },
+    {
+      "id": "html-only",
+      "eml": "F05",
+      "origin": "direct",
+      "expectSubject": "ZQ42C3 html statement",
+      "contains": [
+        "ZQ42C3-BODY-CANARY F05",
+        "Write us [[address]]",
+        "call us [[link]]",
+        "Or visit [link] or mail"
+      ],
+      "absent": [
+        "href",
+        "mailto",
+        "tel:",
+        "@",
+        "<p>",
+        "<a",
+        "ZQ42C3-SCRIPT-CANARY",
+        "zq42c3-links.test"
+      ],
+      "linkCount": 3,
+      "addressCount": 2
+    },
+    {
+      "id": "attach-inner-empty",
+      "eml": "F06",
+      "origin": "attachment",
+      "expect": {
+        "subject": "ZQ42C3-INNER-SUBJECT empty statement",
+        "text": ""
+      },
+      "absent": [
+        "ZQ42C3-OUTER-NOTE",
+        "ZQ42C3-OUTER-SUBJECT"
+      ]
+    },
+    {
+      "id": "attach-inner-html",
+      "eml": "F07",
+      "origin": "attachment",
+      "expectSubject": "ZQ42C3-INNER-SUBJECT html statement",
+      "contains": [
+        "ZQ42C3-INNER-BODY F07",
+        "help [[address]] or [address]"
+      ],
+      "absent": [
+        "href",
+        "mailto",
+        "tel:",
+        "@",
+        "<p>",
+        "<a",
+        "ZQ42C3-SCRIPT-CANARY",
+        "zq42c3-links.test",
+        "ZQ42C3-OUTER-NOTE",
+        "ZQ42C3-OUTER-SUBJECT"
+      ],
+      "linkCount": 0,
+      "addressCount": 2
+    },
+    {
+      "id": "attach-origin-no-part",
+      "eml": "F08",
+      "origin": "attachment",
+      "expect": {
+        "subject": "Fwd: ZQ42C3 no attachment",
+        "text": "ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F08 no attachment here, from [address]"
+      }
+    },
+    {
+      "id": "attach-inline-disposition",
+      "eml": "F09",
+      "origin": "attachment",
+      "expect": {
+        "subject": "ZQ42C3-INNER-SUBJECT inline statement",
+        "text": "ZQ42C3-INNER-BODY F09\nEarn 2.5x ZQ42C3 points"
+      },
+      "absent": [
+        "ZQ42C3-OUTER-NOTE",
+        "ZQ42C3-OUTER-SUBJECT",
+        "ZQ42C3-HEADER-CANARY",
+        "ZQ42C3-NESTED-BODY",
+        "ZQ42C3-NESTED-SUBJECT",
+        "ZQ42C3 Nested",
+        "From: ",
+        "Subject: ",
+        "Date: "
+      ]
+    },
+    {
+      "id": "attach-inline-disposition-as-direct",
+      "eml": "F09",
+      "origin": "direct",
+      "expect": {
+        "subject": "Fwd: ZQ42C3-OUTER-SUBJECT inline",
+        "text": "ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F09 see attached, from [address]"
+      },
+      "absent": [
+        "ZQ42C3-INNER-BODY",
+        "ZQ42C3-INNER-SUBJECT",
+        "ZQ42C3-NESTED-BODY",
+        "ZQ42C3-NESTED-SUBJECT",
+        "ZQ42C3 Nested",
+        "From: ",
+        "Subject: ",
+        "Date: "
+      ]
+    }
+  ],
+  "scrub": [
+    {
+      "id": "address-plain",
+      "body": "Contact zq42c3-anna@example.com today",
+      "expect": "Contact [address] today"
+    },
+    {
+      "id": "address-angle-reply",
+      "body": "On 20 Nov 2026, ZQ42C3 Anna <zq42c3-anna@example.com> wrote:",
+      "expect": "On 20 Nov 2026, ZQ42C3 Anna <[address]> wrote:"
+    },
+    {
+      "id": "address-uppercase",
+      "body": "Write to ZQ42C3-ANNA@EXAMPLE.COM now",
+      "expect": "Write to [address] now"
+    },
+    {
+      "id": "address-plus-tag",
+      "body": "Sent to zq42c3-anna+loyalty@example.com",
+      "expect": "Sent to [address]"
+    },
+    {
+      "id": "address-in-quote-prefix",
+      "body": "> zq42c3-anna@example.com said",
+      "expect": "> [address] said"
+    },
+    {
+      "id": "address-two-on-line",
+      "body": "a: zq42c3-a@example.com, b: zq42c3-b@example.net",
+      "expect": "a: [address], b: [address]"
+    },
+    {
+      "id": "address-then-path",
+      "body": "Open zq42c3-anna@track.zq42c3-links.test/u?t=ZQ42C3 here",
+      "expect": "Open [address] here"
+    },
+    {
+      "id": "mailto-bare",
+      "body": "Reply mailto:zq42c3-anna@example.com",
+      "expect": "Reply [link]"
+    },
+    {
+      "id": "mailto-angle",
+      "body": "Reply <mailto:zq42c3-anna@example.com>",
+      "expect": "Reply <[link]>"
+    },
+    {
+      "id": "tel-plain",
+      "body": "Call tel:5550100",
+      "expect": "Call [link]"
+    },
+    {
+      "id": "tel-plus-digits",
+      "body": "Call tel:+1-555-0100 now",
+      "expect": "Call [link] now"
+    },
+    {
+      "id": "bare-link-path",
+      "body": "Visit track.zq42c3-links.test/u today",
+      "expect": "Visit [link] today"
+    },
+    {
+      "id": "bare-link-query",
+      "body": "Visit zq42c3-links.test?t=ZQ42C3 today",
+      "expect": "Visit [link] today"
+    },
+    {
+      "id": "bare-link-fragment",
+      "body": "Visit zq42c3-links.test#offers today",
+      "expect": "Visit [link] today"
+    },
+    {
+      "id": "bare-link-port-path",
+      "body": "Visit zq42c3-links.test:8443/path today",
+      "expect": "Visit [link] today"
+    },
+    {
+      "id": "bare-link-uppercase",
+      "body": "Visit TRACK.ZQ42C3-LINKS.TEST/U today",
+      "expect": "Visit [link] today"
+    },
+    {
+      "id": "www-link",
+      "body": "See www.zq42c3-links.test/offers today",
+      "expect": "See [link] today"
+    },
+    {
+      "id": "scheme-link",
+      "body": "See https://zq42c3-links.test/a?b=c today",
+      "expect": "See [link] today"
+    },
+    {
+      "id": "link-then-address-same-line",
+      "body": "see https://zq42c3-links.test/x or write zq42c3-anna@example.com",
+      "expect": "see [link] or write [address]"
+    },
+    {
+      "id": "balance-decimal",
+      "body": "Balance 1234.56 ZQ42C3 points",
+      "expect": "Balance 1234.56 ZQ42C3 points"
+    },
+    {
+      "id": "balance-comma-grouped",
+      "body": "Balance 52,000 ZQ42C3 miles",
+      "expect": "Balance 52,000 ZQ42C3 miles"
+    },
+    {
+      "id": "balance-comma-grouped-decimals",
+      "body": "Credit 1,234.50 ZQ42C3 travel cash",
+      "expect": "Credit 1,234.50 ZQ42C3 travel cash"
+    },
+    {
+      "id": "multiplier-decimal-x",
+      "body": "Earn 1.5x ZQ42C3 points",
+      "expect": "Earn 1.5x ZQ42C3 points"
+    },
+    {
+      "id": "multiplier-decimal-x-slash",
+      "body": "Earn 2.5x/dollar on ZQ42C3 stays",
+      "expect": "Earn 2.5x/dollar on ZQ42C3 stays"
+    },
+    {
+      "id": "date-dotted-dmy",
+      "body": "As of 20.11.2026 ZQ42C3",
+      "expect": "As of 20.11.2026 ZQ42C3"
+    },
+    {
+      "id": "date-dotted-ymd",
+      "body": "As of 2026.11.20 ZQ42C3",
+      "expect": "As of 2026.11.20 ZQ42C3"
+    },
+    {
+      "id": "date-slashed-dmy",
+      "body": "As of 20/11/2026 ZQ42C3",
+      "expect": "As of 20/11/2026 ZQ42C3"
+    },
+    {
+      "id": "date-slashed-mdy",
+      "body": "As of 11/20/2026 ZQ42C3",
+      "expect": "As of 11/20/2026 ZQ42C3"
+    },
+    {
+      "id": "date-iso",
+      "body": "As of 2026-11-20 ZQ42C3",
+      "expect": "As of 2026-11-20 ZQ42C3"
+    },
+    {
+      "id": "time-dotted-slash",
+      "body": "Open 09.30/17.45 ZQ42C3",
+      "expect": "Open 09.30/17.45 ZQ42C3"
+    },
+    {
+      "id": "percent-and-fraction",
+      "body": "Bonus 12.5% and 1/2 off ZQ42C3",
+      "expect": "Bonus 12.5% and 1/2 off ZQ42C3"
+    },
+    {
+      "id": "version-like-slash",
+      "body": "App v2.10/beta ZQ42C3",
+      "expect": "App v2.10/beta ZQ42C3"
+    },
+    {
+      "id": "masked-bullets",
+      "body": "Member •••• 7731 ZQ42C3",
+      "expect": "Member •••• 7731 ZQ42C3"
+    },
+    {
+      "id": "masked-letter-x",
+      "body": "Member XXXXXX7731 ZQ42C3",
+      "expect": "Member XXXXXX7731 ZQ42C3"
+    },
+    {
+      "id": "masked-star",
+      "body": "Member ******7731 ZQ42C3",
+      "expect": "Member ******7731 ZQ42C3"
+    },
+    {
+      "id": "masked-ellipsis",
+      "body": "Member …7731 ZQ42C3",
+      "expect": "Member …7731 ZQ42C3"
+    },
+    {
+      "id": "suffix-hash",
+      "body": "Member #7731 ZQ42C3",
+      "expect": "Member #7731 ZQ42C3"
+    },
+    {
+      "id": "program-dotted-abbrev",
+      "body": "Your Z.Q. Rewards ZQ42C3 summary",
+      "expect": "Your Z.Q. Rewards ZQ42C3 summary"
+    },
+    {
+      "id": "program-fabricated-dotted-name",
+      "body": "Your ZQ42C3.Air Club summary",
+      "expect": "Your ZQ42C3.Air Club summary"
+    },
+    {
+      "id": "glued-dot-no-slash",
+      "body": "Thanks for flying ZQ42C3 points.Thanks again",
+      "expect": "Thanks for flying ZQ42C3 points.Thanks again"
+    },
+    {
+      "id": "bare-domain-no-path",
+      "body": "Sent by zq42c3-links.test for ZQ42C3",
+      "expect": "Sent by zq42c3-links.test for ZQ42C3"
+    },
+    {
+      "id": "file-name-like",
+      "body": "Attached statement.pdf for ZQ42C3",
+      "expect": "Attached statement.pdf for ZQ42C3"
+    },
+    {
+      "id": "abbrev-slash",
+      "body": "Fees e.g./i.e. ZQ42C3 terms",
+      "expect": "Fees e.g./i.e. ZQ42C3 terms"
+    },
+    {
+      "id": "one-letter-tld",
+      "body": "Promo zq42c3-club.x/promo ZQ42C3",
+      "expect": "Promo zq42c3-club.x/promo ZQ42C3"
+    },
+    {
+      "id": "hotel-colon",
+      "body": "Hotel: ZQ42C3 Stays",
+      "expect": "Hotel: ZQ42C3 Stays"
+    },
+    {
+      "id": "intel-colon",
+      "body": "Intel: ZQ42C3 note",
+      "expect": "Intel: ZQ42C3 note"
+    },
+    {
+      "id": "tel-colon-space",
+      "body": "Tel: +1 555 0100 ZQ42C3",
+      "expect": "Tel: +1 555 0100 ZQ42C3"
+    },
+    {
+      "id": "masked-address",
+      "body": "Sent to a***@example.com ZQ42C3",
+      "expect": "Sent to a***@example.com ZQ42C3"
+    },
+    {
+      "id": "at-sign-no-domain",
+      "body": "Earned @ ZQ42C3 partner",
+      "expect": "Earned @ ZQ42C3 partner"
+    },
+    {
+      "id": "address-without-tld-dot",
+      "body": "Sent to zq42c3-anna@example ZQ42C3",
+      "expect": "Sent to zq42c3-anna@example ZQ42C3"
+    }
+  ],
+  "inlineBlocks": [
+    {
+      "id": "gmail-style",
+      "lines": [
+        "ZQ42C3 see below",
+        "",
+        "---------- Forwarded message ---------",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "Date: Thu, 20 Nov 2026 at 09:00",
+        "Subject: ZQ42C3 statement",
+        "To: <zq42c3-anna@example.com>",
+        "",
+        "Your ZQ42C3 statement body"
+      ],
+      "expectLines": [
+        "ZQ42C3 see below",
+        "",
+        "---------- Forwarded message ---------",
+        "",
+        "Your ZQ42C3 statement body"
+      ]
+    },
+    {
+      "id": "outlook-style",
+      "lines": [
+        "ZQ42C3 fyi",
+        "-----Original Message-----",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "Sent: Thursday, 20 November 2026 09:00",
+        "To: zq42c3-anna@example.com",
+        "Cc: zq42c3-ben@example.net",
+        "Subject: ZQ42C3 statement",
+        "",
+        "Your ZQ42C3 statement body"
+      ],
+      "expectLines": [
+        "ZQ42C3 fyi",
+        "-----Original Message-----",
+        "",
+        "Your ZQ42C3 statement body"
+      ]
+    },
+    {
+      "id": "apple-style",
+      "lines": [
+        "ZQ42C3 from my phone",
+        "Begin forwarded message:",
+        "",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "Subject: ZQ42C3 statement",
+        "Date: 20 November 2026 at 09:00",
+        "To: zq42c3-anna@example.com",
+        "",
+        "Your ZQ42C3 statement body"
+      ],
+      "expectLines": [
+        "ZQ42C3 from my phone",
+        "Begin forwarded message:",
+        "",
+        "",
+        "Your ZQ42C3 statement body"
+      ]
+    },
+    {
+      "id": "quoted-prefix",
+      "lines": [
+        "ZQ42C3 note",
+        "> ---------- Forwarded message ---------",
+        "> From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "> To: zq42c3-anna@example.com",
+        ">",
+        "> quoted ZQ42C3 body"
+      ],
+      "expectLines": [
+        "ZQ42C3 note",
+        "> ---------- Forwarded message ---------",
+        ">",
+        "> quoted ZQ42C3 body"
+      ]
+    },
+    {
+      "id": "folded-to",
+      "lines": [
+        "---------- Forwarded message ---------",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "To: zq42c3-a@example.com,",
+        "    zq42c3-b@example.net,",
+        "    zq42c3-c@example.org",
+        "Subject: ZQ42C3 statement",
+        "",
+        "Folded ZQ42C3 body"
+      ],
+      "expectLines": [
+        "---------- Forwarded message ---------",
+        "",
+        "Folded ZQ42C3 body"
+      ]
+    },
+    {
+      "id": "reach-12-removed",
+      "lines": [
+        "---------- Forwarded message ---------",
+        "ZQ42C3 filler line 1",
+        "ZQ42C3 filler line 2",
+        "ZQ42C3 filler line 3",
+        "ZQ42C3 filler line 4",
+        "ZQ42C3 filler line 5",
+        "ZQ42C3 filler line 6",
+        "ZQ42C3 filler line 7",
+        "ZQ42C3 filler line 8",
+        "ZQ42C3 filler line 9",
+        "ZQ42C3 filler line 10",
+        "ZQ42C3 filler line 11",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "To: zq42c3-anna@example.com",
+        "",
+        "Reach ZQ42C3 body"
+      ],
+      "expectLines": [
+        "---------- Forwarded message ---------",
+        "ZQ42C3 filler line 1",
+        "ZQ42C3 filler line 2",
+        "ZQ42C3 filler line 3",
+        "ZQ42C3 filler line 4",
+        "ZQ42C3 filler line 5",
+        "ZQ42C3 filler line 6",
+        "ZQ42C3 filler line 7",
+        "ZQ42C3 filler line 8",
+        "ZQ42C3 filler line 9",
+        "ZQ42C3 filler line 10",
+        "ZQ42C3 filler line 11",
+        "",
+        "Reach ZQ42C3 body"
+      ]
+    },
+    {
+      "id": "reach-13-kept",
+      "lines": [
+        "---------- Forwarded message ---------",
+        "ZQ42C3 filler line 1",
+        "ZQ42C3 filler line 2",
+        "ZQ42C3 filler line 3",
+        "ZQ42C3 filler line 4",
+        "ZQ42C3 filler line 5",
+        "ZQ42C3 filler line 6",
+        "ZQ42C3 filler line 7",
+        "ZQ42C3 filler line 8",
+        "ZQ42C3 filler line 9",
+        "ZQ42C3 filler line 10",
+        "ZQ42C3 filler line 11",
+        "ZQ42C3 filler line 12",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "To: zq42c3-anna@example.com",
+        "",
+        "Reach ZQ42C3 body"
+      ],
+      "expectLines": [
+        "---------- Forwarded message ---------",
+        "ZQ42C3 filler line 1",
+        "ZQ42C3 filler line 2",
+        "ZQ42C3 filler line 3",
+        "ZQ42C3 filler line 4",
+        "ZQ42C3 filler line 5",
+        "ZQ42C3 filler line 6",
+        "ZQ42C3 filler line 7",
+        "ZQ42C3 filler line 8",
+        "ZQ42C3 filler line 9",
+        "ZQ42C3 filler line 10",
+        "ZQ42C3 filler line 11",
+        "ZQ42C3 filler line 12",
+        "From: ZQ42C3 Air <[address]>",
+        "To: [address]",
+        "",
+        "Reach ZQ42C3 body"
+      ]
+    },
+    {
+      "id": "no-from",
+      "lines": [
+        "---------- Forwarded message ---------",
+        "ZQ42C3 no header follows",
+        "Date: 20 Nov 2026",
+        "",
+        "Body ZQ42C3"
+      ],
+      "expectLines": [
+        "---------- Forwarded message ---------",
+        "ZQ42C3 no header follows",
+        "Date: 20 Nov 2026",
+        "",
+        "Body ZQ42C3"
+      ]
+    },
+    {
+      "id": "two-blocks",
+      "lines": [
+        "ZQ42C3 outer",
+        "---------- Forwarded message ---------",
+        "From: zq42c3-ben@example.net",
+        "To: zq42c3-anna@example.com",
+        "",
+        "ZQ42C3 middle",
+        "---------- Forwarded message ---------",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "To: zq42c3-ben@example.net",
+        "",
+        "ZQ42C3 innermost body"
+      ],
+      "expectLines": [
+        "ZQ42C3 outer",
+        "---------- Forwarded message ---------",
+        "",
+        "ZQ42C3 middle",
+        "---------- Forwarded message ---------",
+        "",
+        "ZQ42C3 innermost body"
+      ]
+    },
+    {
+      "id": "block-to-end-of-text",
+      "lines": [
+        "ZQ42C3 note",
+        "---------- Forwarded message ---------",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "To: zq42c3-anna@example.com"
+      ],
+      "expectLines": [
+        "ZQ42C3 note",
+        "---------- Forwarded message ---------"
+      ]
+    },
+    {
+      "id": "from-line-only",
+      "lines": [
+        "---------- Forwarded message ---------",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "",
+        "Only-from ZQ42C3 body"
+      ],
+      "expectLines": [
+        "---------- Forwarded message ---------",
+        "",
+        "Only-from ZQ42C3 body"
+      ]
+    },
+    {
+      "id": "marker-kept",
+      "lines": [
+        "-- Forwarded message --",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "Date: 20 Nov 2026",
+        "",
+        "Marker ZQ42C3 body"
+      ],
+      "expectLines": [
+        "-- Forwarded message --",
+        "",
+        "Marker ZQ42C3 body"
+      ]
+    },
+    {
+      "id": "body-after-blank-kept",
+      "lines": [
+        "---------- Forwarded message ---------",
+        "From: ZQ42C3 Air <statements@zq42c3-air.test>",
+        "Subject: ZQ42C3 statement",
+        "",
+        "Note: ZQ42C3 points",
+        "Date: shown below",
+        "",
+        "Second ZQ42C3 paragraph"
+      ],
+      "expectLines": [
+        "---------- Forwarded message ---------",
+        "",
+        "Note: ZQ42C3 points",
+        "Date: shown below",
+        "",
+        "Second ZQ42C3 paragraph"
+      ]
+    }
+  ],
+  "cap": [
+    {
+      "id": "cap-splits-address",
+      "fillerUnit": "ZQ42C3 ",
+      "fillerLength": 19996,
+      "address": "qxzq42c3local@example.com",
+      "tail": " ZQ42C3 tail",
+      "forbiddenFragment": "qx",
+      "note": "body = fillerUnit repeated and cut to fillerLength code points, then one space, then address, then tail; the address begins three code points before maxChars"
+    }
+  ],
+  "longRun": [
+    {
+      "id": "long-run-letters-body",
+      "unit": "a",
+      "length": 120000,
+      "where": "body",
+      "expect": ""
+    },
+    {
+      "id": "long-run-dotted-body",
+      "unit": "a.",
+      "length": 120000,
+      "where": "body",
+      "expect": ""
+    },
+    {
+      "id": "long-run-local-part-body",
+      "unit": "zq42c3.",
+      "length": 120000,
+      "where": "body",
+      "expect": ""
+    },
+    {
+      "id": "long-run-dotted-subject",
+      "unit": "a.",
+      "length": 120000,
+      "where": "subject",
+      "expect": null
+    }
+  ],
+  "edge": [
+    {
+      "id": "cap-after-shrink",
+      "body": [
+        [
+          "Offer [https://track.zq42c3-links.test/c/tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt]\n",
+          40
+        ],
+        [
+          "x ",
+          5247
+        ],
+        [
+          "zq42c3-anna@example.com ZQ42C3 tail",
+          1
+        ]
+      ],
+      "expect": [
+        [
+          "Offer [[link]]\n",
+          40
+        ],
+        [
+          "x ",
+          5246
+        ],
+        [
+          "x",
+          1
+        ]
+      ],
+      "forbiddenFragment": "zq42c3-an"
+    },
+    {
+      "id": "whitespace-past-margin",
+      "body": [
+        [
+          "a",
+          21500
+        ],
+        [
+          " ",
+          1
+        ],
+        [
+          "a",
+          50000
+        ]
+      ],
+      "expect": []
+    },
+    {
+      "id": "bound-on-whitespace",
+      "body": [
+        [
+          "a",
+          21023
+        ],
+        [
+          "b",
+          1
+        ],
+        [
+          " ",
+          1
+        ],
+        [
+          "zq42c3-anna@example.com",
+          1
+        ]
+      ],
+      "expect": [
+        [
+          "a",
+          20000
+        ]
+      ]
+    }
+  ],
+  "integration": {
+    "note": "I1 stores all nine rows; I2 stores the two F03 rows; I3 builds its own reads rows from preRead. Dates are offsets from Postgres CURRENT_DATE.",
+    "program": {
+      "name": "ZQ42C3 Air",
+      "kind": "airline",
+      "defaultUnit": "miles",
+      "domain": "zq42c3-air.test"
+    },
+    "member": {
+      "displayName": "ZQ42C3 Anna"
+    },
+    "membership": {
+      "memberNumber": "ZQ42C3A0007731",
+      "baseline": {
+        "balance": "40000",
+        "unit": "miles",
+        "asOfOffset": -40
+      }
+    },
+    "messages": [
+      {
+        "key": "zq42c3-k-f01",
+        "eml": "F01",
+        "origin": "direct",
+        "offered": true,
+        "expectInput": {
+          "subject": "ZQ42C3-SUBJECT-CANARY statement for [address]",
+          "text": "ZQ42C3-BODY-CANARY F01\nContact [address] today\nOn 20 Nov 2026, ZQ42C3 Anna <[address]> wrote:\nWrite to [address] now\nSent to [address]\n> [address] said\na: [address], b: [address]\nOpen [address] here\nReply [link]\nReply <[link]>\nCall [link]\nCall [link] now\nVisit [link] today\nVisit [link] today\nVisit [link] today\nVisit [link] today\nVisit [link] today\nSee [link] today\nSee [link] today\nsee [link] or write [address]\nBalance 1234.56 ZQ42C3 points\nBalance 52,000 ZQ42C3 miles\nCredit 1,234.50 ZQ42C3 travel cash\nEarn 1.5x ZQ42C3 points\nEarn 2.5x/dollar on ZQ42C3 stays\nAs of 20.11.2026 ZQ42C3\nAs of 2026.11.20 ZQ42C3\nAs of 20/11/2026 ZQ42C3\nAs of 11/20/2026 ZQ42C3\nAs of 2026-11-20 ZQ42C3\nOpen 09.30/17.45 ZQ42C3\nBonus 12.5% and 1/2 off ZQ42C3\nApp v2.10/beta ZQ42C3\nMember •••• 7731 ZQ42C3\nMember XXXXXX7731 ZQ42C3\nMember ******7731 ZQ42C3\nMember …7731 ZQ42C3\nMember #7731 ZQ42C3\nYour Z.Q. Rewards ZQ42C3 summary\nYour ZQ42C3.Air Club summary\nThanks for flying ZQ42C3 points.Thanks again\nSent by zq42c3-links.test for ZQ42C3\nAttached statement.pdf for ZQ42C3\nFees e.g./i.e. ZQ42C3 terms\nPromo zq42c3-club.x/promo ZQ42C3\nHotel: ZQ42C3 Stays\nIntel: ZQ42C3 note\nTel: +1 555 0100 ZQ42C3\nSent to a***@example.com ZQ42C3\nEarned @ ZQ42C3 partner\nSent to zq42c3-anna@example ZQ42C3"
+        }
+      },
+      {
+        "key": "zq42c3-k-f02",
+        "eml": "F02",
+        "origin": "inline",
+        "offered": true,
+        "expectInput": {
+          "subject": "Fwd: ZQ42C3 statement",
+          "text": "ZQ42C3 forwarding my statement ZQ42C3-BODY-CANARY F02\n\n---------- Forwarded message ---------\n\nZQ42C3-INNER-BODY F02\nDetails at [link]\nBalance 1234.56 ZQ42C3 points\nOn 20 Nov 2026, ZQ42C3 Anna <[address]> wrote:"
+        }
+      },
+      {
+        "key": "zq42c3-k-f03-attachment",
+        "eml": "F03",
+        "origin": "attachment",
+        "offered": true,
+        "expectInput": {
+          "subject": "ZQ42C3-INNER-SUBJECT your statement for [address]",
+          "text": "ZQ42C3-INNER-BODY F03\nYour ZQ42C3 Air balance is shown in the app\nEarn 1.5x ZQ42C3 points\nManage at [link]\nHelp: [address]"
+        }
+      },
+      {
+        "key": "zq42c3-k-f03-direct",
+        "eml": "F03",
+        "origin": "direct",
+        "offered": true,
+        "expectInput": {
+          "subject": "Fwd: ZQ42C3-OUTER-SUBJECT",
+          "text": "ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F03 see attached, from [address]"
+        }
+      },
+      {
+        "key": "zq42c3-k-f04",
+        "eml": "F04",
+        "origin": "direct",
+        "offered": true,
+        "expectInput": {
+          "subject": "Fwd: ZQ42C3 stranger",
+          "text": "ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F04 from a stranger"
+        }
+      },
+      {
+        "key": "zq42c3-k-f05",
+        "eml": "F05",
+        "origin": "direct",
+        "offered": true,
+        "expectInput": {
+          "subject": "ZQ42C3 html statement",
+          "text": "ZQ42C3-BODY-CANARY F05\n\nWrite us [[address]], call us [[link]], read offers\n[[link]].\n\nOr visit [link] or mail\n[address] today."
+        }
+      },
+      {
+        "key": "zq42c3-k-f06",
+        "eml": "F06",
+        "origin": "attachment",
+        "offered": false,
+        "expectInput": null
+      },
+      {
+        "key": "zq42c3-k-f07",
+        "eml": "F07",
+        "origin": "attachment",
+        "offered": true,
+        "expectInput": {
+          "subject": "ZQ42C3-INNER-SUBJECT html statement",
+          "text": "ZQ42C3-INNER-BODY F07\n\nhelp [[address]] or [address]"
+        }
+      },
+      {
+        "key": "zq42c3-k-f08",
+        "eml": "F08",
+        "origin": "attachment",
+        "offered": true,
+        "expectInput": {
+          "subject": "Fwd: ZQ42C3 no attachment",
+          "text": "ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F08 no attachment here, from [address]"
+        }
+      }
+    ],
+    "emptyOriginal": {
+      "key": "zq42c3-k-f06",
+      "state": "failed",
+      "code": "empty_message",
+      "attempts": 1
+    },
+    "reading": {
+      "answerWhenTextContains": "ZQ42C3-INNER-BODY F03",
+      "otherwise": {
+        "ok": false,
+        "code": "api_error"
+      },
+      "reader": {
+        "programName": "ZQ42C3 Air",
+        "memberNumberSuffix": "•••• 7731",
+        "balance": "41500",
+        "unit": "miles",
+        "asOf": "{{DAY:-3}}",
+        "expiryWarnings": [],
+        "instruments": []
+      }
+    },
+    "expect": {
+      "attachment": {
+        "key": "zq42c3-k-f03-attachment",
+        "state": "applied",
+        "observationSource": "email",
+        "balanceAfter": "41500",
+        "unit": "miles",
+        "asOfOffset": -3,
+        "inputSubject": "ZQ42C3-INNER-SUBJECT your statement for [address]"
+      },
+      "direct": {
+        "key": "zq42c3-k-f03-direct",
+        "state": "retry",
+        "attempts": 1,
+        "observation": false
+      }
+    },
+    "preRead": {
+      "notReoffered": [
+        "no_balance",
+        "applied",
+        "stale",
+        "pending",
+        "ignored",
+        "not_mine"
+      ],
+      "resetByRetryFailed": {
+        "state": "failed",
+        "attempts": 3,
+        "code": "bad_output",
+        "expectInput": {
+          "subject": "ZQ42C3-INNER-SUBJECT your statement for [address]",
+          "text": "ZQ42C3-INNER-BODY F03\nYour ZQ42C3 Air balance is shown in the app\nEarn 1.5x ZQ42C3 points\nManage at [link]\nHelp: [address]"
+        }
+      }
+    }
+  }
+}

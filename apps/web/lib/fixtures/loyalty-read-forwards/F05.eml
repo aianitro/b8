@@ -1,0 +1,13 @@
+From: ZQ42C3 Air <statements@zq42c3-air.test>
+To: zq42c3-inbox@example.net
+Subject: ZQ42C3 html statement
+Message-ID: <f05@zq42c3-mail.test>
+X-ZQ42C3: ZQ42C3-HEADER-CANARY
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+<html><body><p>ZQ42C3-BODY-CANARY F05</p>
+<p>Write <a href="mailto:zq42c3-anna@example.com">us</a>, call <a href="tel:+15550100">us</a>, read <a href="https://zq42c3-links.test/offers">offers</a>.</p>
+<p>Or visit track.zq42c3-links.test/u?t=ZQ42C3 or mail zq42c3-help@zq42c3-links.test today.</p>
+<script>var ZQ = "ZQ42C3-SCRIPT-CANARY";</script></body></html>

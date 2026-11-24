@@ -1,0 +1,28 @@
+From: ZQ42C3 Stranger <zq42c3-stranger@example.invalid>
+To: zq42c3-inbox@example.net
+Subject: Fwd: ZQ42C3 stranger
+Message-ID: <f04@zq42c3-mail.test>
+X-ZQ42C3: ZQ42C3-HEADER-CANARY
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="ZQ42C3-B"
+
+--ZQ42C3-B
+Content-Type: text/plain; charset=utf-8
+
+ZQ42C3-OUTER-NOTE ZQ42C3-BODY-CANARY F04 from a stranger
+--ZQ42C3-B
+Content-Type: message/rfc822
+
+From: ZQ42C3 Air <statements@zq42c3-air.test>
+To: zq42c3-member@example.org
+Cc: zq42c3-cc@example.org
+Delivered-To: zq42c3-delivered@example.net
+Subject: ZQ42C3 stranger inner
+Message-ID: <inner@zq42c3-air.test>
+Date: Thu, 20 Nov 2026 09:00:00 +0000
+X-ZQ42C3: ZQ42C3-HEADER-CANARY
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+ZQ42C3-STRANGER-INNER F04
+--ZQ42C3-B--
