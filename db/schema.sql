@@ -1844,3 +1844,196 @@ CREATE TABLE loyalty_inbox_read_state (
   CONSTRAINT loyalty_inbox_read_state_code_iff_error
     CHECK ((last_error_code IS NOT NULL) = (last_outcome IS NOT DISTINCT FROM 'error'))
 );
+
+-- ─── Hotel stays (step 42e, migration 1793200000000_loyalty_stays) ──────────────────────────
+-- Hotel confirmations, changes and cancellations from the loyalty inbox, read by a SECOND,
+-- separate booking read, become stays; a typed route adds or corrects one by hand. The balance read
+-- and its tables are untouched: a message may have a row in both loyalty_inbox_reads and
+-- loyalty_inbox_booking_reads, and neither read consults the other's row. A stay is NEVER deleted
+-- (a cancellation sets state, keeping the row, its dates and its code) and nothing here cascades.
+-- "Nights this year" is not stored anywhere: it is summed on every read from CURRENT_DATE. No CHECK
+-- compares a column with CURRENT_DATE.
+
+-- The referenced key of loyalty_stays' composite foreign key. id is already unique, so this index
+-- refuses nothing; it exists so a stay cannot sit under a membership of another program.
+CREATE UNIQUE INDEX IF NOT EXISTS loyalty_memberships_id_program_key ON loyalty_memberships (id, program_id);
+
+-- One row per hotel booking, keyed by program and normalised confirmation code.
+--   confirmation_code    — letters and digits only, upper-cased, 4 to 20; stored in full because it
+--                          is the dedupe key, masked in every payload, never logged.
+--   nights               — GENERATED from the two dates and written by nobody; it cannot go stale.
+--                          Stored only so the 1..60 bound (LOYALTY_STAY_MAX_NIGHTS) is a CHECK.
+--   property             — the one model free-text value: trimmed, 1 to 80, no '<', '>' or control
+--                          character. NULL = not stated, never ''.
+--   source               — typed (the typed route last wrote it) or email (a mail last decided it).
+--   evidence_received_on — received date of the mail that last decided the stay; NULL = never
+--                          touched by mail. A typed write KEEPS it, so only a strictly later mail can
+--                          supersede a typed correction (SPEC.md D8).
+--   evidence_key         — that mail's dedupe_key; NOT a foreign key (the mail is purged first).
+--   award                — true points or certificate, false cash, NULL not stated (never false).
+--   membership_id        — the first attribution is sticky; the composite key pins its program.
+CREATE TABLE loyalty_stays (
+  id                    SERIAL PRIMARY KEY,
+  membership_id         INTEGER NOT NULL,
+  program_id            INTEGER NOT NULL REFERENCES loyalty_programs(id),
+  confirmation_code     TEXT NOT NULL
+                          CONSTRAINT loyalty_stays_confirmation_code_shape
+                            CHECK (confirmation_code ~ '^[A-Z0-9]{4,20}$'),
+  check_in              DATE NOT NULL,
+  check_out             DATE NOT NULL,
+  nights                INTEGER GENERATED ALWAYS AS (check_out - check_in) STORED,
+  property              TEXT
+                          CONSTRAINT loyalty_stays_property_shape
+                            CHECK (property IS NULL
+                                   OR (property = btrim(property)
+                                       AND char_length(property) BETWEEN 1 AND 80
+                                       AND property !~ '[<>[:cntrl:]]')),
+  state                 TEXT NOT NULL
+                          CONSTRAINT loyalty_stays_state_check CHECK (state IN ('booked', 'cancelled')),
+  source                TEXT NOT NULL
+                          CONSTRAINT loyalty_stays_source_check CHECK (source IN ('typed', 'email')),
+  evidence_key          TEXT
+                          CONSTRAINT loyalty_stays_evidence_key_shape
+                            CHECK (evidence_key IS NULL OR evidence_key ~ '^[0-9a-f]{64}$'),
+  evidence_received_on  DATE,
+  award                 BOOLEAN,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT loyalty_stays_program_code_key UNIQUE (program_id, confirmation_code),
+  CONSTRAINT loyalty_stays_nights_range CHECK (nights BETWEEN 1 AND 60),
+  CONSTRAINT loyalty_stays_evidence_pair
+    CHECK ((evidence_key IS NULL) = (evidence_received_on IS NULL)),
+  CONSTRAINT loyalty_stays_email_has_evidence
+    CHECK (source <> 'email' OR evidence_key IS NOT NULL),
+  CONSTRAINT loyalty_stays_membership_program_fkey
+    FOREIGN KEY (membership_id, program_id) REFERENCES loyalty_memberships (id, program_id)
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_stays_membership_check_out ON loyalty_stays (membership_id, check_out);
+
+-- One row per stored hotel-program message the booking read attempted; a mirror of
+-- loyalty_inbox_reads with the same crash-safe attempt row (counted before the model call), no
+-- balance, and the cleaned booking held only while a person has not decided. States:
+--   retry, failed  — not read yet: attempts and last_error_code set, nothing else.
+--   none, flight   — the kind said so; nothing extracted (flight rows are 42e1b's to re-read).
+--   no_booking     — a hotel kind with no valid code or unusable dates; nothing stored.
+--   stale          — older than what the stay already reflects; nothing changed.
+--   recorded       — placed by the rules; stay_id is the stay written or updated.
+--   not_mine_known — an unmatched suffix on loyalty_inbox_not_mine; discarded.
+--   pending        — HELD for one tap; reason set, booking set.
+--   placed_by_hand, not_mine, ignored — resolved by a person; reason KEPT, booking cleared.
+--   dedupe_key    — the 42c1 message key; NOT a foreign key (the message is purged first).
+--   booking       — exactly {kind, property, checkIn, checkOut, code, award}; NOT NULL exactly while
+--                   pending. No other key can be stored.
+--   membership_id — the membership the booking was placed on; NOT inheriting.
+--   stay_id       — always for recorded; for placed_by_hand when the tap wrote or updated a stay.
+-- Purged by received_on strictly older than LOYALTY_READ_RETENTION_DAYS, pending included; stays
+-- are never purged.
+CREATE TABLE loyalty_inbox_booking_reads (
+  id               SERIAL PRIMARY KEY,
+  dedupe_key       TEXT NOT NULL
+                     CONSTRAINT loyalty_inbox_booking_reads_dedupe_key_key UNIQUE
+                     CONSTRAINT loyalty_inbox_booking_reads_dedupe_key_shape CHECK (dedupe_key ~ '^[0-9a-f]{64}$'),
+  program_id       INTEGER NOT NULL REFERENCES loyalty_programs(id),
+  received_on      DATE NOT NULL,
+  state            TEXT NOT NULL
+                     CONSTRAINT loyalty_inbox_booking_reads_state_check
+                       CHECK (state IN ('retry', 'failed', 'none', 'flight', 'no_booking', 'stale',
+                                        'recorded', 'pending', 'placed_by_hand', 'not_mine_known',
+                                        'not_mine', 'ignored')),
+  attempts         SMALLINT NOT NULL
+                     CONSTRAINT loyalty_inbox_booking_reads_attempts_range CHECK (attempts BETWEEN 0 AND 3),
+  last_error_code  TEXT
+                     CONSTRAINT loyalty_inbox_booking_reads_last_error_code_check
+                       CHECK (last_error_code IS NULL
+                              OR last_error_code IN ('rate_limited', 'timeout', 'api_error', 'refused',
+                                                     'bad_output', 'empty_message')),
+  kind             TEXT
+                     CONSTRAINT loyalty_inbox_booking_reads_kind_check
+                       CHECK (kind IS NULL OR kind IN ('hotel_booked', 'hotel_cancelled', 'flight', 'none')),
+  program_check    TEXT
+                     CONSTRAINT loyalty_inbox_booking_reads_program_check_check
+                       CHECK (program_check IS NULL OR program_check IN ('match', 'mismatch', 'not_stated')),
+  reason           TEXT
+                     CONSTRAINT loyalty_inbox_booking_reads_reason_check
+                       CHECK (reason IS NULL
+                              OR reason IN ('no_suffix', 'unmatched_suffix', 'ambiguous_suffix',
+                                            'forwarder_conflict', 'program_mismatch')),
+  suffix           TEXT
+                     CONSTRAINT loyalty_inbox_booking_reads_suffix_shape CHECK (suffix IS NULL OR suffix ~ '^[A-Z0-9]{3,4}$'),
+  -- CASE, not AND: the path tests must never run on a non-object.
+  booking          JSONB
+                     CONSTRAINT loyalty_inbox_booking_reads_booking_shape CHECK (
+                       booking IS NULL
+                       OR CASE WHEN jsonb_typeof(booking) = 'object' THEN
+                           booking ?& ARRAY['kind', 'property', 'checkIn', 'checkOut', 'code', 'award']
+                           AND NOT jsonb_path_exists(booking,
+                             '$.keyvalue() ? (!(@.key == "kind" || @.key == "property" || @.key == "checkIn" || @.key == "checkOut" || @.key == "code" || @.key == "award"))')
+                           AND jsonb_path_exists(booking,
+                             '$ ? (@.kind.type() == "string" && (@.kind == "hotel_booked" || @.kind == "hotel_cancelled"))')
+                           AND CASE jsonb_typeof(booking -> 'property')
+                                 WHEN 'null' THEN true
+                                 WHEN 'string' THEN (booking ->> 'property') = btrim(booking ->> 'property')
+                                                    AND char_length(booking ->> 'property') BETWEEN 1 AND 80
+                                                    AND (booking ->> 'property') !~ '[<>[:cntrl:]]'
+                                 ELSE false END
+                           AND jsonb_path_exists(booking,
+                             '$ ? (@.checkIn.type() == "string" && @.checkIn like_regex "^[0-9]{4}-[0-9]{2}-[0-9]{2}$")')
+                           AND jsonb_path_exists(booking,
+                             '$ ? (@.checkOut.type() == "string" && @.checkOut like_regex "^[0-9]{4}-[0-9]{2}-[0-9]{2}$")')
+                           AND jsonb_path_exists(booking,
+                             '$ ? (@.code.type() == "string" && @.code like_regex "^[A-Z0-9]{4,20}$")')
+                           AND jsonb_path_exists(booking,
+                             '$ ? (@.award.type() == "null" || @.award.type() == "boolean")')
+                         ELSE false END),
+  membership_id    INTEGER REFERENCES loyalty_memberships(id),
+  stay_id          INTEGER REFERENCES loyalty_stays(id),
+  read_on          DATE,                                  -- NULL exactly while unread
+  resolved_on      DATE,                                  -- NULL exactly while retry, failed or pending
+  CONSTRAINT loyalty_inbox_booking_reads_retry_attempts
+    CHECK (state <> 'retry' OR attempts BETWEEN 1 AND 2),
+  CONSTRAINT loyalty_inbox_booking_reads_failed_attempts
+    CHECK (state <> 'failed' OR attempts >= 1),
+  CONSTRAINT loyalty_inbox_booking_reads_code_iff_unread
+    CHECK ((last_error_code IS NOT NULL) = (state IN ('retry', 'failed'))),
+  CONSTRAINT loyalty_inbox_booking_reads_kind_iff_read
+    CHECK ((kind IS NULL) = (state IN ('retry', 'failed'))),
+  CONSTRAINT loyalty_inbox_booking_reads_unread_holds_nothing
+    CHECK (state NOT IN ('retry', 'failed')
+           OR (suffix IS NULL AND program_check IS NULL AND read_on IS NULL
+               AND membership_id IS NULL AND stay_id IS NULL)),
+  CONSTRAINT loyalty_inbox_booking_reads_read_is_checked_and_dated
+    CHECK (state IN ('retry', 'failed') OR (program_check IS NOT NULL AND read_on IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_booking_reads_resolved_iff_settled
+    CHECK ((resolved_on IS NULL) = (state IN ('retry', 'failed', 'pending'))),
+  CONSTRAINT loyalty_inbox_booking_reads_resolved_not_before_read
+    CHECK (resolved_on IS NULL OR read_on IS NULL OR resolved_on >= read_on),
+  CONSTRAINT loyalty_inbox_booking_reads_flight_state
+    CHECK ((state = 'flight') = (kind IS NOT DISTINCT FROM 'flight')),
+  CONSTRAINT loyalty_inbox_booking_reads_none_state
+    CHECK ((state = 'none') = (kind IS NOT DISTINCT FROM 'none')),
+  CONSTRAINT loyalty_inbox_booking_reads_non_booking_holds_nothing
+    CHECK (state NOT IN ('none', 'flight')
+           OR (suffix IS NULL AND membership_id IS NULL AND stay_id IS NULL)),
+  CONSTRAINT loyalty_inbox_booking_reads_reason_iff_held
+    CHECK ((reason IS NOT NULL) = (state IN ('pending', 'placed_by_hand', 'not_mine', 'ignored'))),
+  CONSTRAINT loyalty_inbox_booking_reads_booking_iff_pending
+    CHECK ((booking IS NOT NULL) = (state = 'pending')),
+  CONSTRAINT loyalty_inbox_booking_reads_pending_unplaced
+    CHECK (state <> 'pending' OR (membership_id IS NULL AND stay_id IS NULL)),
+  CONSTRAINT loyalty_inbox_booking_reads_recorded_has_stay
+    CHECK (state <> 'recorded' OR (stay_id IS NOT NULL AND membership_id IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_booking_reads_stay_only_when_placed
+    CHECK (stay_id IS NULL OR state IN ('recorded', 'placed_by_hand')),
+  CONSTRAINT loyalty_inbox_booking_reads_not_mine_known_unmatched
+    CHECK (state <> 'not_mine_known' OR (suffix IS NOT NULL AND membership_id IS NULL)),
+  CONSTRAINT loyalty_inbox_booking_reads_mismatch_reason_is_mismatch
+    CHECK (reason IS DISTINCT FROM 'program_mismatch' OR program_check IS NOT DISTINCT FROM 'mismatch'),
+  CONSTRAINT loyalty_inbox_booking_reads_reason_suffix
+    CHECK ((reason IS DISTINCT FROM 'no_suffix' OR suffix IS NULL)
+           AND (reason IS NULL OR reason IN ('no_suffix', 'program_mismatch') OR suffix IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_inbox_booking_reads_received ON loyalty_inbox_booking_reads (received_on);
+CREATE INDEX IF NOT EXISTS loyalty_inbox_booking_reads_program ON loyalty_inbox_booking_reads (program_id, received_on);
+CREATE INDEX IF NOT EXISTS loyalty_inbox_booking_reads_pending ON loyalty_inbox_booking_reads (received_on DESC, id DESC) WHERE state = 'pending';

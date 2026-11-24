@@ -9,6 +9,7 @@ import { writeNetWorthSnapshot } from './netWorth';
 import { runGiftSweep } from './giftStore';
 import { runLoyaltyInboxDaily } from './loyaltyInbox';
 import { runLoyaltyReadDaily } from './loyaltyInboxRead';
+import { runLoyaltyBookingsDaily } from './loyaltyBookingRead';
 import { createLogger } from './logger';
 
 const log = createLogger('scheduler');
@@ -88,6 +89,7 @@ export async function runDailyJob() {
   // what it just stored is read today, and before the digest. With no API key it reads nothing and
   // only purges. Resolves rather than rejects: a model outage must never cost the digest below it.
   await runLoyaltyReadDaily();
+  await runLoyaltyBookingsDaily();
 
   // Last, and after the syncs, so the outlook it reads is computed over the transactions this run
   // just pulled rather than yesterday's — an alert about a month the job has not finished loading

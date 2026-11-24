@@ -15,9 +15,12 @@
 // loyalty inbox panel on /travel and the on-demand poll route, against a mailbox that cannot be
 // reached). P8-42c2 added H15 (the reading queue, its wording and its three actions, and the read
 // route, with no API key and a model endpoint that cannot be reached), so the final success line is
-// now `OK H1-H16`: P8-42d added H16 (a balance from a screenshot: the "Update from screenshot" control on
+// now `OK H1-H17`: P8-42d added H16 (a balance from a screenshot: the "Update from screenshot" control on
 // every membership, the "Needs a screenshot" section, the read route answering `disabled` with no key,
 // and the confirm route clearing the prompt).
+// P8-42e1 added H17 (the "Hotel stays" section: the typed stays route and the held-booking route over
+// real HTTP for both people, this year's counted nights, a cancellation leaving the dash, and no full
+// confirmation code or member number in any response).
 //
 // THE MAILBOX VARIABLES. The dev server never inherits a `LOYALTY_IMAP_` variable from the shell that
 // runs this script: every one is removed from its environment, and five are then set to fabricated
@@ -975,7 +978,147 @@ try {
     pass('H16', `both users: /travel carries the control once per membership and once per due entry, with the heading while ${JSON.parse(dueBefore[0]).length} memberships are due; the read route is 401 with no credential, 403 for a read-scope token and 200 disabled with every field null for both people; the confirm route is 401, 403, then 201 with source screenshot, and ${confirmed} confirms for today empty the due list and remove the heading; both people get the same list before and after; H15's ${S.expectAbsent.length} absent phrases stay absent; ${heard.length} responses hold no full member number`);
   }
 
-  console.log('OK H1-H16');
+  // ── H17 ── (P8-42e1) Hotel stays. One hotel program with one membership carrying a member-number
+  // canary, one airline membership (a stay there is refused), and one held booking written as the
+  // booking read leaves it, whose object carries a confirmation-code canary. The server has no API key,
+  // so nothing is read; every stay here comes from the typed route (POST /api/v1/loyalty/stays) or the
+  // one tap (POST /api/v1/loyalty/inbox/bookings/<id>). The step checks the routes' authority and
+  // refusals, the counted nights on /travel for both people, the tap, a typed cancellation leaving the
+  // dash (with the row still stored), that H15's and H16's pinned absences and H16's control count
+  // still hold, and that no response carries a full code or the member number.
+  current = 'H17';
+  {
+    const NUMBER = 'ZQ42ESURFACENUMBER7K9X';
+    const DONE = 'ZQ42ESURFACEDONE1';
+    const SOON = 'ZQ42ESURFACESOON3';
+    const HELD = 'ZQ42ESURFACEHELD2';
+    const [heldIn, heldOut] = [day(40), day(42)];
+    psql(`
+      INSERT INTO loyalty_programs (name, kind, default_unit) VALUES ('ZQ42E Surface Hotel', 'hotel', 'points'), ('ZQ42E Surface Air', 'airline', 'miles');
+      INSERT INTO household_members (display_name) VALUES ('ZQ42E Surface Guest');
+      INSERT INTO loyalty_memberships (member_id, program_id, member_number) VALUES
+        ((SELECT id FROM household_members WHERE display_name = 'ZQ42E Surface Guest'), (SELECT id FROM loyalty_programs WHERE name = 'ZQ42E Surface Hotel'), '${NUMBER}'),
+        ((SELECT id FROM household_members WHERE display_name = 'ZQ42E Surface Guest'), (SELECT id FROM loyalty_programs WHERE name = 'ZQ42E Surface Air'), NULL);
+      INSERT INTO loyalty_inbox_booking_reads (dedupe_key, program_id, received_on, state, attempts, kind, program_check, read_on, reason, suffix, booking)
+        VALUES ('${sha256('zq42e-surface-held')}', (SELECT id FROM loyalty_programs WHERE name = 'ZQ42E Surface Hotel'), CURRENT_DATE - 1, 'pending', 1,
+                'hotel_booked', 'not_stated', CURRENT_DATE, 'forwarder_conflict', '7K9X',
+                jsonb_build_object('kind', 'hotel_booked', 'property', 'ZQ42E Surface Held Inn', 'checkIn', '${heldIn}', 'checkOut', '${heldOut}', 'code', '${HELD}', 'award', NULL));`);
+    const memberOf = (programName) => Number(psql(`SELECT m.id FROM loyalty_memberships m JOIN loyalty_programs p ON p.id = m.program_id WHERE p.name = '${programName}'`));
+    const hotelId = memberOf('ZQ42E Surface Hotel');
+    const airId = memberOf('ZQ42E Surface Air');
+    const heldId = Number(psql(`SELECT id FROM loyalty_inbox_booking_reads WHERE dedupe_key = '${sha256('zq42e-surface-held')}'`));
+    const year = psql('SELECT EXTRACT(YEAR FROM CURRENT_DATE)::int');
+    const readToken = randomBytes(32).toString('base64url');
+    psql(`INSERT INTO auth_sessions (token_hash, credential_id, kind, scope, label, expires_at)
+      VALUES ('${sha256(readToken)}', 'gifts-check-owner-cred', 'personal', 'read', 'zq42e read token', NOW() + interval '2 hours')`);
+    const heard = [];
+    const people = [['owner', w.owner], ['second user', w.two]];
+    const send = async (path, headers, body) => {
+      const res = await fetch(`${ORIGIN}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+      const text = await res.text();
+      heard.push(text);
+      let json = null;
+      try { json = JSON.parse(text); } catch { /* reported by the status checks */ }
+      return { status: res.status, json };
+    };
+    const travelOf = async (token) => {
+      const page = await get('/travel', token);
+      heard.push(page.text);
+      return { status: page.status, html: uncommented(page.text) };
+    };
+    const apiOf = async (token) => {
+      const api = await get('/api/v1/loyalty', token);
+      heard.push(api.text);
+      return { status: api.status, data: JSON.parse(api.text).data };
+    };
+    const occurrences = (html, t) => html.split(t).length - 1;
+    /** The section's visible text: from its heading to the next section's, tags removed. */
+    const sectionText = (html) => {
+      const start = html.indexOf('Hotel stays');
+      const end = html.indexOf('Certificates &amp; credits', start);
+      return start < 0 ? '' : html.slice(start, end < 0 ? undefined : end).replace(/<[^>]+>/g, '\n').split('\n').map((t) => t.trim()).filter(Boolean).join('|');
+    };
+    const asOwner = { cookie: `b8_session=${w.owner}` };
+    const asTwo = { cookie: `b8_session=${w.two}` };
+    const stays = '/api/v1/loyalty/stays';
+    const body = { membershipId: hotelId, confirmationCode: DONE, checkIn: day(-5), checkOut: day(-3), property: 'ZQ42E Surface Inn', state: 'booked', award: null };
+
+    // (a) The typed route: 401, 403, the refusals, then 201 twice and 200 for the same code.
+    const anon = await send(stays, {}, body);
+    check('H17', anon.status === 401, `the stays route with no credential answered ${anon.status}`);
+    const scoped = await send(stays, { authorization: `Bearer ${readToken}` }, body);
+    check('H17', scoped.status === 403, `the stays route with a read-scope token answered ${scoped.status}`);
+    for (const [what, bad] of [
+      ['a source', { ...body, source: 'typed' }],
+      ['nights', { ...body, nights: 2 }],
+      ['an extra key', { ...body, note: 'ZQ42E' }],
+      ['a three-character code', { ...body, confirmationCode: 'ZQ4' }],
+      ['a check-out not after the check-in', { ...body, checkOut: body.checkIn }],
+      ['a non-hotel membership', { ...body, membershipId: airId }],
+    ]) {
+      const r = await send(stays, asOwner, bad);
+      check('H17', r.status === 400, `the stays route answered ${r.status} for ${what}`);
+    }
+    const done = await send(stays, asOwner, body);
+    check('H17', done.status === 201 && done.json?.data?.nights === 2 && done.json?.data?.source === 'typed', `the completed stay answered ${done.status}`);
+    const soon = await send(stays, asTwo, { ...body, confirmationCode: SOON, checkIn: day(10), checkOut: day(12), property: 'ZQ42E Surface Soon Inn' });
+    check('H17', soon.status === 201, `the upcoming stay answered ${soon.status}`);
+    const again = await send(stays, asTwo, { ...body, property: 'ZQ42E Surface Renamed Inn' });
+    check('H17', again.status === 200 && again.json?.data?.id === done.json?.data?.id, `the same code again answered ${again.status}`);
+    check('H17', psql(`SELECT count(*) FROM loyalty_stays WHERE confirmation_code = '${DONE}'`) === '1', 'the same code made a second row');
+
+    // (b) /travel for both people: the section once, the nights once, both lists, masked codes only.
+    const sections = [];
+    for (const [who, token] of people) {
+      const page = await travelOf(token);
+      check('H17', page.status === 200, `/travel answered ${page.status} for the ${who}`);
+      check('H17', occurrences(page.html, 'Hotel stays') === 1, `/travel shows the heading ${occurrences(page.html, 'Hotel stays')} times for the ${who}`);
+      check('H17', occurrences(page.html, `2 nights counted in ${year}`) === 1, `/travel lacks the counted nights for the ${who}`);
+      check('H17', hasText(page.html, 'Upcoming') && hasText(page.html, 'Completed this year'), `/travel lacks a list for the ${who}`);
+      check('H17', hasText(page.html, '••••ONE1') && hasText(page.html, '••••OON3'), `/travel lacks a masked code for the ${who}`);
+      sections.push(sectionText(page.html));
+    }
+    check('H17', sections[0] !== '' && sections[0] === sections[1], 'the two users see different section text');
+
+    // (c) The held booking's tap: 401, 403, 200, then 409, and the stay appears.
+    const tap = `/api/v1/loyalty/inbox/bookings/${heldId}`;
+    const tapAnon = await send(tap, {}, { action: 'place', membershipId: hotelId });
+    check('H17', tapAnon.status === 401, `the tap with no credential answered ${tapAnon.status}`);
+    const tapScoped = await send(tap, { authorization: `Bearer ${readToken}` }, { action: 'place', membershipId: hotelId });
+    check('H17', tapScoped.status === 403, `the tap with a read-scope token answered ${tapScoped.status}`);
+    const placed = await send(tap, asOwner, { action: 'place', membershipId: hotelId });
+    check('H17', placed.status === 200 && placed.json?.data?.state === 'placed_by_hand', `the place answered ${placed.status}`);
+    const twice = await send(tap, asTwo, { action: 'place', membershipId: hotelId });
+    check('H17', twice.status === 409 && twice.json?.error?.code === 'ITEM_RESOLVED', `the second place answered ${twice.status}`);
+    for (const [who, token] of people) {
+      const page = await travelOf(token);
+      check('H17', hasText(page.html, '••••ELD2') && hasText(page.html, 'ZQ42E Surface Held Inn'), `/travel lacks the placed stay for the ${who}`);
+      check('H17', !hasText(page.html, 'Stays that need a membership'), `/travel still lists a held booking for the ${who}`);
+    }
+
+    // (d) A typed cancellation: the dash for that membership, the stay in neither list, the row kept.
+    const cancelled = await send(stays, asOwner, { ...body, property: 'ZQ42E Surface Renamed Inn', state: 'cancelled' });
+    check('H17', cancelled.status === 200 && cancelled.json?.data?.state === 'cancelled', `the cancellation answered ${cancelled.status}`);
+    const label = 'ZQ42E Surface Hotel · ZQ42E Surface Guest';
+    for (const [who, token] of people) {
+      const page = await travelOf(token);
+      check('H17', new RegExp(`${label}</span><span[^>]*>— · No stay counted yet<`).test(page.html), `/travel does not show the dash for the membership for the ${who}`);
+      check('H17', !hasText(page.html, '••••ONE1') && !hasText(page.html, 'ZQ42E Surface Renamed Inn'), `/travel still lists the cancelled stay for the ${who}`);
+      // (e) H15's and H16's pinned absences, and H16's control count, are undisturbed.
+      for (const t of READ.surface.expectAbsent) check('H17', !hasText(page.html, t), `/travel shows "${t}" for the ${who}`);
+      const api = await apiOf(token);
+      const memberships = api.data.cards.flatMap((c) => c.memberships).length;
+      const controls = occurrences(page.html, 'Update from screenshot');
+      check('H17', controls === memberships + api.data.inboxRead.screenshotDue.length, `/travel shows the screenshot control ${controls} times for the ${who}`);
+    }
+    check('H17', psql(`SELECT state FROM loyalty_stays WHERE confirmation_code = '${DONE}'`) === 'cancelled', 'the cancelled stay is not stored as cancelled');
+
+    // (f) No response of the step holds a full code or the member number.
+    for (const text of heard) for (const canary of [NUMBER, DONE, SOON, HELD]) check('H17', !holds(text, canary), 'a response of the step holds a canary');
+    pass('H17', `both users: the stays route is 401 with no credential, 403 for a read-scope token, 400 for six refused bodies, 201 for a completed and an upcoming stay and 200 for the same code again; /travel shows "Hotel stays" once and "2 nights counted in ${year}" once with both lists and masked codes, the same section for both people; the tap is 401, 403, 200 placed_by_hand, then 409, and the stay appears; a typed cancellation leaves the dash and the row stored as cancelled; H15's ${READ.surface.expectAbsent.length} absent phrases stay absent and H16's control count holds; ${heard.length} responses hold no full code or member number`);
+  }
+
+  console.log('OK H1-H17');
 } catch (error) {
   exitCode = 1;
   if (error instanceof StepFailure) console.log(`${error.step} FAIL ${error.message}`);

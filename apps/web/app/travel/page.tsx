@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import TravelBoard from '@/components/TravelBoard';
 import { loadOverview } from '@/lib/loyaltyStore';
+import { loadBookings } from '@/lib/loyaltyBookingStore';
 
 // Nights & Miles (P8-42a). Reads the database directly, like app/properties/page.tsx, and hands the
 // client board exactly what `GET /api/v1/loyalty` returns: member numbers MASKED, balances as
@@ -18,7 +19,11 @@ import { loadOverview } from '@/lib/loyaltyStore';
 // this page shows the same dates to both users. It carries a date derived from a ledger row, never
 // the row's text or amount, which makes it `numeric-only` in the gift surface registry (H12). This
 // page still reads no ledger table itself; `loadOverview` does.
+//
+// P8-42e1: the `Hotel stays` section's payload is loaded beside the overview, by its own loader, and
+// never inside it: the overview's shape is pinned and unchanged. It carries stays (dates, nights and
+// MASKED confirmation codes) and held bookings, all read from the loyalty tables; no ledger row.
 export default async function TravelPage() {
-  const overview = await loadOverview();
-  return <TravelBoard overview={overview} />;
+  const [overview, bookings] = await Promise.all([loadOverview(), loadBookings()]);
+  return <TravelBoard overview={overview} bookings={bookings} />;
 }

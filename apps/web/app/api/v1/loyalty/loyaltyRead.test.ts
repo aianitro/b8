@@ -991,7 +991,7 @@ describe('reading the loyalty inbox (P8-42c2)', () => {
     // The loyalty routes number fourteen and the two new ones are classified no-transaction-data.
     const dir = join(WEB, 'app/api/v1/loyalty');
     const files = (readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith('route.ts')).map((f) => relative(WEB, join(dir, f)).split('\\').join('/'));
-    expect(files).toHaveLength(16);
+    expect(files).toHaveLength(18);
     for (const f of ['app/api/v1/loyalty/inbox/read/route.ts', 'app/api/v1/loyalty/inbox/readings/[id]/route.ts']) {
       expect(ROUTES.find((x) => x.file === f)?.classes, f).toEqual(['no-transaction-data']);
     }

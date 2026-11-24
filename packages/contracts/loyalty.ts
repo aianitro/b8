@@ -1,6 +1,7 @@
 // Loyalty (P8-42a) — household members, the program catalog with its aliases, memberships with a
 // derived current balance, append-only balance observations, instruments, and (P8-42c1) the loyalty
-// inbox, and (P8-42c2) reading it, and (P8-42d) reading a screenshot. The sixteen endpoints, stated once:
+// inbox, and (P8-42c2) reading it, and (P8-42d) reading a screenshot, and (P8-42e1) hotel stays. The
+// eighteen endpoints, stated once:
 //
 //   GET   /api/v1/loyalty                                 —                                → LoyaltyOverviewResponseSchema
 //   POST  /api/v1/loyalty/members                         LoyaltyMemberCreateRequestSchema → LoyaltyMemberResponseSchema (201)
@@ -18,6 +19,8 @@
 //   POST  /api/v1/loyalty/inbox/readings/[id]             LoyaltyInboxResolveRequestSchema → LoyaltyInboxResolveResponseSchema
 //   POST  /api/v1/loyalty/memberships/[id]/screenshot     image bytes (JPEG, PNG or WebP)  → LoyaltyScreenshotReadResponseSchema (200 for every outcome)
 //   POST  /api/v1/loyalty/memberships/[id]/screenshot/confirm LoyaltyScreenshotConfirmRequestSchema → LoyaltyMembershipResponseSchema (201)
+//   POST  /api/v1/loyalty/stays                           LoyaltyStayCreateRequestSchema   → LoyaltyStayResponseSchema (201 created, 200 corrected)
+//   POST  /api/v1/loyalty/inbox/bookings/[id]             LoyaltyBookingResolveRequestSchema → LoyaltyBookingResolveResponseSchema
 //
 // There is no route that updates or deletes an observation, and none that deletes a member, a
 // program, a membership or an instrument. An edited balance is a POST of a new observation.
@@ -1963,3 +1966,304 @@ export type LoyaltyInboxResolve = z.infer<typeof LoyaltyInboxResolveSchema>;
 export type LoyaltyScreenshotOutcome = z.infer<typeof LoyaltyScreenshotOutcomeSchema>;
 export type LoyaltyScreenshotRead = z.infer<typeof LoyaltyScreenshotReadSchema>;
 export type LoyaltyScreenshotConfirmRequest = z.infer<typeof LoyaltyScreenshotConfirmRequestSchema>;
+
+// ─── Hotel stays (P8-42e1) ──────────────────────────────────────────────────────────────────────
+//
+// Hotel confirmations, changes and cancellations from the loyalty inbox are read by a SECOND,
+// separate booking read and become stays (tables in migrations/1793200000000_loyalty_stays.sql); a
+// typed route adds or corrects one by hand. A stay is never deleted: a cancellation sets its state.
+// The year's counted nights are DERIVED on every read from Postgres's CURRENT_DATE and never stored.
+//
+// THE CONFIRMATION CODE IS AN IDENTIFIER. It is stored in full (it is the dedupe key) and NO response
+// schema here has a field that can hold it: every payload carries `maskedCode`, the existing masked
+// member-number form, so at most four characters of a code can ever fit. Requests may carry a full
+// code (it is how a typed stay is keyed), and an error answering one never echoes it.
+//
+// The bookings payload is a separate payload with its own loader; `LoyaltyOverviewSchema` and
+// `LoyaltyInboxReadPanelSchema` are deliberately unchanged.
+
+/**
+ * The most nights one stay may span. Equals `loyalty_stays_nights_range`. A stay is at least one
+ * night: a check-out not strictly after its check-in is not a stay.
+ */
+export const LOYALTY_STAY_MAX_NIGHTS = 60;
+/** A stay's state. Equals `loyalty_stays_state_check`. A cancelled stay is kept, counted nowhere and listed nowhere. */
+export const LOYALTY_STAY_STATES = ['booked', 'cancelled'] as const;
+/**
+ * Who last decided a stay. Equals `loyalty_stays_source_check`. Never in a request body: the typed
+ * route writes `typed`, the booking read writes `email`.
+ */
+export const LOYALTY_STAY_SOURCES = ['typed', 'email'] as const;
+/**
+ * What the booking read says a message is. Equals `loyalty_inbox_booking_reads_kind_check`. A
+ * `flight` is recorded with nothing extracted (flights are a later step); `none` is not a booking.
+ */
+export const LOYALTY_BOOKING_KINDS = ['hotel_booked', 'hotel_cancelled', 'flight', 'none'] as const;
+/**
+ * Why a booking was held for a person instead of placed. Equals
+ * `loyalty_inbox_booking_reads_reason_check`. The attribution rule (SPEC.md D9) never guesses.
+ */
+export const LOYALTY_BOOKING_HOLD_REASONS = [
+  'no_suffix',
+  'unmatched_suffix',
+  'ambiguous_suffix',
+  'forwarder_conflict',
+  'program_mismatch',
+] as const;
+/** The three one-tap actions on a held booking. */
+export const LOYALTY_BOOKING_ACTIONS = ['place', 'not_mine', 'ignore'] as const;
+
+export const LoyaltyStayStateSchema = z.enum(LOYALTY_STAY_STATES);
+export const LoyaltyStaySourceSchema = z.enum(LOYALTY_STAY_SOURCES);
+export const LoyaltyBookingKindSchema = z.enum(LOYALTY_BOOKING_KINDS);
+export const LoyaltyBookingHoldReasonSchema = z.enum(LOYALTY_BOOKING_HOLD_REASONS);
+export const LoyaltyBookingActionSchema = z.enum(LOYALTY_BOOKING_ACTIONS);
+
+/**
+ * The day number of a `YYYY-MM-DD` text that already passed `calendarDate`, by integer arithmetic
+ * on its parts (days from civil, proleptic Gregorian). Never a JS Date, so no time zone can move a
+ * night count. Differences of two of these are exact whole days.
+ */
+const stayDayNumber = (date: string): number => {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7));
+  const day = Number(date.slice(8, 10));
+  const y = month <= 2 ? year - 1 : year;
+  const era = Math.floor(y / 400);
+  const yoe = y - era * 400;
+  const doy = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+  return era * 146097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+};
+
+/** Nights between two valid calendar dates: check-out minus check-in, in whole days. */
+const stayNights = (checkIn: string, checkOut: string) => stayDayNumber(checkOut) - stayDayNumber(checkIn);
+
+/**
+ * A confirmation code's normal form: its ASCII letters and digits only, upper-cased. Non-ASCII
+ * characters are dropped BEFORE upper-casing, so a non-ASCII letter can never become an ASCII one
+ * and create a match. Valid with 4 to 20 characters. Equals `loyalty_stays_confirmation_code_shape`.
+ */
+const normalisedStayCode = (text: string) => text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+const isStayCode = (code: string) => /^[A-Z0-9]{4,20}$/.test(code);
+
+/**
+ * A property name as stored: trimmed, 1 to 80 characters, no `<`, `>` or control character. Equals
+ * `loyalty_stays_property_shape`. Built with the constructor so the Unicode property escape does
+ * not depend on the compile target.
+ */
+const STAY_PROPERTY_FORBIDDEN = new RegExp('[<>\\p{Cc}]', 'u');
+const isStayProperty = (s: string) =>
+  s === s.trim() && chars(s) >= 1 && chars(s) <= 80 && !STAY_PROPERTY_FORBIDDEN.test(s);
+
+/** A stay's dates in order and within the bound. Both already passed `calendarDate`. */
+const stayDatesOk = (s: { checkIn: string; checkOut: string }) =>
+  s.checkOut > s.checkIn && stayNights(s.checkIn, s.checkOut) <= LOYALTY_STAY_MAX_NIGHTS;
+
+/**
+ * One stay as every payload shows it. `maskedCode` is the ONLY code field and it is masked.
+ * `nights` is the database's derived count, refined here to equal the dates' difference, so a
+ * producer cannot emit a figure that contradicts its dates. `property` null = not stated (rendered
+ * `Property not stated`); `award` null = not stated, never false. The mail evidence behind a stay
+ * is deliberately not emitted.
+ */
+export const LoyaltyStaySchema = z
+  .strictObject({
+    id: LoyaltyIdSchema,
+    membershipId: LoyaltyIdSchema,
+    programId: LoyaltyIdSchema,
+    property: z.string().refine(isStayProperty, 'expected a stored property name').nullable(),
+    maskedCode: LoyaltyMaskedMemberNumberSchema,
+    checkIn: calendarDate,
+    checkOut: calendarDate,
+    nights: z.int().min(1).max(LOYALTY_STAY_MAX_NIGHTS),
+    state: LoyaltyStayStateSchema,
+    source: LoyaltyStaySourceSchema,
+    award: z.boolean().nullable(),
+  })
+  .refine((s) => s.nights === stayNights(s.checkIn, s.checkOut), {
+    message: 'nights is the difference of the dates',
+    path: ['nights'],
+  });
+
+/**
+ * `POST /api/v1/loyalty/stays` — add a stay by hand (201) or, when the program and normalised code
+ * already exist on the same membership, correct it (200). The handler normalises the code and the
+ * property (trimmed) before writing; the membership must be of a hotel-kind program, and a code
+ * already recorded under another membership of the program is refused, both 400 `INVALID_INPUT`.
+ *
+ * There is deliberately no `source`, `nights` or `id` key, and the strict object refuses each: a
+ * client never chooses provenance, and nights are derived by the database. `property` and `award`
+ * are required keys whose null means "not stated" (never an empty string, never false). `state:
+ * 'cancelled'` is the only way to cancel by hand; nothing deletes. Error messages never echo input.
+ */
+export const LoyaltyStayCreateRequestSchema = z
+  .strictObject({
+    membershipId: LoyaltyIdSchema,
+    confirmationCode: z
+      .string()
+      .refine((s) => isStayCode(normalisedStayCode(s)), 'a confirmation code is 4 to 20 letters or digits'),
+    checkIn: calendarDate,
+    checkOut: calendarDate,
+    property: z
+      .string()
+      .refine((s) => isStayProperty(s.trim()), 'a property is 1 to 80 characters with no angle brackets')
+      .nullable(),
+    state: LoyaltyStayStateSchema,
+    award: z.boolean().nullable(),
+  })
+  .refine((b) => b.checkOut > b.checkIn, {
+    message: 'the check-out must be after the check-in',
+    path: ['checkOut'],
+  })
+  .refine((b) => b.checkOut <= b.checkIn || stayNights(b.checkIn, b.checkOut) <= LOYALTY_STAY_MAX_NIGHTS, {
+    message: `a stay is at most ${LOYALTY_STAY_MAX_NIGHTS} nights`,
+    path: ['checkOut'],
+  });
+
+/** Hold reasons decided on a printed suffix: an item with one of these always has one. */
+const SUFFIX_DECIDED_HOLDS: readonly string[] = ['unmatched_suffix', 'ambiguous_suffix', 'forwarder_conflict'];
+
+/**
+ * One held booking (a `pending` booking-read row), for one tap.
+ *
+ *   maskedSuffix           — the printed suffix, masked; null exactly for `no_suffix` (and possibly
+ *                            `program_mismatch`).
+ *   state                  — `booked` for a confirmation or change, `cancelled` for a cancellation.
+ *   maskedCode             — the code, masked. The full code never leaves the server.
+ *   candidateMembershipIds — memberships of the item's program whose stored number ends with the
+ *                            suffix, computed in SQL at read time, ascending, no repeat; empty with
+ *                            no suffix. Ids only.
+ */
+export const LoyaltyBookingQueueItemSchema = z
+  .strictObject({
+    id: LoyaltyIdSchema,
+    programId: LoyaltyIdSchema,
+    receivedOn: calendarDate,
+    reason: LoyaltyBookingHoldReasonSchema,
+    maskedSuffix: LoyaltyReadMaskedSuffixSchema.nullable(),
+    property: z.string().refine(isStayProperty, 'expected a stored property name').nullable(),
+    checkIn: calendarDate,
+    checkOut: calendarDate,
+    maskedCode: LoyaltyMaskedMemberNumberSchema,
+    state: LoyaltyStayStateSchema,
+    candidateMembershipIds: z.array(LoyaltyIdSchema),
+  })
+  .refine(stayDatesOk, {
+    message: 'the check-out is after the check-in, within the night limit',
+    path: ['checkOut'],
+  })
+  .refine((i) => i.reason !== 'no_suffix' || i.maskedSuffix === null, {
+    message: 'no_suffix carries no suffix',
+    path: ['maskedSuffix'],
+  })
+  .refine((i) => !SUFFIX_DECIDED_HOLDS.includes(i.reason) || i.maskedSuffix !== null, {
+    message: 'this reason was decided on a suffix',
+    path: ['maskedSuffix'],
+  })
+  .refine((i) => i.maskedSuffix !== null || i.candidateMembershipIds.length === 0, {
+    message: 'with no suffix there are no candidates',
+    path: ['candidateMembershipIds'],
+  })
+  .refine((i) => i.candidateMembershipIds.every((id, k, a) => k === 0 || a[k - 1] < id), {
+    message: 'candidates are ascending with no repeat',
+    path: ['candidateMembershipIds'],
+  });
+
+/**
+ * One hotel membership's counted nights this year (SPEC.md D11). A stay counts exactly when it is
+ * `booked`, its check-out is on or before CURRENT_DATE and in CURRENT_DATE's year; it contributes
+ * all its nights to the year of its CHECK-OUT. `nightsThisYear` is null when nothing counts
+ * (rendered `—`), never 0. Every night of a counted stay counts; no program rule is applied.
+ */
+export const LoyaltyBookingNightsSchema = z.strictObject({
+  membershipId: LoyaltyIdSchema,
+  nightsThisYear: z.int().min(1).nullable(),
+});
+
+/**
+ * THE BOOKINGS PAYLOAD for the `Hotel stays` section on /travel. Every value is produced in one
+ * snapshot, with `year` and every date rule from Postgres's CURRENT_DATE.
+ *
+ *   year      — CURRENT_DATE's year.
+ *   nights    — one entry per membership of a hotel-kind program, membership ids strictly ascending.
+ *   upcoming  — booked stays whose check-out is after CURRENT_DATE, by check-in then id.
+ *   completed — the counted stays (see `LoyaltyBookingNightsSchema`), by check-out descending then id.
+ *   queue     — held bookings, at most `LOYALTY_READ_QUEUE_LIMIT`, newest received first then id
+ *               descending (ordered here, so an unordered list is refused).
+ *
+ * `upcoming` and `completed` hold only `booked` stays: a cancelled stay is in no list. Strict at
+ * every depth, so no key can hold a full code, a guest name, a price or a member number.
+ */
+export const LoyaltyBookingsSchema = z
+  .strictObject({
+    year: z.int().min(1),
+    nights: z.array(LoyaltyBookingNightsSchema),
+    upcoming: z.array(LoyaltyStaySchema),
+    completed: z.array(LoyaltyStaySchema),
+    queue: z.array(LoyaltyBookingQueueItemSchema).max(LOYALTY_READ_QUEUE_LIMIT),
+  })
+  .refine((b) => b.nights.every((n, k, a) => k === 0 || a[k - 1].membershipId < n.membershipId), {
+    message: 'nights is strictly ascending by membership with no repeat',
+    path: ['nights'],
+  })
+  .refine((b) => b.upcoming.every((s) => s.state === 'booked'), {
+    message: 'a cancelled stay is never upcoming',
+    path: ['upcoming'],
+  })
+  .refine((b) => b.completed.every((s) => s.state === 'booked'), {
+    message: 'a cancelled stay is never completed',
+    path: ['completed'],
+  })
+  .refine(
+    (b) =>
+      b.queue.every((it, k, a) => {
+        if (k === 0) return true;
+        const prev = a[k - 1];
+        return prev.receivedOn > it.receivedOn || (prev.receivedOn === it.receivedOn && prev.id > it.id);
+      }),
+    { message: 'held bookings are newest received first, then id descending', path: ['queue'] }
+  );
+
+/**
+ * `POST /api/v1/loyalty/inbox/bookings/[id]` — one action on one held booking, only while it is
+ * `pending` (else 409 `ITEM_RESOLVED`).
+ *
+ *   place    — `membershipId` is required and must be a membership of the item's program (else 400
+ *              `INVALID_INPUT`). Applies the booking by the dedupe and supersession rules; the item
+ *              becomes `placed_by_hand`. Two simultaneous places make one stay.
+ *   not_mine — the item becomes `not_mine`; with a suffix, (program, suffix) is recorded in
+ *              `loyalty_inbox_not_mine` idempotently and every other held booking of that pair follows.
+ *   ignore   — the item becomes `ignored`.
+ *
+ * Discriminated on `action` and strict per branch, so `membershipId` with `not_mine` or `ignore` is
+ * refused rather than silently dropped. Error messages never echo input.
+ */
+export const LoyaltyBookingResolveRequestSchema = z.discriminatedUnion('action', [
+  z.strictObject({ action: z.literal('place'), membershipId: LoyaltyIdSchema }),
+  z.strictObject({ action: z.literal('not_mine') }),
+  z.strictObject({ action: z.literal('ignore') }),
+]);
+
+/** `POST /api/v1/loyalty/inbox/bookings/[id]`: the item and the state the action set. */
+export const LoyaltyBookingResolveSchema = z.strictObject({
+  id: LoyaltyIdSchema,
+  state: z.enum(['placed_by_hand', 'not_mine', 'ignored']),
+});
+
+/** `POST …/stays` (201 created, 200 corrected). */
+export const LoyaltyStayResponseSchema = apiResponseSchema(LoyaltyStaySchema);
+/** `POST …/inbox/bookings/[id]`. */
+export const LoyaltyBookingResolveResponseSchema = apiResponseSchema(LoyaltyBookingResolveSchema);
+
+export type LoyaltyStayState = z.infer<typeof LoyaltyStayStateSchema>;
+export type LoyaltyStaySource = z.infer<typeof LoyaltyStaySourceSchema>;
+export type LoyaltyBookingKind = z.infer<typeof LoyaltyBookingKindSchema>;
+export type LoyaltyBookingHoldReason = z.infer<typeof LoyaltyBookingHoldReasonSchema>;
+export type LoyaltyBookingAction = z.infer<typeof LoyaltyBookingActionSchema>;
+export type LoyaltyStay = z.infer<typeof LoyaltyStaySchema>;
+export type LoyaltyStayCreateRequest = z.infer<typeof LoyaltyStayCreateRequestSchema>;
+export type LoyaltyBookingQueueItem = z.infer<typeof LoyaltyBookingQueueItemSchema>;
+export type LoyaltyBookingNights = z.infer<typeof LoyaltyBookingNightsSchema>;
+export type LoyaltyBookings = z.infer<typeof LoyaltyBookingsSchema>;
+export type LoyaltyBookingResolveRequest = z.infer<typeof LoyaltyBookingResolveRequestSchema>;
+export type LoyaltyBookingResolve = z.infer<typeof LoyaltyBookingResolveSchema>;
