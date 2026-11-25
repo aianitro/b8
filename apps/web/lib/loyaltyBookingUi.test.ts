@@ -114,7 +114,7 @@ describe('the Hotel stays section (P8-42e1)', () => {
 
     const page = read('app/travel/page.tsx');
     expect(page).toMatch(/import \{ loadBookings \} from '@\/lib\/loyaltyBookingStore';/);
-    expect(page).toMatch(/<TravelBoard overview=\{overview\} bookings=\{bookings\} \/>/);
+    expect(page).toMatch(/<TravelBoard overview=\{overview\} bookings=\{bookings\} flights=\{flights\} \/>/);
     expect(page).not.toMatch(/@\/lib\/db|raw_mail/);
     expect(read('components/TravelBoard.tsx')).toMatch(/bookings\?: LoyaltyBookings/);
   });

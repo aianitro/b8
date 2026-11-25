@@ -79,6 +79,7 @@ export const ROUTES: Surface[] = [
   // P8-42c1: the inbox poll reads the environment and the five inbox tables and writes the inbox
   // tables alone. Collected mail is not a ledger row, and the poll answers counts and a code only.
   { file: 'app/api/v1/loyalty/inbox/bookings/[id]/route.ts', classes: ['no-transaction-data'] },
+  { file: 'app/api/v1/loyalty/inbox/flights/[id]/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/inbox/poll/route.ts', classes: ['no-transaction-data'] },
   // P8-42c2: reading the stored mail and acting on a queued reading. Both touch the inbox tables and
   // the balance observations only, never a ledger row, and answer counts or a state.
@@ -97,6 +98,7 @@ export const ROUTES: Surface[] = [
   { file: 'app/api/v1/loyalty/programs/[id]/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/programs/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/route.ts', classes: ['numeric-only'] },
+  { file: 'app/api/v1/loyalty/segments/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/loyalty/stays/route.ts', classes: ['no-transaction-data'] },
   { file: 'app/api/v1/overview/route.ts', classes: ['text-bearing'], scenario: 'X1' },
   { file: 'app/api/v1/plaid/create-link-token/route.ts', classes: ['no-transaction-data'] },

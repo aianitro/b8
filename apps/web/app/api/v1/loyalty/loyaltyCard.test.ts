@@ -600,6 +600,6 @@ describe('loyalty card link, annual fee and benefit state (P8-42b)', () => {
     expect(await ledgerSum()).toBe(sumBefore);
     expect(await ledger()).toBe(ledgerBefore);
     const routes = (readdirSync(LOYALTY_DIR, { recursive: true }) as string[]).filter((f) => f.endsWith('route.ts'));
-    expect(routes).toHaveLength(18);
+    expect(routes).toHaveLength(20);
   });
 });

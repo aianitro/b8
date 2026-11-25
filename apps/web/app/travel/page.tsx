@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import TravelBoard from '@/components/TravelBoard';
 import { loadOverview } from '@/lib/loyaltyStore';
 import { loadBookings } from '@/lib/loyaltyBookingStore';
+import { loadFlights } from '@/lib/loyaltyFlightStore';
 
 // Nights & Miles (P8-42a). Reads the database directly, like app/properties/page.tsx, and hands the
 // client board exactly what `GET /api/v1/loyalty` returns: member numbers MASKED, balances as
@@ -23,7 +24,11 @@ import { loadBookings } from '@/lib/loyaltyBookingStore';
 // P8-42e1: the `Hotel stays` section's payload is loaded beside the overview, by its own loader, and
 // never inside it: the overview's shape is pinned and unchanged. It carries stays (dates, nights and
 // MASKED confirmation codes) and held bookings, all read from the loyalty tables; no ledger row.
+//
+// P8-42e1b: the `Flights` section's payload is loaded the same way, by its own loader, in the same
+// `Promise.all`. It carries flight legs (dates, airport, carrier and flight codes, MASKED confirmation
+// codes) and held flight bookings, read from the loyalty tables alone; it counts nothing.
 export default async function TravelPage() {
-  const [overview, bookings] = await Promise.all([loadOverview(), loadBookings()]);
-  return <TravelBoard overview={overview} bookings={bookings} />;
+  const [overview, bookings, flights] = await Promise.all([loadOverview(), loadBookings(), loadFlights()]);
+  return <TravelBoard overview={overview} bookings={bookings} flights={flights} />;
 }

@@ -84,6 +84,7 @@ vi.mock('@/lib/loyaltyReader', async (importOriginal) => {
       if (H.reader === null) return { read: async () => { H.unexpected++; return { ok: false, code: 'api_error' }; } };
       return H.reader;
     }),
+    createFlightReader: vi.fn(() => ({ read: async () => ({ ok: false, code: 'api_error' }) })),
   };
 });
 // The daily job's other steps, so `runDailyJob` runs the real read step and nothing that needs Plaid,
@@ -198,6 +199,7 @@ const withoutKey = () => { delete process.env.ANTHROPIC_API_KEY; };
 async function clearWorld(): Promise<void> {
   const ours = `SELECT id FROM loyalty_programs WHERE name LIKE 'ZQ42C2%'`;
   await db.query('DELETE FROM loyalty_inbox_reads');
+  await db.query('DELETE FROM loyalty_inbox_flight_reads');
   await db.query('DELETE FROM loyalty_inbox_not_mine');
   await db.query('DELETE FROM loyalty_inbox_messages');
   await db.query(`DELETE FROM loyalty_observations WHERE membership_id IN (SELECT id FROM loyalty_memberships WHERE program_id IN (${ours}))`);
@@ -991,7 +993,7 @@ describe('reading the loyalty inbox (P8-42c2)', () => {
     // The loyalty routes number fourteen and the two new ones are classified no-transaction-data.
     const dir = join(WEB, 'app/api/v1/loyalty');
     const files = (readdirSync(dir, { recursive: true }) as string[]).filter((f) => f.endsWith('route.ts')).map((f) => relative(WEB, join(dir, f)).split('\\').join('/'));
-    expect(files).toHaveLength(18);
+    expect(files).toHaveLength(20);
     for (const f of ['app/api/v1/loyalty/inbox/read/route.ts', 'app/api/v1/loyalty/inbox/readings/[id]/route.ts']) {
       expect(ROUTES.find((x) => x.file === f)?.classes, f).toEqual(['no-transaction-data']);
     }

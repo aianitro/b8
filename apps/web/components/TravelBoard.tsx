@@ -13,18 +13,24 @@
 // "Hotel stays" (P8-42e1) follows the program cards: it is per membership too, and it renders only
 // when the page passed its payload and that payload has something to show.
 //
+// "Flights" (P8-42e1b) follows "Hotel stays", under the same rule: optional, and drawn only when its
+// payload has an airline membership, a flight or a held booking. It is a section of its own rather
+// than part of the stays section, whose wording is pinned and whose count line is about nights.
+//
 // The "Link a card" choices (P8-42b) are the server's credit cards less the ones a membership already
 // holds: one card earns into one membership, so a taken card is not offered.
 
 import type { LoyaltyBookings, LoyaltyOverview } from '@b8/contracts/loyalty';
+import type { LoyaltyFlights } from '@b8/contracts/loyalty';
 import LoyaltyAddPanel from './LoyaltyAddPanel';
 import LoyaltyProgramCard from './LoyaltyProgramCard';
 import LoyaltyInstrumentList from './LoyaltyInstrumentList';
 import LoyaltyInboxPanel from './LoyaltyInboxPanel';
 import LoyaltyScreenshotDue from './LoyaltyScreenshotDue';
 import LoyaltyStaysSection from './LoyaltyStaysSection';
+import LoyaltyFlightsSection from './LoyaltyFlightsSection';
 
-export default function TravelBoard({ overview, bookings }: { overview: LoyaltyOverview; bookings?: LoyaltyBookings }) {
+export default function TravelBoard({ overview, bookings, flights }: { overview: LoyaltyOverview; bookings?: LoyaltyBookings; flights?: LoyaltyFlights }) {
   const programOf = new Map(overview.programs.map((p) => [p.id, p]));
   const taken = new Set(overview.cards.flatMap((c) => c.memberships.map((m) => m.cardAccountId)));
   const cardChoices = overview.cardAccounts.filter((a) => !taken.has(a.id));
@@ -56,6 +62,7 @@ export default function TravelBoard({ overview, bookings }: { overview: LoyaltyO
         </div>
       )}
       {bookings && <LoyaltyStaysSection bookings={bookings} overview={overview} />}
+      {flights && <LoyaltyFlightsSection flights={flights} overview={overview} />}
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400">Certificates &amp; credits</h2>
       <LoyaltyInstrumentList instruments={overview.instruments} holderOf={holderOf} />
       {/* P8-42c1: forwarded loyalty mail — polling, forwarding health and coverage. */}

@@ -122,7 +122,7 @@ describe('the loyalty contract', () => {
 
     // Exactly one response schema carries a field for the full number.
     const responses = Object.entries(loyalty).filter(([name]) => /ResponseSchema$/.test(name)) as [string, z.ZodType][];
-    expect(responses.length).toBe(12);
+    expect(responses.length).toBe(13);
     const carrying = responses.filter(([, s]) => keysOf(s).includes('memberNumber')).map(([n]) => n);
     expect(carrying).toEqual(['LoyaltyMemberNumberResponseSchema']);
     // Every response is the envelope: success with data, or the error branch.

@@ -2037,3 +2037,205 @@ CREATE TABLE loyalty_inbox_booking_reads (
 CREATE INDEX IF NOT EXISTS loyalty_inbox_booking_reads_received ON loyalty_inbox_booking_reads (received_on);
 CREATE INDEX IF NOT EXISTS loyalty_inbox_booking_reads_program ON loyalty_inbox_booking_reads (program_id, received_on);
 CREATE INDEX IF NOT EXISTS loyalty_inbox_booking_reads_pending ON loyalty_inbox_booking_reads (received_on DESC, id DESC) WHERE state = 'pending';
+
+-- ─── Flights (step 42e, migration 1793300000000_loyalty_segments) ───────────────────────────
+-- Flight confirmations, changes and cancellations from airline-program mail, read by a THIRD,
+-- separate flight read, become segments (one row per leg); a typed route adds or corrects one by
+-- hand. The balance and booking reads and their tables are untouched, including booking-read rows
+-- in state 'flight' (those belong to hotel programs and are never read for segments). A segment is
+-- NEVER deleted (a cancellation sets state) and nothing here cascades. No flight count, mileage,
+-- status credit or per-airline total is stored anywhere; "upcoming" and "recent" are read-time rules
+-- against CURRENT_DATE, and no CHECK compares a column with CURRENT_DATE. The composite key reuses
+-- loyalty_memberships_id_program_key above; nothing on an existing table is added or altered.
+
+-- One row per flight leg. The identity is (program, code, flight date, carrier, flight number);
+-- origin, destination and award are attributes a later mail may update, so a change that moves one
+-- flight cancels the old leg instead of leaving it booked beside the new one.
+--   confirmation_code    — letters and digits only, upper-cased, 4 to 20 (the loyalty_stays normal
+--                          form); stored in full because it is part of the identity, masked in every
+--                          payload, never logged.
+--   flight_date          — the departure date only; no time of day or time zone is stored.
+--   origin, destination  — three upper-case letters each, never equal.
+--   carrier              — two upper-case letters or digits.
+--   flight_number        — one to four digits and an optional upper-case letter; TEXT so leading
+--                          zeros, which are part of the identity, are kept.
+--   source               — typed (the typed route last wrote it) or email (a mail last decided it).
+--                          A typed leg is never cancelled because a mail omitted it.
+--   evidence_received_on — received date of the mail that last decided the leg; NULL = never
+--                          touched by mail. A typed write KEEPS it and evidence_key, so an older mail
+--                          cannot undo a typed correction (SPEC.md D8).
+--   evidence_key         — that mail's dedupe_key; NOT a foreign key (the mail is purged first).
+--   award                — true miles or an award, false cash, NULL not stated (never false).
+--   membership_id        — all legs of one code share it; the first attribution is sticky; the
+--                          composite key pins its program. NOT an inheriting column.
+CREATE TABLE loyalty_segments (
+  id                    SERIAL PRIMARY KEY,
+  membership_id         INTEGER NOT NULL,
+  program_id            INTEGER NOT NULL REFERENCES loyalty_programs(id),
+  confirmation_code     TEXT NOT NULL
+                          CONSTRAINT loyalty_segments_confirmation_code_shape
+                            CHECK (confirmation_code ~ '^[A-Z0-9]{4,20}$'),
+  flight_date           DATE NOT NULL,
+  origin                TEXT NOT NULL
+                          CONSTRAINT loyalty_segments_origin_shape CHECK (origin ~ '^[A-Z]{3}$'),
+  destination           TEXT NOT NULL
+                          CONSTRAINT loyalty_segments_destination_shape CHECK (destination ~ '^[A-Z]{3}$'),
+  carrier               TEXT NOT NULL
+                          CONSTRAINT loyalty_segments_carrier_shape CHECK (carrier ~ '^[A-Z0-9]{2}$'),
+  flight_number         TEXT NOT NULL
+                          CONSTRAINT loyalty_segments_flight_number_shape
+                            CHECK (flight_number ~ '^[0-9]{1,4}[A-Z]?$'),
+  state                 TEXT NOT NULL
+                          CONSTRAINT loyalty_segments_state_check CHECK (state IN ('booked', 'cancelled')),
+  source                TEXT NOT NULL
+                          CONSTRAINT loyalty_segments_source_check CHECK (source IN ('typed', 'email')),
+  evidence_key          TEXT
+                          CONSTRAINT loyalty_segments_evidence_key_shape
+                            CHECK (evidence_key IS NULL OR evidence_key ~ '^[0-9a-f]{64}$'),
+  evidence_received_on  DATE,
+  award                 BOOLEAN,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT loyalty_segments_identity_key
+    UNIQUE (program_id, confirmation_code, flight_date, carrier, flight_number),
+  CONSTRAINT loyalty_segments_airports_differ CHECK (origin <> destination),
+  CONSTRAINT loyalty_segments_evidence_pair
+    CHECK ((evidence_key IS NULL) = (evidence_received_on IS NULL)),
+  CONSTRAINT loyalty_segments_email_has_evidence
+    CHECK (source <> 'email' OR evidence_key IS NOT NULL),
+  CONSTRAINT loyalty_segments_membership_program_fkey
+    FOREIGN KEY (membership_id, program_id) REFERENCES loyalty_memberships (id, program_id)
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_segments_membership_flight_date ON loyalty_segments (membership_id, flight_date);
+
+-- One row per stored airline-program message the flight read attempted; a sibling of
+-- loyalty_inbox_booking_reads (its own table, because sharing that one would widen four of its CHECKs
+-- on live rows) with the same crash-safe attempt row, counted before the model call. States:
+--   retry, failed  — not read yet: attempts and last_error_code set, nothing else.
+--   none           — the kind said so; nothing extracted, no suffix, no membership.
+--   no_booking     — a flight kind with nothing usable (no code, no or void legs, implausible
+--                    dates, or a cancellation of an unknown code); nothing stored.
+--   stale          — does not supersede what the code's legs reflect; decided before attribution,
+--                    so it is never held. Nothing changed.
+--   recorded       — placed by the rules; membership_id is where the code's legs are.
+--   not_mine_known — an unmatched suffix on loyalty_inbox_not_mine; discarded.
+--   pending        — HELD for one tap; reason set, booking set, no membership.
+--   placed_by_hand, not_mine, ignored — resolved by a person; reason KEPT, booking cleared.
+-- There is no 'flight' state: that value belongs to the hotel table.
+--   dedupe_key    — the 42c1 message key; NOT a foreign key (the message is purged first).
+--   booking       — exactly {kind, code, award, complete, legs}; NOT NULL exactly while pending; kind
+--                   equals the row's kind; legs at most 12, at least one for a booking, each exactly
+--                   {flightDate, origin, destination, carrier, flightNumber} in the loyalty_segments
+--                   shapes. No other key can be stored at any depth.
+--   membership_id — set exactly for recorded and placed_by_hand; NOT inheriting.
+-- Purged by received_on strictly older than LOYALTY_READ_RETENTION_DAYS, pending included; segments
+-- are never purged.
+CREATE TABLE loyalty_inbox_flight_reads (
+  id               SERIAL PRIMARY KEY,
+  dedupe_key       TEXT NOT NULL
+                     CONSTRAINT loyalty_inbox_flight_reads_dedupe_key_key UNIQUE
+                     CONSTRAINT loyalty_inbox_flight_reads_dedupe_key_shape CHECK (dedupe_key ~ '^[0-9a-f]{64}$'),
+  program_id       INTEGER NOT NULL REFERENCES loyalty_programs(id),
+  received_on      DATE NOT NULL,
+  state            TEXT NOT NULL
+                     CONSTRAINT loyalty_inbox_flight_reads_state_check
+                       CHECK (state IN ('retry', 'failed', 'none', 'no_booking', 'stale', 'recorded',
+                                        'pending', 'placed_by_hand', 'not_mine_known', 'not_mine',
+                                        'ignored')),
+  attempts         SMALLINT NOT NULL
+                     CONSTRAINT loyalty_inbox_flight_reads_attempts_range CHECK (attempts BETWEEN 0 AND 3),
+  last_error_code  TEXT
+                     CONSTRAINT loyalty_inbox_flight_reads_last_error_code_check
+                       CHECK (last_error_code IS NULL
+                              OR last_error_code IN ('rate_limited', 'timeout', 'api_error', 'refused',
+                                                     'bad_output', 'empty_message')),
+  kind             TEXT
+                     CONSTRAINT loyalty_inbox_flight_reads_kind_check
+                       CHECK (kind IS NULL OR kind IN ('flight_booked', 'flight_cancelled', 'none')),
+  program_check    TEXT
+                     CONSTRAINT loyalty_inbox_flight_reads_program_check_check
+                       CHECK (program_check IS NULL OR program_check IN ('match', 'mismatch', 'not_stated')),
+  reason           TEXT
+                     CONSTRAINT loyalty_inbox_flight_reads_reason_check
+                       CHECK (reason IS NULL
+                              OR reason IN ('no_suffix', 'unmatched_suffix', 'ambiguous_suffix',
+                                            'forwarder_conflict', 'program_mismatch')),
+  suffix           TEXT
+                     CONSTRAINT loyalty_inbox_flight_reads_suffix_shape CHECK (suffix IS NULL OR suffix ~ '^[A-Z0-9]{3,4}$'),
+  -- CASE, not AND: the path tests and jsonb_array_length must never run on the wrong type, and
+  -- keyvalue() is applied to objects only (on a scalar it is an error even in lax mode).
+  booking          JSONB
+                     CONSTRAINT loyalty_inbox_flight_reads_booking_shape CHECK (
+                       booking IS NULL
+                       OR CASE WHEN jsonb_typeof(booking) = 'object' THEN
+                           booking ?& ARRAY['kind', 'code', 'award', 'complete', 'legs']
+                           AND NOT jsonb_path_exists(booking,
+                             '$.keyvalue() ? (!(@.key == "kind" || @.key == "code" || @.key == "award" || @.key == "complete" || @.key == "legs"))')
+                           AND jsonb_path_exists(booking,
+                             '$ ? (@.kind.type() == "string" && (@.kind == "flight_booked" || @.kind == "flight_cancelled"))')
+                           AND jsonb_path_exists(booking,
+                             '$ ? (@.code.type() == "string" && @.code like_regex "^[A-Z0-9]{4,20}$")')
+                           AND jsonb_path_exists(booking,
+                             '$ ? (@.award.type() == "null" || @.award.type() == "boolean")')
+                           AND jsonb_path_exists(booking,
+                             '$ ? (@.complete.type() == "boolean")')
+                           AND CASE WHEN jsonb_typeof(booking -> 'legs') = 'array' THEN
+                               jsonb_array_length(booking -> 'legs') <= 12
+                               AND (jsonb_array_length(booking -> 'legs') >= 1
+                                    OR (booking ->> 'kind') IS DISTINCT FROM 'flight_booked')
+                               AND NOT jsonb_path_exists(booking,
+                                 'strict $.legs[*] ? (@.type() != "object")')
+                               AND NOT jsonb_path_exists(booking,
+                                 '$.legs[*] ? (@.type() == "object").keyvalue() ? (!(@.key == "flightDate" || @.key == "origin" || @.key == "destination" || @.key == "carrier" || @.key == "flightNumber"))')
+                               AND NOT jsonb_path_exists(booking,
+                                 '$.legs[*] ? (!(@.flightDate.type() == "string" && @.flightDate like_regex "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" && @.origin.type() == "string" && @.origin like_regex "^[A-Z]{3}$" && @.destination.type() == "string" && @.destination like_regex "^[A-Z]{3}$" && @.carrier.type() == "string" && @.carrier like_regex "^[A-Z0-9]{2}$" && @.flightNumber.type() == "string" && @.flightNumber like_regex "^[0-9]{1,4}[A-Z]?$" && @.origin != @.destination))')
+                             ELSE false END
+                         ELSE false END),
+  membership_id    INTEGER REFERENCES loyalty_memberships(id),
+  read_on          DATE,                                  -- NULL exactly while unread
+  resolved_on      DATE,                                  -- NULL exactly while retry, failed or pending
+  CONSTRAINT loyalty_inbox_flight_reads_retry_attempts
+    CHECK (state <> 'retry' OR attempts BETWEEN 1 AND 2),
+  CONSTRAINT loyalty_inbox_flight_reads_failed_attempts
+    CHECK (state <> 'failed' OR attempts >= 1),
+  CONSTRAINT loyalty_inbox_flight_reads_code_iff_unread
+    CHECK ((last_error_code IS NOT NULL) = (state IN ('retry', 'failed'))),
+  CONSTRAINT loyalty_inbox_flight_reads_kind_iff_read
+    CHECK ((kind IS NULL) = (state IN ('retry', 'failed'))),
+  CONSTRAINT loyalty_inbox_flight_reads_unread_holds_nothing
+    CHECK (state NOT IN ('retry', 'failed')
+           OR (suffix IS NULL AND program_check IS NULL AND read_on IS NULL AND membership_id IS NULL)),
+  CONSTRAINT loyalty_inbox_flight_reads_read_is_checked_and_dated
+    CHECK (state IN ('retry', 'failed') OR (program_check IS NOT NULL AND read_on IS NOT NULL)),
+  CONSTRAINT loyalty_inbox_flight_reads_resolved_iff_settled
+    CHECK ((resolved_on IS NULL) = (state IN ('retry', 'failed', 'pending'))),
+  CONSTRAINT loyalty_inbox_flight_reads_resolved_not_before_read
+    CHECK (resolved_on IS NULL OR read_on IS NULL OR resolved_on >= read_on),
+  CONSTRAINT loyalty_inbox_flight_reads_none_state
+    CHECK ((state = 'none') = (kind IS NOT DISTINCT FROM 'none')),
+  CONSTRAINT loyalty_inbox_flight_reads_none_holds_nothing
+    CHECK (state <> 'none' OR (suffix IS NULL AND membership_id IS NULL)),
+  CONSTRAINT loyalty_inbox_flight_reads_reason_iff_held
+    CHECK ((reason IS NOT NULL) = (state IN ('pending', 'placed_by_hand', 'not_mine', 'ignored'))),
+  CONSTRAINT loyalty_inbox_flight_reads_booking_iff_pending
+    CHECK ((booking IS NOT NULL) = (state = 'pending')),
+  CONSTRAINT loyalty_inbox_flight_reads_booking_kind_is_row_kind
+    CHECK (booking IS NULL
+           OR CASE WHEN jsonb_typeof(booking) = 'object'
+                   THEN (booking ->> 'kind') IS NOT DISTINCT FROM kind
+                   ELSE false END),
+  CONSTRAINT loyalty_inbox_flight_reads_membership_iff_placed
+    CHECK ((membership_id IS NOT NULL) = (state IN ('recorded', 'placed_by_hand'))),
+  CONSTRAINT loyalty_inbox_flight_reads_not_mine_known_unmatched
+    CHECK (state <> 'not_mine_known' OR suffix IS NOT NULL),
+  CONSTRAINT loyalty_inbox_flight_reads_mismatch_reason_is_mismatch
+    CHECK (reason IS DISTINCT FROM 'program_mismatch' OR program_check IS NOT DISTINCT FROM 'mismatch'),
+  CONSTRAINT loyalty_inbox_flight_reads_reason_suffix
+    CHECK ((reason IS DISTINCT FROM 'no_suffix' OR suffix IS NULL)
+           AND (reason IS NULL OR reason IN ('no_suffix', 'program_mismatch') OR suffix IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS loyalty_inbox_flight_reads_received ON loyalty_inbox_flight_reads (received_on);
+CREATE INDEX IF NOT EXISTS loyalty_inbox_flight_reads_program ON loyalty_inbox_flight_reads (program_id, received_on);
+CREATE INDEX IF NOT EXISTS loyalty_inbox_flight_reads_pending ON loyalty_inbox_flight_reads (received_on DESC, id DESC) WHERE state = 'pending';

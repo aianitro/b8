@@ -1,7 +1,7 @@
 // Loyalty (P8-42a) — household members, the program catalog with its aliases, memberships with a
 // derived current balance, append-only balance observations, instruments, and (P8-42c1) the loyalty
-// inbox, and (P8-42c2) reading it, and (P8-42d) reading a screenshot, and (P8-42e1) hotel stays. The
-// eighteen endpoints, stated once:
+// inbox, and (P8-42c2) reading it, and (P8-42d) reading a screenshot, and (P8-42e1) hotel stays, and
+// (P8-42e1b) flights. The twenty endpoints, stated once:
 //
 //   GET   /api/v1/loyalty                                 —                                → LoyaltyOverviewResponseSchema
 //   POST  /api/v1/loyalty/members                         LoyaltyMemberCreateRequestSchema → LoyaltyMemberResponseSchema (201)
@@ -21,6 +21,8 @@
 //   POST  /api/v1/loyalty/memberships/[id]/screenshot/confirm LoyaltyScreenshotConfirmRequestSchema → LoyaltyMembershipResponseSchema (201)
 //   POST  /api/v1/loyalty/stays                           LoyaltyStayCreateRequestSchema   → LoyaltyStayResponseSchema (201 created, 200 corrected)
 //   POST  /api/v1/loyalty/inbox/bookings/[id]             LoyaltyBookingResolveRequestSchema → LoyaltyBookingResolveResponseSchema
+//   POST  /api/v1/loyalty/segments                        LoyaltySegmentCreateRequestSchema → LoyaltySegmentResponseSchema (201 created, 200 corrected)
+//   POST  /api/v1/loyalty/inbox/flights/[id]              LoyaltyBookingResolveRequestSchema → LoyaltyBookingResolveResponseSchema
 //
 // There is no route that updates or deletes an observation, and none that deletes a member, a
 // program, a membership or an instrument. An edited balance is a POST of a new observation.
@@ -2267,3 +2269,276 @@ export type LoyaltyBookingNights = z.infer<typeof LoyaltyBookingNightsSchema>;
 export type LoyaltyBookings = z.infer<typeof LoyaltyBookingsSchema>;
 export type LoyaltyBookingResolveRequest = z.infer<typeof LoyaltyBookingResolveRequestSchema>;
 export type LoyaltyBookingResolve = z.infer<typeof LoyaltyBookingResolveSchema>;
+
+// ─── Flights (P8-42e1b) ─────────────────────────────────────────────────────────────────────────
+//
+// Flight confirmations, changes and cancellations from airline-program mail are read by a THIRD,
+// separate flight read and become segments, one per leg (tables in
+// migrations/1793300000000_loyalty_segments.sql); a typed route adds or corrects one by hand. A
+// segment is never deleted: a cancellation sets its state.
+//
+// A LEG'S IDENTITY is (program, normalised code, flight date, carrier, flight number). Origin,
+// destination and award are attributes a later mail may update. That rule lives in the database's
+// UNIQUE constraint and the application's plan; no schema here restates it.
+//
+// THE CONFIRMATION CODE IS AN IDENTIFIER, exactly as for stays: no response schema here has a field
+// that can hold it, every payload carries `maskedCode`, and only a request may carry a full code.
+//
+// NOTHING IS COUNTED. No schema here has a flight count, mileage, status credit, distance or
+// per-airline total, and the strict objects refuse any such key: miles and status credits follow
+// each airline program's own rules and are not calculated (SPEC.md D11).
+//
+// The flights payload is a separate payload with its own loader. The hold route reuses the 42e1
+// request and answer schemas (`LoyaltyBookingResolveRequestSchema`, `LoyaltyBookingResolveSchema`,
+// `LoyaltyBookingResolveResponseSchema`) unchanged; `LoyaltyOverviewSchema`,
+// `LoyaltyInboxReadPanelSchema` and every 42e1 schema are deliberately unchanged.
+
+/**
+ * What the flight read says a message is. Equals `loyalty_inbox_flight_reads_kind_check`. `none`
+ * covers reminders, boarding passes, receipts, statements and marketing.
+ */
+export const LOYALTY_FLIGHT_KINDS = ['flight_booked', 'flight_cancelled', 'none'] as const;
+/**
+ * The most legs one mail may list. More is void as a whole, never truncated. Equals the bound on
+ * `loyalty_inbox_flight_reads.booking.legs`.
+ */
+export const LOYALTY_SEGMENTS_MAX_PER_MAIL = 12;
+/** How many days back the `recent` list reaches from CURRENT_DATE, inclusive. */
+export const LOYALTY_SEGMENT_RECENT_DAYS = 30;
+/**
+ * How many days before or after a mail's received date each of its legs must fall, both ends
+ * inclusive; otherwise the model mis-dated the mail and nothing is stored. Typed legs are exempt.
+ */
+export const LOYALTY_SEGMENT_PLAUSIBLE_DAYS = 366;
+
+export const LoyaltyFlightKindSchema = z.enum(LOYALTY_FLIGHT_KINDS);
+
+// The leg shapes, stated once for this module. Each stored form equals the matching CHECK on
+// `loyalty_segments`. The clean pass in apps/web/lib/domain/loyaltyFlight.ts states them a second
+// time (contracts may not import lib, and the domain may not trust a zod parse for the model's
+// output); T42e1b-U11 ties the two copies together.
+const isAirportCode = (s: string) => /^[A-Z]{3}$/.test(s);
+const isCarrierCode = (s: string) => /^[A-Z0-9]{2}$/.test(s);
+const isFlightNumber = (s: string) => /^[0-9]{1,4}[A-Z]?$/.test(s);
+
+/**
+ * Input forms: accepted in either case. Airports and the carrier are trimmed then upper-cased; a
+ * flight number has every whitespace character removed then is upper-cased (`412 a` is `412A`).
+ * Leading zeros are kept. The parsed value is the stored form. Messages never echo input.
+ */
+const airportInput = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .refine(isAirportCode, 'an airport is three letters');
+const carrierInput = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .refine(isCarrierCode, 'a carrier is two letters or digits');
+const flightNumberInput = z
+  .string()
+  .overwrite((s) => s.replace(/\s/g, '').toUpperCase())
+  .refine(isFlightNumber, 'a flight number is one to four digits and an optional letter');
+
+/** Stored forms, as every payload carries them: exactly the database's shapes, no normalising. */
+const airportStored = z.string().refine(isAirportCode, 'expected a stored airport code');
+const carrierStored = z.string().refine(isCarrierCode, 'expected a stored carrier code');
+const flightNumberStored = z.string().refine(isFlightNumber, 'expected a stored flight number');
+
+const airportsDiffer = (l: { origin: string; destination: string }) => l.origin !== l.destination;
+const AIRPORTS_DIFFER = { message: 'the origin and the destination are different airports', path: ['destination'] };
+
+/**
+ * One leg as the clean pass keeps it (SPEC.md D6): a real calendar date, two different three-letter
+ * airports, a two-character carrier and a flight number. Accepts the input forms above and parses to
+ * the stored form, so it and `cleanFlight` agree on validity and on the normalised value.
+ */
+export const LoyaltyFlightLegSchema = z
+  .strictObject({
+    flightDate: calendarDate,
+    origin: airportInput,
+    destination: airportInput,
+    carrier: carrierInput,
+    flightNumber: flightNumberInput,
+  })
+  .refine(airportsDiffer, AIRPORTS_DIFFER);
+
+/** A leg in a payload: stored forms only. */
+const StoredFlightLegSchema = z
+  .strictObject({
+    flightDate: calendarDate,
+    origin: airportStored,
+    destination: airportStored,
+    carrier: carrierStored,
+    flightNumber: flightNumberStored,
+  })
+  .refine(airportsDiffer, AIRPORTS_DIFFER);
+
+/**
+ * One segment (leg) as every payload shows it. `maskedCode` is the ONLY code field and it is masked.
+ * `award` null = not stated, never false. The mail evidence behind a segment is deliberately not
+ * emitted.
+ */
+export const LoyaltySegmentSchema = z
+  .strictObject({
+    id: LoyaltyIdSchema,
+    membershipId: LoyaltyIdSchema,
+    programId: LoyaltyIdSchema,
+    maskedCode: LoyaltyMaskedMemberNumberSchema,
+    flightDate: calendarDate,
+    origin: airportStored,
+    destination: airportStored,
+    carrier: carrierStored,
+    flightNumber: flightNumberStored,
+    state: LoyaltyStayStateSchema,
+    source: LoyaltyStaySourceSchema,
+    award: z.boolean().nullable(),
+  })
+  .refine(airportsDiffer, AIRPORTS_DIFFER);
+
+/**
+ * `POST /api/v1/loyalty/segments` — add a segment by hand (201) or, when the membership already
+ * holds the same leg identity, rewrite it (200). The membership must be of an airline-kind program
+ * and a code already recorded under another membership of the program is refused, both 400
+ * `INVALID_INPUT`; the handler normalises the code before writing.
+ *
+ * There is deliberately no `source` or `id` key, and the strict object refuses each: a client never
+ * chooses provenance, and there is no edit by id (a wrong date or number is corrected by adding the
+ * right leg and cancelling the wrong one). `award` is a required key whose null means "not stated",
+ * never false. `state: 'cancelled'` is the only way to cancel by hand, and `state: 'booked'` the only
+ * way to re-book a cancelled leg; nothing deletes. Error messages never echo input.
+ */
+export const LoyaltySegmentCreateRequestSchema = z
+  .strictObject({
+    membershipId: LoyaltyIdSchema,
+    confirmationCode: z
+      .string()
+      .refine((s) => isStayCode(normalisedStayCode(s)), 'a confirmation code is 4 to 20 letters or digits'),
+    flightDate: calendarDate,
+    origin: airportInput,
+    destination: airportInput,
+    carrier: carrierInput,
+    flightNumber: flightNumberInput,
+    state: LoyaltyStayStateSchema,
+    award: z.boolean().nullable(),
+  })
+  .refine(airportsDiffer, AIRPORTS_DIFFER);
+
+/**
+ * One held flight booking (a `pending` flight-read row), for one tap.
+ *
+ *   maskedSuffix           — the printed suffix, masked; null exactly for `no_suffix` (and possibly
+ *                            `program_mismatch`).
+ *   state                  — `booked` for a confirmation or change, `cancelled` for a cancellation.
+ *   maskedCode             — the code, masked. The full code never leaves the server.
+ *   legs                   — the cleaned legs, at most `LOYALTY_SEGMENTS_MAX_PER_MAIL`; at least one
+ *                            when booked. A cancellation with none cancels the whole code.
+ *   candidateMembershipIds — memberships of the item's program whose stored number ends with the
+ *                            suffix, ascending, no repeat; empty with no suffix. Ids only.
+ */
+export const LoyaltyFlightQueueItemSchema = z
+  .strictObject({
+    id: LoyaltyIdSchema,
+    programId: LoyaltyIdSchema,
+    receivedOn: calendarDate,
+    reason: LoyaltyBookingHoldReasonSchema,
+    maskedSuffix: LoyaltyReadMaskedSuffixSchema.nullable(),
+    state: LoyaltyStayStateSchema,
+    maskedCode: LoyaltyMaskedMemberNumberSchema,
+    legs: z.array(StoredFlightLegSchema).max(LOYALTY_SEGMENTS_MAX_PER_MAIL),
+    candidateMembershipIds: z.array(LoyaltyIdSchema),
+  })
+  .refine((i) => i.state !== 'booked' || i.legs.length >= 1, {
+    message: 'a held booking has at least one leg',
+    path: ['legs'],
+  })
+  .refine((i) => i.reason !== 'no_suffix' || i.maskedSuffix === null, {
+    message: 'no_suffix carries no suffix',
+    path: ['maskedSuffix'],
+  })
+  .refine((i) => !SUFFIX_DECIDED_HOLDS.includes(i.reason) || i.maskedSuffix !== null, {
+    message: 'this reason was decided on a suffix',
+    path: ['maskedSuffix'],
+  })
+  .refine((i) => i.maskedSuffix !== null || i.candidateMembershipIds.length === 0, {
+    message: 'with no suffix there are no candidates',
+    path: ['candidateMembershipIds'],
+  })
+  .refine((i) => i.candidateMembershipIds.every((id, k, a) => k === 0 || a[k - 1] < id), {
+    message: 'candidates are ascending with no repeat',
+    path: ['candidateMembershipIds'],
+  });
+
+/**
+ * THE FLIGHTS PAYLOAD for the `Flights` section on /travel. Every value is produced in one snapshot,
+ * with every date rule from Postgres's CURRENT_DATE.
+ *
+ *   airlineMembershipIds — every membership of an airline-kind program, ids strictly ascending.
+ *   upcoming             — booked segments dated CURRENT_DATE or later, by flight date then id.
+ *   recent               — booked segments dated before CURRENT_DATE and no more than
+ *                          `LOYALTY_SEGMENT_RECENT_DAYS` days before it, by flight date descending
+ *                          then id ascending.
+ *   queue                — held flight bookings, at most `LOYALTY_READ_QUEUE_LIMIT`, newest received
+ *                          first then id descending.
+ *
+ * Every order is checked here, so an unordered list is refused. `upcoming` and `recent` hold only
+ * `booked` segments: a cancelled segment is in no list. Strict at every depth, so no key can hold a
+ * full code, a count, a total, a mileage figure or a year.
+ */
+export const LoyaltyFlightsSchema = z
+  .strictObject({
+    airlineMembershipIds: z.array(LoyaltyIdSchema),
+    upcoming: z.array(LoyaltySegmentSchema),
+    recent: z.array(LoyaltySegmentSchema),
+    queue: z.array(LoyaltyFlightQueueItemSchema).max(LOYALTY_READ_QUEUE_LIMIT),
+  })
+  .refine((f) => f.airlineMembershipIds.every((id, k, a) => k === 0 || a[k - 1] < id), {
+    message: 'airline memberships are strictly ascending with no repeat',
+    path: ['airlineMembershipIds'],
+  })
+  .refine((f) => f.upcoming.every((s) => s.state === 'booked'), {
+    message: 'a cancelled segment is never upcoming',
+    path: ['upcoming'],
+  })
+  .refine((f) => f.recent.every((s) => s.state === 'booked'), {
+    message: 'a cancelled segment is never recent',
+    path: ['recent'],
+  })
+  .refine(
+    (f) =>
+      f.upcoming.every((s, k, a) => {
+        if (k === 0) return true;
+        const prev = a[k - 1];
+        return prev.flightDate < s.flightDate || (prev.flightDate === s.flightDate && prev.id < s.id);
+      }),
+    { message: 'upcoming flights are by flight date, then id', path: ['upcoming'] }
+  )
+  .refine(
+    (f) =>
+      f.recent.every((s, k, a) => {
+        if (k === 0) return true;
+        const prev = a[k - 1];
+        return prev.flightDate > s.flightDate || (prev.flightDate === s.flightDate && prev.id < s.id);
+      }),
+    { message: 'recent flights are by flight date descending, then id', path: ['recent'] }
+  )
+  .refine(
+    (f) =>
+      f.queue.every((it, k, a) => {
+        if (k === 0) return true;
+        const prev = a[k - 1];
+        return prev.receivedOn > it.receivedOn || (prev.receivedOn === it.receivedOn && prev.id > it.id);
+      }),
+    { message: 'held flight bookings are newest received first, then id descending', path: ['queue'] }
+  );
+
+/** `POST …/segments` (201 created, 200 rewritten). */
+export const LoyaltySegmentResponseSchema = apiResponseSchema(LoyaltySegmentSchema);
+
+export type LoyaltyFlightKind = z.infer<typeof LoyaltyFlightKindSchema>;
+export type LoyaltyFlightLeg = z.infer<typeof LoyaltyFlightLegSchema>;
+export type LoyaltySegment = z.infer<typeof LoyaltySegmentSchema>;
+export type LoyaltySegmentCreateRequest = z.infer<typeof LoyaltySegmentCreateRequestSchema>;
+export type LoyaltyFlightQueueItem = z.infer<typeof LoyaltyFlightQueueItemSchema>;
+export type LoyaltyFlights = z.infer<typeof LoyaltyFlightsSchema>;
